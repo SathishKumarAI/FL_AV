@@ -19,7 +19,7 @@ Fedml/
 flower/
 # test/
 
-model/
+# model/
 # Videos
 *.mp4
 *.mov
