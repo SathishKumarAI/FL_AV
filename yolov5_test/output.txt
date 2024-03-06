@@ -1,0 +1,31 @@
+[34m[1mtrain: [0mweights=C:\Users\SIU856522160\Downloads\yolov5\yolov5s.pt, cfg=, data=C:\Users\SIU856522160\Downloads\major\output_yaml\dataset_Device_1_batch_1.yaml, hyp=data\hyps\hyp.scratch.yaml, epochs=12, batch_size=8, imgsz=1024, rect=False, resume=False, nosave=False, noval=False, noautoanchor=False, evolve=None, bucket=, cache=None, image_weights=False, device=0, multi_scale=False, single_cls=False, adam=False, sync_bn=False, workers=8, project=runs\train, name=exp, exist_ok=False, quad=False, linear_lr=False, label_smoothing=0.0, patience=100, freeze=0, save_period=-1, local_rank=-1, entity=None, upload_dataset=False, bbox_interval=-1, artifact_alias=latest
+[34m[1mgithub: [0mskipping check (not a git repository), for updates see https://github.com/ultralytics/yolov5
+[34m[1mWeights & Biases: [0mrun 'pip install wandb' to automatically track and visualize YOLOv5  runs (RECOMMENDED)
+Plotting labels... 
+
+[34m[1mautoanchor: [0mAnalyzing anchors... anchors/target = 4.42, Best Possible Recall (BPR) = 0.9988
+                 all       1000      18187      0.647      0.145      0.126     0.0459
+                 all       1000      18187       0.65      0.219      0.197     0.0774
+                 all       1000      18187      0.645      0.285       0.27      0.119
+                 all       1000      18187      0.678      0.332      0.344      0.161
+                 all       1000      18187      0.731      0.329      0.365       0.18
+                 all       1000      18187      0.734      0.339       0.37      0.184
+                 all       1000      18187      0.763      0.331      0.391      0.195
+                 all       1000      18187      0.754      0.339      0.393        0.2
+                 all       1000      18187      0.541      0.406      0.407      0.208
+                 all       1000      18187      0.742      0.365      0.417      0.214
+                 all       1000      18187      0.579      0.419      0.423      0.217
+                 all       1000      18187      0.548       0.45      0.431      0.217
+Optimizer stripped from runs\train\exp173\weights\last.pt, 14.4MB
+Optimizer stripped from runs\train\exp173\weights\best.pt, 14.4MB
+                 all       1000      18187      0.551      0.449      0.431      0.217
+              person       1000       1214      0.522       0.64      0.627      0.291
+               rider       1000         64      0.298     0.0929      0.122     0.0428
+                 car       1000      10198      0.602      0.778      0.777      0.451
+               truck       1000        376      0.413      0.548      0.471      0.299
+                 bus       1000        163      0.463      0.497      0.469      0.341
+               train       1000          4          1          0   0.000257   0.000205
+               motor       1000         50      0.812      0.173      0.261     0.0912
+                bike       1000        103      0.333      0.466      0.353      0.144
+       traffic light       1000       2562      0.493      0.647      0.589      0.197
+        traffic sign       1000       3453      0.568       0.65      0.637      0.313

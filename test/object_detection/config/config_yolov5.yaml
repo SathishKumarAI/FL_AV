@@ -1,0 +1,95 @@
+yaml_config_file: 'config/fedml_config_yolov5.yaml'
+
+using_mlops: False
+yaml_paths: ['config/']
+training_type: cross_silo
+random_seed: 0
+scenario: horizontal
+config_version: release
+name: exp
+project: 'runs/train'
+exist_ok: True
+bootstrap: 'config/bootstrap.sh'  # Note: This might need adjustment for Windows
+dataset: 'coco'
+# data_cache_dir: 'C:\Users\siu856522160\'  # Uncomment if needed, adjust path
+
+partition_method: homo
+partition_alpha: 0.5
+data_conf: 'C:\Users\siu856522160\Downloads\major\test\object_detection\model\yolov5\data\coco128.yaml'  # Commented out, Windows paths not allowed
+
+img_size: [640, 640]
+model: 'yolov5'
+class_num: 80
+
+yolo_cfg: 'C:\Users\siu856522160\Downloads\major\test\object_detection\model\yolov5\models\yolov5s.yaml'  # Windows path format
+yolo_hyp: 'C:\Users\siu856522160\Downloads\major\test\object_detection\config\hyps\hyp.scratch.yaml'  # Windows path format
+
+weights: 'none'
+single_cls: False
+conf_thres: 0.001
+iou_thres: 0.6
+yolo_verbose: False
+
+# Federated Optimizer & Training Parameters
+federated_optimizer: 'FedAvg'
+client_id_list: 
+id: 0
+client_num_in_total: 3
+client_num_per_round: 1
+comm_round: 20
+epochs: 5
+batch_size: 1
+client_optimizer: 'adam'
+lr: 0.01
+weight_decay: 0.001
+checkpoint_interval: 5
+server_checkpoint_interval: 5
+frequency_of_the_test: 5
+worker_num: 2
+using_gpu: True
+log_file_dir: 'C:\Users\siu856522160\.fedml\fedml-server\fedml\logs'  # Windows path format
+enable_wandb: False
+wandb_key: ''
+wandb_project: 'fedml'
+wandb_name: 'fedml_torch_object_detection'
+n_proc_in_silo: 1
+proc_rank_in_silo: 0
+comm: None
+enable_cuda_rpc: False
+cpu_transfer: False
+process_id: 1
+# process_id: 0 #default value
+#watch out 
+sys_perf_profiling: True
+current_running_dir: 'C:\Users\siu856522160\.fedml\fedml-client'  # Windows path format
+os_name: 'Windows'  # Adjusted for Windows environment
+version: 'release'
+cloud_region: ''
+total_batch_size: 1
+round_idx: 
+
+# Model and Training Hyperparameters
+last: 'C:\Users\siu856522160\Downloads\major\test\object_detection\runs\train\exp\weights\last.pt'  # Windows path format
+best: 'C:\Users\siu856522160\Downloads\major\test\object_detection\runs\train\exp\weights\best.pt'  # Windows path format
+results_file: 'C:\Users\siu856522160\Downloads\major\test\object_detection\runs\train\exp\results.txt'  # Windows path format
+nc: 80
+model_stride: [8, 16, 32]
+hyp:
+  lr0: 0.01
+  lrf: 0.2
+  momentum: 0.937
+  weight_decay: 0.0005
+  warmup_epochs: 3.0
+  warmup_momentum: 0.8
+  warmup_bias_lr: 0.1
+  box: 0.05
+  cls: 0.5
+  cls_pw: 1.0
+  obj: 1.0
+  obj_pw: 1.0
+  iou_t: 0.2
+  anchor_t: 4.0
+  fl_gamma: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4

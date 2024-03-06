@@ -1,0 +1,1 @@
+Total number of images in train annotations: 69863
