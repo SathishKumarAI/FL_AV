@@ -45,7 +45,6 @@ class FlowerClient(fl.client.Client):
         # state_dict = OrderedDict({k: torch.tensor(v, dtype=torch.float32) for k, v in params_dict})
         self.model.load_state_dict(state_dict, strict=True)
 
-  
 
     def fit(self, parameters):
         """Train parameters on the locally held training set."""
