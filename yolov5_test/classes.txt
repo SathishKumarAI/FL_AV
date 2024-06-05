@@ -1,6 +1,0 @@
-handgun
-knife
-person
-revolver
-rifle
-
