@@ -1,0 +1,4 @@
+# paths.yaml
+project_root: "/mnt/c/Projects/YourProject"
+args: "C:\Users\siu856522160\Downloads\major\load_data.py"
+logs_dir: "/mnt/c/Logs"
