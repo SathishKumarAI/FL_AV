@@ -225,7 +225,6 @@ def val( model, train_data, device, args, hyp):
         return results
 
 
-  
 
 def train(train_data, model, device, args, hyp):
     try:
