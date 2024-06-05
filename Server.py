@@ -79,7 +79,7 @@ def get_evaluate_fn(model, opt):
     return evaluate
 
 def main():
-    args = util.fit_config_file("/home/siu856522160/major/test/tt/yolov5/config/config.yaml")
+    args = util.fit_config_file(r"major\config\config.yaml")
     args = SimpleNamespace(**args)
     IP_ADDRESS = "10.100.192.219:8080"
     
