@@ -1,7 +1,5 @@
-# YOLOv5 🚀 by Ultralytics, GPL-3.0 license
-"""
-Perform test request
-"""
+# YOLOv5 🚀 by Ultralytics, AGPL-3.0 license
+"""Perform test request."""
 
 import pprint
 

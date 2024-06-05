@@ -2,8 +2,8 @@ import logging
 
 import numpy as np
 import torch
-
-import fedml
+import flwr as fl
+# import fedml
 from model.yolov5.utils.general import (
     box_iou,
     non_max_suppression,
@@ -15,7 +15,7 @@ from model.yolov5.utils.metrics import ap_per_class
 # from fedml.core import ServerAggregator
 
 
-class YOLOAggregator(ServerAggregator):
+class YOLOAggregator(fl.server.Server):
     def get_model_params(self):
         return self.model.cpu().state_dict()
 
@@ -214,17 +214,26 @@ class YOLOAggregator(ServerAggregator):
         # metrics = (mp, mr, map50, map, *(loss.cpu() / len(test_data)).tolist()), maps, t
         # logging.info(f"Test metrics: {metrics}")
 
-        fedml.mlops.log(
-            {
-                f"round_idx": self.round_idx,
+        # fedml.mlops.log(
+        #     {
+        #         f"round_idx": self.round_idx,
+        #         f"test_mp": np.float(mp),
+        #         f"test_mr": np.float(mr),
+        #         f"test_map50": np.float(map50),
+        #         f"test_map": np.float(map),
+        #         f"test_loss": np.float(sum((loss.cpu() / len(test_data)).tolist())),
+        #     }
+        # )
+        fl.common.logger.log(fl.common.LogMetrics(   
+        {
+            f"round_idx": self.round_idx,
                 f"test_mp": np.float(mp),
                 f"test_mr": np.float(mr),
                 f"test_map50": np.float(map50),
                 f"test_map": np.float(map),
                 f"test_loss": np.float(sum((loss.cpu() / len(test_data)).tolist())),
-            }
-        )
-
+        }
+        ))
         test_metrics = {
             "test_correct": 0,
             "test_total": len(test_data),

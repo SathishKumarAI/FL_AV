@@ -1,0 +1,72 @@
+yaml_config_file: '/home/siu856522160/major/test/tt/yolov5/config/config.yaml'
+dry: False
+# dataloader_index: 3
+nc_index: 80
+using_mlops: False
+yaml_paths: ['config/']
+training_type: cross_silo
+random_seed: 0
+scenario: horizontal
+config_version: release
+name: exp
+project: 'runs/train'
+exist_ok: True
+bootstrap: 'config/bootstrap.sh'
+nc: 80
+model_stride: [8, 16, 32]
+clinet_name : ""
+# Dataset Configuration:
+dataset: 'coco'
+data_conf: '/home/siu856522160/major/test/tt/vech/Device_1/SubData_4/batch_info_4.yaml'
+model_conf : "/home/siu856522160/major/test/tt/yolov5/config/config.yaml"
+img_size: [640, 640]
+model: 'yolov5'
+class_num: 80
+yolo_cfg: '/home/siu856522160/major/test/tt/yolov5/models/yolov5s.yaml'
+yolo_hyp: '/home/siu856522160/major/test/tt/yolov5/config/hyps/hyp.scratch-low.yaml'
+weights: '/home/siu856522160/major/test/tt/yolov5/yolov5s.pt'
+single_cls: False
+conf_thres: 0.001
+iou_thres: 0.6
+yolo_verbose: False
+
+# Federation Configuration:
+federated_optimizer: 'FedAvg'
+client_id_list:
+id: 0
+client_num_in_total: 3
+client_num_per_round: 1
+comm_round: 20
+epochs: 2
+batch_size: 1
+client_optimizer: 'adam'
+lr: 0.01
+weight_decay: 0.001
+checkpoint_interval: 5
+server_checkpoint_interval: 5
+frequency_of_the_test: 5
+worker_num: 2
+using_gpu: True
+log_file_dir: ''
+
+# System Configuration:
+enable_wandb: False
+wandb_key: ''
+wandb_project: 'flower_fedml_yolov5'
+wandb_name: 'fed_torch_object_detection'
+n_proc_in_silo: 1
+proc_rank_in_silo: 0
+comm: None
+enable_cuda_rpc: False
+cpu_transfer: False
+process_id: 1
+sys_perf_profiling: True
+current_running_dir: 
+os_name: 'Linux'
+total_batch_size: 1
+round_idx:
+
+# # Model and Training Hyperparameters:
+# last: 'runs/train/exp/weights/last.pt'
+# best: 'runs/train/exp/weights/best.pt'
+# results_file: 'runs/train/exp/results.txt'
