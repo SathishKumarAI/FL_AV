@@ -40,7 +40,7 @@ if str(ROOT) not in sys.path:
 # ROOT = ROOT.relative_to(Path.cwd())  # relative
 
 import export
-import val
+import major.test.tt.yolov5.model.yolov5.val_2 as val_2
 from . import notebook_init
 from .general import LOGGER, check_yaml, file_size, print_args
 from .torch_utils import select_device
@@ -95,7 +95,7 @@ def run(
             assert suffix in str(w), "export failed"
 
             # Validate
-            result = val.run(
+            result = val_2.run(
                 data,
                 w,
                 batch_size,

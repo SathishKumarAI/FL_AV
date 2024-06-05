@@ -9,7 +9,7 @@ from warnings import warn
 import yaml
 import torch
 
-from data.data_loader import load_partition_data_coco
+from data.data_loader import load_partition_data_coco, load_entire_training_data_coco, load_entire_validation_data_coco
 from model.yolov5.utils.general import (
     labels_to_class_weights,
     increment_path,
@@ -18,13 +18,10 @@ from model.yolov5.utils.general import (
 )
 from model.yolov5.utils.general import intersect_dicts
 from model.yolov5.models.yolo import Model as YOLOv5
-from model.yolov6.yolov6.utils.config import Config
-from model.yolov6.yolov6.models.yolo import build_model as build_yolov6
-from model.yolov7.models.yolo import Model as YOLOv7
+
 
 from trainer.yolov5_trainer import YOLOv5Trainer
-from trainer.yolov6_trainer import YOLOv6Trainer
-from trainer.yolov7_trainer import YOLOv7Trainer
+
 
 try:
     import wandb
@@ -36,6 +33,8 @@ except ImportError:
 
 
 def init_yolo(args, device="cpu"):
+    print(type(args))
+    # print(args.get("weights"))
     # init settings
     args.yolo_hyp = args.yolo_hyp or (
         "hyp.finetune.yaml" if args.weights else "hyp.scratch.yaml"
@@ -118,7 +117,7 @@ def init_yolo(args, device="cpu"):
     )  # check
     args.nc = nc  # change nc to actual number of classes
 
-    # Model
+    # Mode
     # print("weights:", weights)
 
     if args.model.lower() == "yolov5":
@@ -146,62 +145,59 @@ def init_yolo(args, device="cpu"):
             )  # report
         else:
             model = YOLOv5(args.yolo_cfg, ch=3, nc=nc).to(device)  # create
-    elif args.model.lower() == "yolov6":
-        args.yolov6_cfg = Config.fromfile(args.yolo_cfg)
-        model = build_yolov6(args.yolov6_cfg, num_classes=nc, device=device)
-        pretrained = weights.endswith(".pt")
-        if pretrained:  # finetune if pretrained model is set
-            """Load weights from checkpoint file, only assign weights those layers' name and shape are match."""
-            ckpt = torch.load(weights, map_location=device)
-            state_dict = ckpt["model"].float().state_dict()
-            model_state_dict = model.state_dict()
-            state_dict = {
-                k: v
-                for k, v in state_dict.items()
-                if k in model_state_dict and v.shape == model_state_dict[k].shape
-            }
-            model.load_state_dict(state_dict, strict=False)
-            del ckpt, state_dict, model_state_dict
-    elif args.model.lower() == "yolov7":
-        pretrained = weights.endswith(".pt")
-        if pretrained:
-            ckpt = torch.load(weights, map_location=device)  # load checkpoint
-            if hyp.get("anchors"):
-                ckpt["model"].yaml["anchors"] = round(
-                    hyp["anchors"]
-                )  # force autoanchor
-            model = YOLOv7(args.yolo_cfg or ckpt["model"].yaml, ch=3, nc=nc).to(
-                device
-            )  # create
-            exclude = (
-                ["anchor"] if args.yolo_cfg or hyp.get("anchors") else []
-            )  # exclude keys
-            state_dict = ckpt["model"].float().state_dict()  # to FP32
-            state_dict = intersect_dicts(
-                state_dict, model.state_dict(), exclude=exclude
-            )  # intersect
-            model.load_state_dict(state_dict, strict=False)  # load
-            logging.info(
-                "Transferred %g/%g items from %s"
-                % (len(state_dict), len(model.state_dict()), weights)
-            )  # report
-        else:
-            model = YOLOv7(args.yolo_cfg, ch=3, nc=nc).to(device)  # create
 
-    # print(model)
 
-    dataset = load_partition_data_coco(args, hyp, model)
+    # print(hyp)
+    print()
+    # dataset = load_partition_data_coco(args, hyp, model)
+    # [
+    #     train_data_num,
+    #     test_data_num,
+    #     train_data_global,
+    #     test_data_global,
+    #     train_data_local_num_dict,
+    #     train_data_local_dict,
+    #     test_data_local_dict,
+    #     class_num,
+    # ] = dataset
+    #    return (
+    #     train_data_num,
+    #     test_data_num,
+    #     train_dataloader_global,
+    #     test_dataloader_global,
+    #     train_data_num_dict,
+    #     train_data_loader_dict,
+    #     test_data_loader_dict,
+    #     nc,
+    # )
+    dataset_train = load_entire_training_data_coco(args, hyp, model)
+    # print(dataset_train)
     [
         train_data_num,
-        test_data_num,
         train_data_global,
-        test_data_global,
         train_data_local_num_dict,
-        train_data_local_dict,
-        test_data_local_dict,
+        
         class_num,
-    ] = dataset
-
+    ] = dataset_train
+    # print(dataset_train)
+    # train_data_num, train_dataloader_global, train_dataset_global, nc
+    
+    # return (
+    #     val_data_num,
+    #     val_dataloader_global,
+    #     val_data_num_dict,
+    #     val_data_loader_dict,
+    #     nc,
+    # )
+    dataset_val = load_entire_validation_data_coco(args, hyp, model)
+    [
+        val_data_num,
+        val_dataloader_global,
+        val_data_num_dict,
+        class_num
+    ] = dataset_val
+    # print(dataset_val)
+    
     args.model_stride = model.stride
     gs = int(max(model.stride))  # grid size (max stride)
     imgsz, imgsz_test = [
@@ -235,20 +231,14 @@ def init_yolo(args, device="cpu"):
     args.wandb = wandb
 
     # Trainer
-    if args.model == "yolov5":
-        trainer = YOLOv5Trainer(model=model, args=args)
-        sys.path.append(
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "yolov5")
-        )
-    elif args.model == "yolov6":
-        trainer = YOLOv6Trainer(model=model, args=args)
-        sys.path.append(
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "yolov6", "yolov6")
-        )
-    elif args.model == "yolov7":
-        trainer = YOLOv7Trainer(model=model, args=args)
-        sys.path.append(
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "yolov7")
-        )
+    
+    # if args.model == "yolov5":
+    #     trainer = YOLOv5Trainer(model=model, args=args)
+    #     sys.path.append(
+    #         os.path.join(os.path.dirname(os.path.abspath(__file__)), "yolov5")
+    #     )
 
-    return model, dataset, trainer, args
+
+    # return model, dataset, dataset_train, dataset_val, trainer, args
+    return model, dataset_train, dataset_val, args
+

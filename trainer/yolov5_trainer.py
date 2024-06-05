@@ -11,23 +11,24 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim import lr_scheduler
+import flwr as fl
 
-import fedml
-from fedml.core import ClientTrainer
+
 from model.yolov5.utils.loss import ComputeLoss
 from model.yolov5.utils.general import non_max_suppression, xywh2xyxy, scale_coords
 from model.yolov5.utils.metrics import ConfusionMatrix, ap_per_class, box_iou
 from model.yolov5.val import run as run_val
 
+class YOLOv5Trainer():
 
-class YOLOv5Trainer(ClientTrainer):
-    def __init__(self, model, args=None):
-        super(YOLOv5Trainer, self).__init__(model, args)
-        self.hyp = args.hyp
+    def __init__(self, model, args):
+        # super().__init__(model, args)
+        self.hyp = args.hyp if args else None
         self.args = args
         self.round_loss = []
         self.round_idx = 0
-
+        self.model =model
+    
     def get_model_params(self):
         return self.model.cpu().state_dict()
 
@@ -36,10 +37,11 @@ class YOLOv5Trainer(ClientTrainer):
         self.model.load_state_dict(model_parameters)
 
     def train(self, train_data, device, args):
+        self.id = args.id 
         logging.info("Start training on Trainer {}".format(self.id))
         logging.info(f"Hyperparameters: {self.hyp}, Args: {self.args}")
         model = self.model
-        self.round_idx = args.round_idx
+        # self.round_idx = args.round_idx
         args = self.args
         hyp = self.hyp if self.hyp else self.args.hyp
 
@@ -92,8 +94,8 @@ class YOLOv5Trainer(ClientTrainer):
         model.to(device)
         model.train()
 
+        # compute_loss = ComputeLoss(model, device=device)
         compute_loss = ComputeLoss(model)
-
         epoch_loss = []
         mloss = torch.zeros(3, device=device)  # mean losses
         logging.info("Epoch gpu_mem box obj cls total targets img_size time")
@@ -101,9 +103,28 @@ class YOLOv5Trainer(ClientTrainer):
             model.train()
             t = time.time()
             batch_loss = []
-            logging.info("Trainer_ID: {0}, Epoch: {1}".format(self.id, epoch))
+            # logging.info("Trainer_ID: {0}, Epoch: {1}".format(self.id, epoch))
+            logging.info("Trainer_ID: , Epoch: {0}".format( epoch))
+            # print(type(train_data))
+            pbar = enumerate(train_data)
+            # print(pbar)
+            # (0, 128)
+            # (1, <model.yolov5.utils.dataloaders.InfiniteDataLoader object at 0x7fcc80dc63e0>)
+            # (2, {0: 128})
+            # (3, {0: <model.yolov5.utils.dataloaders.InfiniteDataLoader object at 0x7fcc80dc6da0>})
+            # (4, (80, ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush']))
+            # for i in enumerate(train_data):
+            #     print(f"{i}")
+            # print(train_data[3])
+            index = 3
+            value = train_data[index][0]
+            # print(value)
+            # print(enumerate(value)) # Assuming train_data contains the desired value at index 3
 
-            for (batch_idx, batch) in enumerate(train_data):
+
+            for (batch_idx, batch) in enumerate(value):
+            # for (data_loader, num_classes, class_names) in enumerate(train_data):
+                
                 imgs, targets, paths, _ = batch
                 imgs = imgs.to(device, non_blocking=True).float() / 256.0 - 0.5
 
@@ -140,7 +161,7 @@ class YOLOv5Trainer(ClientTrainer):
 
             epoch_loss.append(copy.deepcopy(mloss.cpu().numpy()))
             logging.info(
-                f"Trainer {self.id} epoch {epoch} box: {mloss[0]} obj: {mloss[1]} cls: {mloss[2]} total: {mloss.sum()} time: {(time.time() - t)}"
+                f"Trainer {self.id}  epoch {epoch} box: {mloss[0]} obj: {mloss[1]} cls: {mloss[2]} total: {mloss.sum()} time: {(time.time() - t)}"
             )
 
             logging.info("#" * 20)
@@ -176,14 +197,16 @@ class YOLOv5Trainer(ClientTrainer):
         epoch_loss = np.array(epoch_loss)
         # logging.info(f"Epoch loss: {epoch_loss}")
 
-        fedml.mlops.log(
-            {
+     
+        fl.common.logger.configure(
+            
+        {
                 f"round_idx": self.round_idx,
-                f"train_box_loss": np.float(epoch_loss[-1, 0]),
-                f"train_obj_loss": np.float(epoch_loss[-1, 1]),
-                f"train_cls_loss": np.float(epoch_loss[-1, 2]),
-                f"train_total_loss": np.float(epoch_loss[-1, :].sum()),
-            }
+                f"train_box_loss": float(epoch_loss[-1, 0]),
+                f"train_obj_loss": float(epoch_loss[-1, 1]),
+                f"train_cls_loss": float(epoch_loss[-1, 2]),
+                f"train_total_loss": float(epoch_loss[-1, :].sum()),
+        }
         )
 
         self.round_loss.append(epoch_loss[-1, :])
@@ -198,7 +221,7 @@ class YOLOv5Trainer(ClientTrainer):
 
     def val(self, model, train_data, device, args):
         logging.info(f"Trainer {self.id} val start")
-        self.round_idx = args.round_idx
+        # self.round_idx = args.round_idx
         args = self.args
         hyp = self.hyp if self.hyp else self.args.hyp
 
@@ -210,20 +233,25 @@ class YOLOv5Trainer(ClientTrainer):
         t = time.time()
         with open(args.data_conf) as f:
             data_dict = yaml.load(f, Loader=yaml.FullLoader)  # data dict
-
+            
+        index = 3
+        value = train_data[index][0]
+        # print(value)
+        
         results, maps, _ = run_val(
             data_dict,
             batch_size=args.batch_size,
             imgsz=args.img_size,
             model=model,
             single_cls=args.single_cls,
-            dataloader=train_data,
+            dataloader=value,
             save_dir=args.save_dir,
             plots=False,
             compute_loss=compute_loss,
         )
         logging.info(results)
         mp, mr, map50, map, box_loss, obj_loss, cls_loss = results
+        print(results)
         logging.info(
             f"Trainer {self.id} val time: {(time.time() - t)}s speed: {(time.time() - t)/len(train_data)} s/batch"
         )
@@ -234,4 +262,6 @@ class YOLOv5Trainer(ClientTrainer):
             f"Trainer {self.id} val map: {map} map50: {map50} mp: {mp} mr: {mr}"
         )
 
-        return
+        return results
+
+
