@@ -1,4 +1,14 @@
-# paths.yaml
-project_root: "/mnt/c/Projects/YourProject"
-args: "C:\Users\siu856522160\Downloads\major\load_data.py"
-logs_dir: "/mnt/c/Logs"
+root_path: c\path\to\project
+config_files:
+    - config_dir: config
+    - settings_file: config\settings.yaml
+data_files:
+    - data_dir: data
+    - models_dir: models
+logs:
+    - logs_dir: logs
+    - error_log_file: logs\error.log
+new_dir: NewDirectory
+source_code:
+    - src_dir: src
+    - tests_dir: tests
