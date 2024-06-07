@@ -1,14 +1,42 @@
-root_path: c\path\to\project
-config_files:
-    - config_dir: config
-    - settings_file: config\settings.yaml
-data_files:
-    - data_dir: data
-    - models_dir: models
-logs:
-    - logs_dir: logs
-    - error_log_file: logs\error.log
-new_dir: NewDirectory
-source_code:
-    - src_dir: src
-    - tests_dir: tests
+environment_args:
+    bootstrap: config/bootstrap.sh
+
+data_args:
+    dataset: "coco"
+    data_cache_dir: 
+    data_conf: "./data/coco128.yaml" # yolo
+    img_size: [640, 640] # [640, 640]
+
+model_args:
+    model: "yolov5" # "yolov5"
+    class_num: 80
+    yolo_cfg: "./model/yolov5/models/yolov5s.yaml" # "./model/yolov6/configs/yolov6s.py" # yolo
+    yolo_hyp: "./config/hyps/hyp.scratch.yaml" # yolo
+    yolov5_weights: "/home/siu856522160/major/test/yolov5/yolov5s.pt"
+    data_config: "major/config/config.yaml"
+    single_cls: false # yolo
+    conf_thres: 0.001 # yolo
+    iou_thres: 0.6 # for yolo NMS
+    yolo_verbose: false # yolo
+
+train_args:
+    federated_optimizer: "FedAvg"
+    client_id_list:
+    client_num_in_total: 2
+    client_num_per_round: 1
+    comm_round: 20
+    epochs: 1
+    batch_size: 1
+    client_optimizer: adam
+    lr: 0.01
+    weight_decay: 0.001
+    checkpoint_interval: 5
+    server_checkpoint_interval: 5
+
+network:
+    ip_address: "10.100.192.219:8080"
+
+device_args:
+    worker_num: 2
+    using_gpu: false
+

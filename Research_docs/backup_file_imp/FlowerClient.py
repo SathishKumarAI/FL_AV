@@ -17,10 +17,10 @@ from flwr.common import (
     parameters_to_ndarrays,
 )
 import train
-import util
+import temp.major.util as util
 import warnings
 import val
-import val_copy_test
+import temp.major.flower.val_copy_test as val_copy_test
 import numpy as np
 import argparse
 from utils.general import (
@@ -43,58 +43,27 @@ from utils.general import (
     LOGGER,
     TQDM_BAR_FORMAT,
     check_amp,)
-
-
-from model.init_yolo import init_yolo
-import copy
-from model.yolov5.models.yolo import Model as YOLOV5
-
-class FlowerClient1(fl.client.Client):
-    def __init__(self, device, args, model, opt, num_examples, train_data, val_data):
+class FlowerClient(fl.client.Client):
+    def __init__(self, device, args, model, opt, num_examples):
         super().__init__()
         self.device = device
         self.args = args
-        self.model = model.to(device)
+        self.model = model
         self.opt = opt
         self.num_examples = num_examples
-        self.train_data = train_data
-        self.val_data = val_data
         logging.info("init_model_params")
-
-    def get_model_parameters(self):
-        """Return a model's parameters."""
-        logging.info("Getting model parameters")
-        parameters = [val.cpu().numpy() for _, val in self.model.state_dict().items()]
-        return fl.common.ndarrays_to_parameters(parameters)
 
     def set_parameters(self, parameters):
         """Set model parameters."""
         try:
-            # Update local model parameters with logging
+            # Update local model parameters
             logging.info("Setting model parameters")
-            state_dict = {}
-            model_state_dict = self.model.state_dict()
             t = parameters_to_ndarrays(parameters.parameters)
-            # Ensure no gradient computation if not required
-            with torch.no_grad():
-                for (name, param), value in zip(model_state_dict.items(), t):
-                    param_shape = param.shape
-                    # Convert and check parameter shape mismatch
-                    param_value = torch.tensor(value)
-                    if param_shape != param_value.shape:
-                        logging.error(f"Shape mismatch for {name}: {param_value.shape} vs {param_shape}. Skipping...")
-                        continue
-                    state_dict[name] = param_value
-            # Load state dictionary with strict=False (consider implications)
-            # Create a new instance of the model
-            new_model = util.load_model_init(self.args, self.device)
-            # Load the state dictionary
-            new_model.load_state_dict(state_dict, strict=False)
-            # Replace the old model with the new one
-            self.model = new_model
-            # self.model.load_state_dict(state_dict, strict=False)
-            # self.model = model_1 
-            logging.info("Model parameters set successfully.")
+            params_dict_with_keys = zip(list(self.model.state_dict().keys()), t)
+            state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict_with_keys})
+
+            # Load state dictionary into model
+            self.model.load_state_dict(state_dict, strict=True)
         except Exception as e:
             logging.error(f"An error occurred during setting parameters: {e}")
 
@@ -103,21 +72,19 @@ class FlowerClient1(fl.client.Client):
         try:
             logging.info("Fitting model parameters")
             self.set_parameters(parameters)
-            # Set the model to training mode
-            # self.model.train()        
             # Get hyperparameters for this round
-            hyp_path = "/home/siu856522160/major/test/tt/yolov5/config/hyps/hyp.scratch-low.yaml"
-            hyp = util.load_hyp(hyp_path)
-            results = train.run(        
-                                data=self.args.data_conf,
-                                imgsz=1024,
-                                weights='/home/siu856522160/major/test/yolov5/yolov5s.pt',
-                                batch=32,
-                                epochs=2,
-                                device=self.device            )
-            keys = ["train_box_loss", "train_obj_loss", "train_cls_loss", "train_total_loss"]
+            batch_size = 16
+            results = train.run(
+                data=self.args.data_conf,
+                imgsz=1024,
+                weights='/home/siu856522160/major/test/yolov5/yolov5s.pt',
+                batch=batch_size,
+                epochs=2,
+                device=self.device
+            )
+            keys = ['mp', 'mr', 'map50', 'map', 'box', 'obj', 'cls']
             result_dict = {k: v for k, v in zip(keys, results)}
-            parameters = self.get_model_parameters()
+            parameters = util.get_model_parameters(self.model)
             logging.info("Fitting model returns")
             return FitRes(
                 status=Status(Code.OK, message="ok"),
@@ -139,27 +106,72 @@ class FlowerClient1(fl.client.Client):
         try:
             logging.info("Evaluating model parameters")
             self.set_parameters(parameters)
+            current_model_state_dict = self.model.state_dict()
             loss = 0
             accuracy = {}
+            data_dict = check_dataset(self.opt.data)
+            if data_dict is None:
+                logging.error("Dataset information not found.")
+                return EvaluateRes(
+                    status=Status(Code.EVALUATE_NOT_IMPLEMENTED, message="ok"),
+                    loss=loss,
+                    num_examples=self.num_examples.get("testset", 0),
+                    metrics={},
+                )
+            
+            # Print the dataset information
+            logging.info(f"Dataset information: {data_dict}")
 
+            train_path = data_dict.get("train")
+            val_path = data_dict.get("val")
+            if train_path is None:
+                logging.error("Train path not found in data_dict.")
+            if val_path is None:
+                logging.error("Validation path not found in data_dict.")
+            names = data_dict.get("names")
+            if not names:
+                logging.error("Names not available in data_dict.")
 
+            gs = max(int(self.model.stride.max()), 32)
+            imgsz = check_img_size(self.opt.imgsz, gs, floor=gs * 2)
+            amp = check_amp(self.model)  # check AMP
 
+            # Estimate batch size
+            batch_size = self.opt.batch_size
+            if batch_size == -1:  # single-GPU only, estimate best batch size
+                batch_size = check_train_batch_size(self.model, imgsz, amp)
+
+            single_cls = self.opt.single_cls
             hyp_path = "/home/siu856522160/major/test/tt/yolov5/config/hyps/hyp.scratch-low.yaml"
             hyp = util.load_hyp(hyp_path)
+            cache = False
+            rect = False
+            rank = 0
+            workers = 4
+            pad = 0.5
+            prefix = colorstr("val: ")
 
-            
+            # Load validation data loader
+            val_loader = util.load_val_dataloader(val_path, imgsz, batch_size, gs, single_cls, hyp, cache, rect, rank, workers, pad, prefix)
+            logging.info("Validation data loader:", val_loader)
+
             # Run validation
-            results = util.val(
-                model=self.model, 
-                train_data=self.val_data,
-                device=self.device,
-                args=self.args,
-                hyp=hyp
+            results, _, _ = val_copy_test.run(
+                data=data_dict,
+                imgsz=imgsz,
+                model=self.model,
+                iou_thres=0.60,
+                single_cls=self.opt.single_cls,
+                verbose=True,
+                plots=False,
             )
             logging.info("Evaluating results model parameters")
 
             # Debugging statement
             logging.info("Num Examples:", self.num_examples)
+
+            # Restore the model state
+            self.model.load_state_dict(current_model_state_dict)
 
             # Create result dictionary
             keys = ['mp', 'mr', 'map50', 'map', 'box', 'obj', 'cls']
@@ -183,31 +195,25 @@ class FlowerClient1(fl.client.Client):
             )
 
 def main():
-    parser = argparse.ArgumentParser(description="Process and save tid from command line.")
-    parser.add_argument("--id", type=int, help="The tid to be saved")
-
+    parser = argparse.ArgumentParser(description="Flower")
+    parser.add_argument(
+        "--client-id",
+        type=int,
+        default=0,
+        choices=range(0, 10),
+        required=False,
+        help="Specifies the artificial data partition of CIFAR10 to be used. Picks partition 0 by default",
+    )
     args = parser.parse_args()
-
-    # Accessing the value of tid
-    id = args.id
-
-    # Save the tid or perform any other operation
-    # print("TID:", id)
-    # yaml_path = r"/home/siu856522160/major/test/tt/yolov5/config/config.yaml"
-    yaml_path = f'/home/siu856522160/major/test/tt/yolov5/config/config_copy_{id}.yaml'
-    model_path = f"/home/siu856522160/major/test/tt/yolov5/yolov5s.pt"
+    yaml_path = r"/home/siu856522160/major/test/tt/yolov5/config/config.yaml"
+    model_path = r"/home/siu856522160/major/test/yolov5/yolov5s.pt"
     args = util.fit_config_file(yaml_path)
     args = SimpleNamespace(**args)
     IP_ADDRESS = "10.100.192.219:8080"
-    num_examples = {"trainset": 80, "testset": 80}
+    num_examples = {"trainset" : 80, "testset" : 80}
     opt = train.parse_opt(True)
-    model, dataset_train, dataset_val, args = init_yolo(args=args, device="cuda:0")
-    index = 1
-    dataset_train = dataset_train[index][0]
-    dataset_val = dataset_val[index][0]
-    
-    # print(dataset_train)
-    client = FlowerClient1(device=DEVICE, args=args, model=model, num_examples=num_examples, opt=opt, train_data=dataset_train, val_data=dataset_val)
+    model = util.load_model(DEVICE)
+    client = FlowerClient(device=DEVICE, args=args, model=model, opt=opt, num_examples=num_examples )
     fl.client.start_client(server_address=IP_ADDRESS, client=client)
 
 if __name__ == "__main__":

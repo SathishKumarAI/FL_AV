@@ -17,10 +17,10 @@ from flwr.common import (
     parameters_to_ndarrays,
 )
 import train
-import util
+import temp.major.util as util
 import warnings
 import val
-import val_copy_test
+import temp.major.flower.val_copy_test as val_copy_test
 import numpy as np
 import argparse
 from utils.general import (

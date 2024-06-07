@@ -9,7 +9,7 @@ from warnings import warn
 import yaml
 import torch
 
-from data.data_loader import load_partition_data_coco, load_entire_training_data_coco, load_entire_validation_data_coco
+from temp.major.data.yolov5_args.data_loader import load_partition_data_coco, load_entire_training_data_coco, load_entire_validation_data_coco
 from model.yolov5.utils.general import (
     labels_to_class_weights,
     increment_path,
