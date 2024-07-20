@@ -39,7 +39,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 # ROOT = ROOT.relative_to(Path.cwd())  # relative
 
-import export
+import model.yolov5.export as export
 import major.test.tt.yolov5.model.yolov5.val_2 as val_2
 from . import notebook_init
 from .general import LOGGER, check_yaml, file_size, print_args

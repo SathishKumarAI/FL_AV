@@ -5,28 +5,22 @@ import yaml
 from pathlib import Path
 from types import SimpleNamespace
 from collections import OrderedDict
-
 import flwr as fl
 from flwr.common import ndarrays_to_parameters
-
 from utils.general import check_img_size, check_dataset
 import warnings
-
 from model.init_yolo import init_yolo
-import util
-import train
+import util 
+import model.yolov5.train as train
 import val
 
 warnings.filterwarnings("ignore", category=UserWarning)
-
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def main():
-    with open("path.yaml", "r") as file:
-        paths = yaml.safe_load(file)["paths"]
-
-    model_weights_path = paths["model_weights"]
-    yolov5_weights = paths["yolov5_weights"]
+    paths = util.load_config()
+    # model_weights_path = paths["model_weights"]
+    # yolov5_weights = paths["yolov5_weights"]
     data_config_path = paths["data_config"]
     ip_address = paths["ip_address"]
     

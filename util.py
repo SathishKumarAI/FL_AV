@@ -58,9 +58,24 @@ RANK = int(os.getenv("RANK", -1))
 LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))
 WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
 
-# Load configuration from YAML file
-with open("path.yaml", "r") as f:
-    paths = yaml.safe_load(f)
+def load_config():
+    try:
+        # Load configuration from YAML file
+        with open("config/config.yaml", "r") as f:
+            paths = yaml.safe_load(f)
+        if paths:
+            return paths
+        else:
+            raise ValueError("Configuration file is empty or invalid")
+    except FileNotFoundError:
+        logging.error("Configuration file not found. Please ensure 'config/config.yaml' exists.")
+        raise
+    except yaml.YAMLError as e:
+        logging.error(f"Error parsing YAML file: {e}")
+        raise
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        raise
     
 def get_model_parameters(model):
     """Return a model's parameters."""

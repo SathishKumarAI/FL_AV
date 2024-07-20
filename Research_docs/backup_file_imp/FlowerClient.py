@@ -16,7 +16,7 @@ from flwr.common import (
     ndarrays_to_parameters,
     parameters_to_ndarrays,
 )
-import train
+import model.yolov5.train as train
 import temp.major.util as util
 import warnings
 import val

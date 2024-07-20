@@ -9,7 +9,7 @@ from flwr.common import (
     Code,
     ndarrays_to_parameters,
 )
-import train
+import model.yolov5.train as train
 import temp.major.util as util
 import val
 from utils.general import (

@@ -9,7 +9,7 @@ from warnings import warn
 import yaml
 import torch
 
-from temp.major.data.yolov5_args.data_loader import load_partition_data_coco, load_entire_training_data_coco, load_entire_validation_data_coco
+from data.yolov5_args.data_loader import load_partition_data_coco, load_entire_training_data_coco, load_entire_validation_data_coco
 from model.yolov5.utils.general import (
     labels_to_class_weights,
     increment_path,
@@ -19,9 +19,7 @@ from model.yolov5.utils.general import (
 from model.yolov5.utils.general import intersect_dicts
 from model.yolov5.models.yolo import Model as YOLOv5
 
-
 from trainer.yolov5_trainer import YOLOv5Trainer
-
 
 try:
     import wandb
@@ -30,7 +28,6 @@ except ImportError:
     logging.info(
         "Install Weights & Biases for experiment logging via 'pip install wandb' (recommended)"
     )
-
 
 def init_yolo(args, device="cpu"):
     print(type(args))
@@ -146,7 +143,6 @@ def init_yolo(args, device="cpu"):
         else:
             model = YOLOv5(args.yolo_cfg, ch=3, nc=nc).to(device)  # create
 
-
     # print(hyp)
     print()
     # dataset = load_partition_data_coco(args, hyp, model)
@@ -231,13 +227,11 @@ def init_yolo(args, device="cpu"):
     args.wandb = wandb
 
     # Trainer
-    
     # if args.model == "yolov5":
     #     trainer = YOLOv5Trainer(model=model, args=args)
     #     sys.path.append(
     #         os.path.join(os.path.dirname(os.path.abspath(__file__)), "yolov5")
     #     )
-
 
     # return model, dataset, dataset_train, dataset_val, trainer, args
     return model, dataset_train, dataset_val, args
