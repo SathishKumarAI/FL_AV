@@ -37,30 +37,7 @@ Please try to create an new Conda ENV for avoiding modules dependencies.
 ## Prepare Data
 [Link page need to update afterwards](update.md)
 
-1. Download the dataset, refer to []()
-2. It should have the basic structure for 
-    ```
-    ```
-3. Generate config file for federated learning
-    ```    
-    ```
-
-### Train
-1. Start server
-    ```
-    ```
-2. Start clients
-    ```
-    ```
-3. Stop training
-
-    ```
-    ```
-
-## Results 
 
 
 
-### About Professor and Committee members
- 
-### About me
+
