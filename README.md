@@ -1,9 +1,9 @@
-# My Thesis
+#still in progress
 
 
 
 add all the file from the server into the GitHub repo.
-## Overview of Thesis
+## Overview of 
 
 ## Resources 
 * Dataset: 
