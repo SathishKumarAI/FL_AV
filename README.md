@@ -1,5 +1,10 @@
 
 # **Project**
+Why Federated Learning over a Centralized Model?
+Federated Learning (FL) allows each data owner (or device) to keep its sensitive data locally, sending only model parameters (gradients) to a central server. This approach not only enhances privacy by avoiding the need for a massive centralized data repository, but also lowers bandwidth costs and reduces the risk of data leaks. In many real-world applications-such as autonomous vehicles or edge-based surveillance—transferring large volumes of raw images to a single server can be impractical or raise confidentiality concerns. FL addresses these challenges by keeping the training data closer to its source.
+
+Why Object Detection?
+Object detection is a fundamental task in computer vision, enabling systems to recognize and localize objects within images or video frames. By federating an object detection model, we allow multiple independent data silos---such as cameras from different traffic intersections or vehicle fleets-to collaboratively train a model without ever pooling their raw images. This is critical in scenarios like smart city infrastructure, where privacy laws may restrict data sharing between agencies, or fleet management, where each vehicle has limited connectivity and must remain operationally secure. FL with object detection meets both practical deployment needs (e.g., edge devices with limited bandwidth) and regulatory requirements (data privacy, security) while still benefiting from diverse, real-world data for improved model robustness.
 
 ## **Overview**
 
