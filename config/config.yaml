@@ -1,61 +1,13 @@
-# General Configuration
-yaml_config_file: '/home/siu856522160/major/test/tt/yolov5/config/config.yaml'  # Path to this YAML config file
-dry: False  # If True, runs a dry run without actual training
-nc_index: 80  # Number of classes for the model
-yaml_paths: ['config/']  # List of paths to YAML config directories
-training_type: cross_silo  # Type of training (e.g., cross_silo, cross_device)
-random_seed: 0  # Random seed for reproducibility
-scenario: horizontal  # Scenario type (e.g., horizontal, vertical)
-config_version: release  # Version of the configuration
-name: exp  # Experiment name
-project: 'runs/train'  # Project directory for saving runs
-exist_ok: True  # If True, existing project directory will be used
-bootstrap: 'config/bootstrap.sh'  # Path to the bootstrap script
-nc: 80  # Number of classes
-model_stride: [8, 16, 32]  # Model stride values
-client_name: ""  # Name of the client (optional)
+data:
+  train: "data/bdd100k/images/train"  # Path to training images
+  val: "data/bdd100k/images/val"      # Path to validation images
+  test: "data/bdd100k/images/test"    # Path to test images
 
-# Dataset Configuration
-dataset: 'coco'  # Dataset name
-data_conf: '/home/siu856522160/major/test/tt/yolov5/data/coco128.yaml'  # Path to dataset configuration file
-model_conf: '/home/siu856522160/major/test/tt/yolov5/config/config.yaml'  # Path to model configuration file
-img_size: [640, 640]  # Image size for training and validation
-model: 'yolov5'  # Model name
-class_num: 80  # Number of classes
-yolo_cfg: '/home/siu856522160/major/test/tt/yolov5/models/yolov5s.yaml'  # Path to YOLO model configuration
-yolo_hyp: '/home/siu856522160/major/test/tt/yolov5/config/hyps/hyp.scratch-low.yaml'  # Path to YOLO hyperparameters
-weights: '/home/siu856522160/major/test/tt/yolov5/yolov5s.pt'  # Path to pre-trained weights
-single_cls: False  # If True, consider all objects as a single class
-conf_thres: 0.001  # Confidence threshold for object detection
-iou_thres: 0.6  # IoU threshold for object detection
-yolo_verbose: False  # If True, enables verbose output for YOLO
+model:
+  name: "yolov5su"  # Model name
+  pretrained: True  # Use pretrained weights
 
-# Federation Configuration
-federated_optimizer: 'FedAvg'  # Federated optimizer type
-client_id_list: []  # List of client IDs
-id: 0  # ID of the current client
-client_num_in_total: 3  # Total number of clients
-client_num_per_round: 1  # Number of clients participating per round
-comm_round: 20  # Number of communication rounds
-epochs: 2  # Number of epochs per round
-batch_size: 1  # Batch size for training
-client_optimizer: 'adam'  # Optimizer type for clients
-lr: 0.01  # Learning rate
-weight_decay: 0.001  # Weight decay for optimizer
-checkpoint_interval: 5  # Interval for saving checkpoints
-server_checkpoint_interval: 5  # Interval for saving server checkpoints
-frequency_of_the_test: 5  # Frequency of testing the model
-worker_num: 2  # Number of workers
-using_gpu: True  # If True, use GPU for training
-log_file_dir: ''  # Directory for log files (if any)
-
-# Paths (to be populated by the load_config function)
-model_weights_path: ''  # Path to model weights (populated by script)
-yolov5_weights: ''  # Path to YOLOv5 weights (populated by script)
-data_config_path: ''  # Path to data configuration (populated by script)
-ip_address: '0.0.0.0:8080'  # Server IP address (populated by script)
-
-# Model and Training Hyperparameters
-last: 'runs/train/exp/weights/last.pt'  # Path to the last model weights
-best: 'runs/train/exp/weights/best.pt'  # Path to the best model weights
-results_file: 'runs/train/exp/results.txt'  # Path to the results file
+training:
+  batch_size: 16    # Batch size for training
+  epochs: 2         # Number of training epochs
+  img_size: 640     # Image size for training and evaluation
