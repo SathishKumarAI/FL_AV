@@ -1,0 +1,16 @@
+[project]
+name = "yolov5_federated"
+version = "1.0.0"
+description = "Federated YOLOv5 Object Detection"
+authors = [{name = "Your Name", email = "your.email@example.com"}]
+requires-python = ">=3.8"
+readme = "README.md"
+
+[tool.flwr.federations]
+local-deployment = { address = "127.0.0.1:9093", insecure = true }
+
+[tool.poetry.dependencies]
+python = "^3.8"
+flwr = { version = "^1.8.0", extras = ["simulation"] }
+torch = "^2.2.1"
+ultralytics = "^8.2.0"

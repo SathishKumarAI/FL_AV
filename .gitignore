@@ -18,6 +18,10 @@
 Fedml/
 flower/
 run/
+# data/data_bddk100
+data/bdd100k/
+data/bdd10k/
+my-project/data
 # test/
 
 # model/

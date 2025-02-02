@@ -1,13 +1,10 @@
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"  # Avoid OpenMP runtime conflicts
+
 import flwr as fl
 import torch
-import yaml
 import logging
-import sys
-import os
-from pathlib import Path
-from typing import Dict, Optional, Tuple, List
-from types import SimpleNamespace
-from collections import OrderedDict
+from ultralytics import YOLO  # Ultralytics YOLO API
 from flwr.common import (
     Code,
     EvaluateRes,
@@ -16,205 +13,141 @@ from flwr.common import (
     ndarrays_to_parameters,
     parameters_to_ndarrays,
 )
-import model.yolov5.train as train
-import temp.major.util as util
-import warnings
-import val
-import temp.major.flower.val_copy_test as val_copy_test
-import numpy as np
-import argparse
-from utils.general import (
-    LOGGER,
-    TQDM_BAR_FORMAT,
-    check_img_size,
-    check_dataset,
-    colorstr,
+from util import load_model, get_model_parameters, set_weights
+import signal
+import sys
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("client.log"),  # Log to a file
+        logging.StreamHandler()  # Log to console
+    ]
 )
-import traceback
-from utils.autobatch import check_train_batch_size
+
+from util import load_config
+
+# Load configuration
+config = load_config()
+
+# Access paths
+train_path = config["data"]["train"]
+val_path = config["data"]["val"]
+test_path = config["data"]["test"]
+
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-RANK = int(os.getenv("RANK", -1))
-LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))  # https://pytorch.org/docs/stable/elastic/run.html
-WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
-warnings.filterwarnings("ignore", category=UserWarning)
-from utils.loggers import LOGGERS, Loggers
-from utils.loggers.comet.comet_utils import check_comet_resume
-from utils.general import (
-    LOGGER,
-    TQDM_BAR_FORMAT,
-    check_amp,)
+
 class FlowerClient(fl.client.Client):
-    def __init__(self, device, args, model, opt, num_examples):
+    def __init__(self, device, data_config, num_examples, client_id):
         super().__init__()
         self.device = device
-        self.args = args
-        self.model = model
-        self.opt = opt
+        self.data_config = data_config
         self.num_examples = num_examples
-        logging.info("init_model_params")
+        self.client_id = client_id
+        self.model = load_model(device)  # Load YOLOv5 model
 
     def set_parameters(self, parameters):
-        """Set model parameters."""
+        """Set model parameters from Flower server."""
         try:
-            # Update local model parameters
-            logging.info("Setting model parameters")
-            t = parameters_to_ndarrays(parameters.parameters)
-            params_dict_with_keys = zip(list(self.model.state_dict().keys()), t)
-            state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict_with_keys})
-
-            # Load state dictionary into model
-            self.model.load_state_dict(state_dict, strict=True)
+            weights = parameters_to_ndarrays(parameters.parameters)
+            set_weights(self.model.model, weights)  # Set weights for Ultralytics YOLO model
         except Exception as e:
-            logging.error(f"An error occurred during setting parameters: {e}")
+            logging.error(f"Error setting parameters: {e}")
+            raise
 
-    def fit(self, parameters):
-        """Train parameters on the locally held training set."""
+    def fit(self, parameters, config):
+        """Train the model on the local dataset."""
         try:
-            logging.info("Fitting model parameters")
             self.set_parameters(parameters)
-            # Get hyperparameters for this round
-            batch_size = 16
-            results = train.run(
-                data=self.args.data_conf,
-                imgsz=1024,
-                weights='/home/siu856522160/major/test/yolov5/yolov5s.pt',
+            batch_size = config.get("batch_size", 16)  # Use config values
+            epochs = config.get("epochs", 2)  # Use config values
+
+            # Train the YOLOv5 model
+            results = self.model.train(
+                data=self.train_path,
+                epochs=epochs,
+                imgsz=640,
                 batch=batch_size,
-                epochs=2,
-                device=self.device
+                device=self.device,
+                save=True,  # Save checkpoints
+                save_period=1,  # Save after every epoch
             )
-            keys = ['mp', 'mr', 'map50', 'map', 'box', 'obj', 'cls']
-            result_dict = {k: v for k, v in zip(keys, results)}
-            parameters = util.get_model_parameters(self.model)
-            logging.info("Fitting model returns")
+
+            # Extract metrics from training results
+            metrics = {
+                "mp": results.results_dict["metrics/precision"],  # Precision
+                "mr": results.results_dict["metrics/recall"],  # Recall
+                "map50": results.results_dict["metrics/mAP_0.5"],  # mAP@0.5
+                "map": results.results_dict["metrics/mAP_0.5:0.95"],  # mAP@0.5:0.95
+            }
+
+            # Return training results to the server
             return FitRes(
-                status=Status(Code.OK, message="ok"),
-                parameters=parameters,
-                num_examples=self.num_examples.get("trainset", 0),
-                metrics=result_dict
+                status=Status(Code.OK, message="Training successful"),
+                parameters=get_model_parameters(self.model.model),  # Send updated model parameters
+                num_examples=self.num_examples["trainset"],  # Number of training examples
+                metrics=metrics,  # Training metrics
             )
         except Exception as e:
-            logging.error(f"An error occurred during fitting: {e}")
+            logging.error(f"Error during training: {e}")
             return FitRes(
-                status=Status(Code.FIT_NOT_IMPLEMENTED, message="ok"),
-                parameters=parameters,
-                num_examples=self.num_examples.get("trainset", 0),
-                metrics={}
+                status=Status(Code.FIT_NOT_IMPLEMENTED, message="Training failed"),
+                parameters=parameters,  # Return original parameters if training fails
+                num_examples=self.num_examples["trainset"],
+                metrics={},  # No metrics if training fails
             )
 
     def evaluate(self, parameters):
-        """Evaluate parameters on the locally held test set."""
+        """Evaluate the model on the local validation set."""
         try:
-            logging.info("Evaluating model parameters")
             self.set_parameters(parameters)
-            current_model_state_dict = self.model.state_dict()
-            loss = 0
-            accuracy = {}
-            data_dict = check_dataset(self.opt.data)
-            if data_dict is None:
-                logging.error("Dataset information not found.")
-                return EvaluateRes(
-                    status=Status(Code.EVALUATE_NOT_IMPLEMENTED, message="ok"),
-                    loss=loss,
-                    num_examples=self.num_examples.get("testset", 0),
-                    metrics={},
-                )
-            
-            # Print the dataset information
-            logging.info(f"Dataset information: {data_dict}")
+            with torch.no_grad():  # Disable gradient computation
+                results = self.model.val(data=self.data_config, imgsz=640, batch=16, device=self.device)
 
-            train_path = data_dict.get("train")
-            val_path = data_dict.get("val")
-            if train_path is None:
-                logging.error("Train path not found in data_dict.")
-            if val_path is None:
-                logging.error("Validation path not found in data_dict.")
-            names = data_dict.get("names")
-            if not names:
-                logging.error("Names not available in data_dict.")
+            # Extract metrics from evaluation results
+            metrics = {
+                "mp": results.results_dict["metrics/precision"],  # Precision
+                "mr": results.results_dict["metrics/recall"],  # Recall
+                "map50": results.results_dict["metrics/mAP_0.5"],  # mAP@0.5
+                "map": results.results_dict["metrics/mAP_0.5:0.95"],  # mAP@0.5:0.95
+            }
 
-            gs = max(int(self.model.stride.max()), 32)
-            imgsz = check_img_size(self.opt.imgsz, gs, floor=gs * 2)
-            amp = check_amp(self.model)  # check AMP
-
-            # Estimate batch size
-            batch_size = self.opt.batch_size
-            if batch_size == -1:  # single-GPU only, estimate best batch size
-                batch_size = check_train_batch_size(self.model, imgsz, amp)
-
-            single_cls = self.opt.single_cls
-            hyp_path = "/home/siu856522160/major/test/tt/yolov5/config/hyps/hyp.scratch-low.yaml"
-            hyp = util.load_hyp(hyp_path)
-            cache = False
-            rect = False
-            rank = 0
-            workers = 4
-            pad = 0.5
-            prefix = colorstr("val: ")
-
-            # Load validation data loader
-            val_loader = util.load_val_dataloader(val_path, imgsz, batch_size, gs, single_cls, hyp, cache, rect, rank, workers, pad, prefix)
-            logging.info("Validation data loader:", val_loader)
-
-            # Run validation
-            results, _, _ = val_copy_test.run(
-                data=data_dict,
-                imgsz=imgsz,
-                model=self.model,
-                iou_thres=0.60,
-                single_cls=self.opt.single_cls,
-                verbose=True,
-                plots=False,
-            )
-            logging.info("Evaluating results model parameters")
-
-            # Debugging statement
-            logging.info("Num Examples:", self.num_examples)
-
-            # Restore the model state
-            self.model.load_state_dict(current_model_state_dict)
-
-            # Create result dictionary
-            keys = ['mp', 'mr', 'map50', 'map', 'box', 'obj', 'cls']
-            result_dict = {k: v for k, v in zip(keys, results)}
-
+            # Return evaluation results to the server
             return EvaluateRes(
-                status=Status(Code.OK, message="ok"),
-                loss=loss,
-                num_examples=self.num_examples.get("testset", 0),
-                metrics=result_dict,
+                status=Status(Code.OK, message="Evaluation successful"),
+                loss=results.results_dict["metrics/loss"],  # Use actual loss from validation
+                num_examples=self.num_examples["testset"],  # Number of test examples
+                metrics=metrics,  # Evaluation metrics
             )
-
         except Exception as e:
-            logging.error(f"An error occurred during evaluation: {e}")
-            traceback.print_exc()  # Print the traceback information
+            logging.error(f"Error during evaluation: {e}")
             return EvaluateRes(
-                status=Status(Code.EVALUATE_NOT_IMPLEMENTED, message="ok"),
-                loss=loss,
-                num_examples=self.num_examples.get("testset", 0),
-                metrics={},
+                status=Status(Code.EVALUATE_NOT_IMPLEMENTED, message="Evaluation failed"),
+                loss=0.0,  # Default loss if evaluation fails
+                num_examples=self.num_examples["testset"],
+                metrics={},  # No metrics if evaluation fails
             )
+
+def signal_handler(sig, frame):
+    """Handle graceful shutdown."""
+    logging.info("Shutting down client gracefully...")
+    sys.exit(0)
 
 def main():
-    parser = argparse.ArgumentParser(description="Flower")
-    parser.add_argument(
-        "--client-id",
-        type=int,
-        default=0,
-        choices=range(0, 10),
-        required=False,
-        help="Specifies the artificial data partition of CIFAR10 to be used. Picks partition 0 by default",
-    )
-    args = parser.parse_args()
-    yaml_path = r"/home/siu856522160/major/test/tt/yolov5/config/config.yaml"
-    model_path = r"/home/siu856522160/major/test/yolov5/yolov5s.pt"
-    args = util.fit_config_file(yaml_path)
-    args = SimpleNamespace(**args)
-    IP_ADDRESS = "10.100.192.219:8080"
-    num_examples = {"trainset" : 80, "testset" : 80}
-    opt = train.parse_opt(True)
-    model = util.load_model(DEVICE)
-    client = FlowerClient(device=DEVICE, args=args, model=model, opt=opt, num_examples=num_examples )
-    fl.client.start_client(server_address=IP_ADDRESS, client=client)
+    """Start Flower client."""
+    signal.signal(signal.SIGINT, signal_handler)  # Handle Ctrl+C
+
+    data_config = "config/data.yaml"  # Path to dataset config
+    num_examples = {"trainset": 80, "testset": 80}  # Example dataset sizes
+    client_id = 0  # Unique ID for each client (can be passed as an argument)
+
+    # Create and start the Flower client
+    client = FlowerClient(device=DEVICE, data_config=data_config, num_examples=num_examples, client_id=client_id)
+
+    # Connect to the Flower server on port 8081
+    fl.client.start_client(server_address="0.0.0.0:8081", client=client)
 
 if __name__ == "__main__":
     main()
