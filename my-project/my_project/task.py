@@ -133,40 +133,53 @@ def set_weights(model, weights):
         return False
 
 # Function to train the model
-def train(model, trainloader, epochs, device):
+def train(model, device):
     try:
-        logger.info(f"Starting training for {epochs} epochs on device: {device}")
-        for epoch in range(epochs):
-            logger.info(f"Epoch {epoch + 1}/{epochs}...")
-            results = model.train(
-                data=trainloader.dataset.data_yaml,
-                epochs=1,  # Train one epoch at a time
-                device=device,
-                verbose=False
-            )
-            loss = results.results_dict.get("train/loss", float("inf"))
-            logger.info(f"Epoch {epoch + 1} completed. Loss: {loss:.4f}")
-
+        logger.info(f"Starting training for  epochs on device: {device}")
+        # for epoch in range(epochs):
+        # logger.info(f"Epoch {epoch + 1}/{epochs}...")
+        results = model.train(
+            data='data.yaml',
+            epochs=1,# Train one epoch at a time
+            imgsz=640,                
+            device=device,
+            verbose=False
+        )
+        # loss = results.results_dict.get("train/loss", float("inf"))
+        # logger.info(f"Epoch {epoch + 1} completed. Loss: {loss:.4f}")
+        # logger.info(f"Epoch {epoch + 1} completed.")
         logger.info("Training completed successfully.")
-        return loss
+        return results
     except Exception as e:
         logger.error(f"Training error: {str(e)}")
         return float("inf")
 
 # Function to test the model
-def test(model, testloader, device):
+def test(model, device):
     try:
         logger.info(f"Starting validation on device: {device}")
-        metrics = model.val(
-            data=testloader.dataset.data_yaml,
+        metrics = model.predict(
+            data='data_yaml',
             device=device,
-            verbose=False
+            verbose=False,
+            conf = 0.5
+            
         )
-        loss = metrics.results_dict.get('val/loss', float("inf"))
-        mAP = metrics.results_dict.get('metrics/mAP50-95', 0.0)
+        # loss = metrics.results_dict.get('val/loss', float("inf"))
+        # mAP = metrics.results_dict.get('metrics/mAP50-95', 0.0)
 
-        logger.info(f"Validation completed. Loss: {loss:.4f}, mAP50-95: {mAP:.4f}")
-        return loss, mAP
+        # logger.info(f"Validation completed. Loss: {loss:.4f}, mAP50-95: {mAP:.4f}")
+        
+        
+        return 
     except Exception as e:
         logger.error(f"Validation error: {str(e)}")
         return float("inf"), 0.0
+
+
+import yaml
+
+def load_config(config_path):
+    with open(config_path, 'r') as file:
+        config = yaml.safe_load(file)
+    return config
