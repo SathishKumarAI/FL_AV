@@ -79,7 +79,7 @@ class FlowerClient(Client):
             return FitRes(parameters=ins.parameters, num_examples=0, metrics={})
 
         # 3) Construct the data.yaml path and train
-        data_yaml_path = f"data/bdd100_batch/batch_{batch_id}/data.yaml"
+        data_yaml_path = f"bdd100_batch/batch_{batch_id}/data.yaml"
         logger.info(f"[Client] Training with data={data_yaml_path}")
 
         try:
@@ -143,7 +143,7 @@ class FlowerClient(Client):
             return EvaluateRes(loss=float("inf"), num_examples=0, metrics={})
 
         # 3) Evaluate on the data.yaml
-        data_yaml_path = f"data/bdd100_batch/batch_{batch_id}/data.yaml"
+        data_yaml_path = f"bdd100_batch/batch_{batch_id}/data.yaml"
         logger.info(f"[Client] Evaluating with data={data_yaml_path}")
 
         try:
