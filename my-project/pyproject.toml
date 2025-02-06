@@ -10,8 +10,6 @@ license = "Apache-2.0"
 dependencies = [
     "flwr[simulation]==1.13.1",
     "flwr-datasets[vision]==0.3.0",
-    "torch==2.0.0",
-    "torchvision==0.15.0",
     "ultralytics==8.0.0",
     "numpy>=1.21.0",
     "scipy>=1.7.0",

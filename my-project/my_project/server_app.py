@@ -36,8 +36,8 @@ class CustomBatchStrategy(FedAvg):
         """
         Called each round by Flower to decide which clients train (fit) and how.
         We'll:
-          1) Use FedAvg to get the default instructions,
-          2) For each selected client, inject a unique batch_id into fit_ins.config.
+        1) Use FedAvg to get the default instructions,
+        2) For each selected client, inject a unique batch_id into fit_ins.config.
         """
         logger.info(f"[Server] configure_fit: Round={server_round}. Assigning batch IDs to clients...")
 
@@ -103,9 +103,10 @@ def server_fn(_):
     # server_config = ServerConfig(num_rounds=3)
 
     logger.info("[Server] FedAvg-based strategy with dynamic batch assignment is ready.")
-    return ServerAppComponents(strategy=strategy, 
-                            #    config=server_config
-                               )
+    return ServerAppComponents(
+        strategy=strategy, 
+        # config=server_config
+                            )
 
 
 app = ServerApp(server_fn=server_fn)
