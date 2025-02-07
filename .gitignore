@@ -1,5 +1,5 @@
 # Images
-*.jpg
+# *.jpg
 *.jpeg
 *.png
 *.bmp
@@ -22,7 +22,7 @@ run/
 data/bdd100k/
 data/bdd10k/
 my-project/runs
-my-project/data
+# my-project/data
 # test/
 
 # model/

@@ -1,0 +1,19 @@
+path: C:\Users\sathish\Downloads\FL_ModelForAV\my-project\data\bdd100_batch\batch_12\
+train: train\images
+val: val\images
+test: test\images
+nc: 13
+names:
+- person
+- rider
+- car
+- truck
+- bus
+- train
+- motorcycle
+- bicycle
+- traffic light
+- traffic sign
+- trailer
+- other person
+- other vehicle
