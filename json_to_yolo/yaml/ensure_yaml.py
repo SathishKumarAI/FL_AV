@@ -44,6 +44,13 @@ def ensure_data_yaml_exists(batch_root):
                     'test': os.path.join(batch_path, 'test.txt'),
                     'names': CATEGORY_NAMES  # Now stored as a properly formatted list
                 }
+                # data_yaml_content = {
+                #     'path': os.path.abspath(batch_path),
+                #     'train': os.path.join(batch_path, 'train.txt'),
+                #     'val': os.path.join(batch_path, 'val.txt'),
+                #     'test': os.path.join(batch_path, 'test.txt'),
+                #     'names': CATEGORY_NAMES  # Now stored as a properly formatted list
+                # }
                 with open(data_yaml_path, 'w', encoding='utf-8') as f:
                     yaml.dump(data_yaml_content, f, default_flow_style=False, sort_keys=False)
                 logging.info(f"data.yaml updated successfully in {batch_path}.")
@@ -141,5 +148,5 @@ def process_batches(batch_root):
     print("Batch processing completed. Check logs/process.log for details.")
 
 if __name__ == "__main__":
-    batch_root = r"C:\Users\sathish\Downloads\FL_ModelForAV\my-project\data\bdd100_batch"  # Update this path if necessary
+    batch_root = r"C:\Users\sathish\Downloads\FL_ModelForAV\my-project\bdd100_mini"  # Update this path if necessary
     process_batches(batch_root)

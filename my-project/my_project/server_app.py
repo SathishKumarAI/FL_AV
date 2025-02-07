@@ -1,4 +1,5 @@
 import logging
+import os
 import warnings
 import torch
 
@@ -6,15 +7,34 @@ import flwr as fl
 from flwr.server import ServerApp, ServerConfig, ServerAppComponents
 from flwr.server.strategy import FedAvg
 from flwr.server.client_proxy import ClientProxy
-from flwr.common import Parameters, FitIns
+from flwr.common import Parameters, FitIns, EvaluateIns
 from typing import List, Tuple
-
+# Ensure Ultralytics does not use HUB (prevents import issues)
+os.environ["ULTRALYTICS_HUB"] = "0"
 from ultralytics import YOLO
 from my_project.task import get_weights, set_weights  # If needed, though we only do get_weights here
 from utils.logging_setup import configure_logging
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logger = configure_logging("server", "logs/server.log")
+
+# Model Path
+MODEL_PATH = "models/yolov5su.pt"
+MODEL_URL = "https://github.com/ultralytics/yolov5/releases/download/v6.0/yolov5su.pt"
+
+def download_model():
+    """Download YOLO model if not found."""
+    import urllib.request
+
+    logger.info(f"[Server] Model not found. Downloading from {MODEL_URL}...")
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)  # Ensure directory exists
+
+    try:
+        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+        logger.info("[Server] Model downloaded successfully.")
+    except Exception as e:
+        logger.error(f"[Server] Failed to download the model: {e}", exc_info=True)
+        raise RuntimeError("Server cannot start without a valid YOLO model.") from e
 
 
 class CustomBatchStrategy(FedAvg):
@@ -75,6 +95,42 @@ class CustomBatchStrategy(FedAvg):
                 updated_instructions.append((client_proxy, fit_ins))  # fallback
 
         return updated_instructions
+    
+    def configure_evaluate(
+            self,
+            server_round: int,
+            parameters: Parameters,
+            client_manager: fl.server.client_manager.ClientManager
+        ) -> List[Tuple[ClientProxy, EvaluateIns]]:
+        """
+        Configure evaluation by assigning batch_id to each client.
+        """
+        logger.info(f"[Server] configure_evaluate: Round={server_round}. Assigning batch IDs...")
+
+        # Use default Flower behavior
+        instructions = super().configure_evaluate(server_round, parameters, client_manager)
+
+        updated_instructions = []
+        for (client_proxy, eval_ins) in instructions:
+            eval_config = eval_ins.config  # This is a Dict[str, Scalar]
+            try:
+                # Assign batch_id (just increment from training)
+                batch_id_assigned = self.next_batch_id
+                self.next_batch_id += 1
+
+                eval_config["batch_id"] = batch_id_assigned  # Inject batch_id
+
+                logger.info(f"[Server] Assigned batch_id={batch_id_assigned} to client {client_proxy.cid} for evaluation.")
+
+                # Create new EvaluateIns with updated config
+                new_eval_ins = EvaluateIns(parameters=eval_ins.parameters, config=eval_config)
+                updated_instructions.append((client_proxy, new_eval_ins))
+
+            except Exception as e:
+                logger.error(f"[Server] Failed to assign batch_id for evaluation: {e}", exc_info=True)
+                updated_instructions.append((client_proxy, eval_ins))  # Fallback
+
+        return updated_instructions
 
 
 def server_fn(_):
@@ -83,9 +139,13 @@ def server_fn(_):
     """
     logger.info("[Server] Initializing YOLO model for FL...")
 
+    # Check if model exists, otherwise download
+    if not os.path.exists(MODEL_PATH):
+        download_model()
+
     # Load YOLO's initial model
     try:
-        model = YOLO("yolov5s.pt")
+        model = YOLO(MODEL_PATH)
         initial_weights = get_weights(model)
     except Exception as e:
         logger.error("[Server] Could not load YOLO model or extract weights!", exc_info=True)
