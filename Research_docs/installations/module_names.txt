@@ -1,0 +1,466 @@
+absl-py @ file:///C:/b/abs_5babsu7y5x/croot/absl-py_1666362945682/work
+
+addict
+aiofiles
+aiohttp @ file:///C:/b/abs_c4zmy2l696/croot/aiohttp_1670009573673/work
+
+aiohttp-cors
+aiosignal @ file:///tmp/build/80754af9/aiosignal_1637843061372/work
+
+alabaster
+amqp
+ansicon
+anyio
+appdirs
+argcomplete
+argon2-cffi
+argon2-cffi-bindings
+arrow
+asn1crypto
+asttokens @ file:///home/conda/feedstock_root/build_artifacts/asttokens_1670263926556/work
+
+astunparse
+async-lru
+async-timeout @ file:///C:/b/abs_43ozhz2a8g/croots/recipe/async-timeout_1664876362767/work
+
+attrdict
+attrs @ file:///C:/b/abs_09s3y775ra/croot/attrs_1668696195628/work
+
+Babel
+backcall @ file:///home/conda/feedstock_root/build_artifacts/backcall_1592338393461/work
+
+backports.functools-lru-cache @ file:///home/conda/feedstock_root/build_artifacts/backports.functools_lru_cache_1618230623929/work
+
+beautifulsoup4
+bidict
+billiard
+bleach
+blessed
+blinker
+blis
+boto3
+botocore
+Brotli
+brotlipy
+build
+CacheControl
+cachetools @ file:///tmp/build/80754af9/cachetools_1619597386817/work
+
+catalogue
+celery
+certifi @ file:///C:/b/abs_4a0polqwty/croot/certifi_1683875377622/work/certifi
+
+cffi @ file:///C:/b/abs_49n3v2hyhr/croot/cffi_1670423218144/work
+
+chardet
+charset-normalizer
+clearml
+cleo
+click
+click-didyoumean
+click-plugins
+click-repl
+clipboard
+cloudpickle
+coincurve
+colorama @ file:///home/conda/feedstock_root/build_artifacts/colorama_1666700638685/work
+
+coloredlogs
+colorful
+comet-ml
+confection
+configobj
+contourpy
+crashtest
+cryptography @ file:///C:/b/abs_5eksb2mt7h/croot/cryptography_1684947849797/work
+
+cupy
+cycler
+cymem
+cytoolz
+dacite
+debugpy @ file:///C:/ci_310/debugpy_1642079916595/work
+
+decorator @ file:///home/conda/feedstock_root/build_artifacts/decorator_1641555617451/work
+
+defusedxml
+Deprecated
+dill
+distlib
+dnspython
+docker
+docker-pycreds
+docutils
+dulwich
+dynaconf
+eciespy
+eth-hash
+eth-keys
+eth-typing
+eth-utils
+eventlet
+everett
+executing @ file:///home/conda/feedstock_root/build_artifacts/executing_1667317341051/work
+
+fastai
+fastapi
+fastcore
+fastdownload
+fastjsonschema
+fastprogress
+fastrlock
+fedml
+fiftyone
+fiftyone-brain
+fiftyone-db
+filelock
+Flask
+Flask-SocketIO
+flatbuffers
+flatten-json
+flower
+flwr
+fonttools
+fqdn
+frozenlist @ file:///C:/b/abs_2bb5uzghsi/croot/frozenlist_1670004511812/work
+
+fsspec
+ftfy
+furl
+future
+gast
+gensim
+gevent
+geventhttpclient
+gitdb
+GitPython
+glob2
+globox
+google-api-core
+google-api-python-client
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+google-pasta
+googleapis-common-protos
+gpustat
+GPUtil
+graphql-core
+graphviz
+greenlet
+grpcio @ file:///C:/b/abs_ccut8qek12/croot/grpc-suite_1681912611694/work
+
+h11
+h2
+h5py
+hpack
+html5lib
+httpcore
+httplib2
+httpx
+humanfriendly
+humanize
+hypercorn
+hyperframe
+idna @ file:///C:/b/abs_bdhbebrioa/croot/idna_1666125572046/work
+
+imageio
+imagesize
+importlib-metadata @ file:///home/conda/feedstock_root/build_artifacts/importlib-metadata_1672612343532/work
+
+installer
+ipykernel @ file:///D:/bld/ipykernel_1655369313836/work
+
+ipython @ file:///D:/bld/ipython_1676047671725/work
+
+isoduration
+iterators
+itsdangerous
+jaraco.classes
+jedi @ file:///home/conda/feedstock_root/build_artifacts/jedi_1669134318875/work
+
+Jinja2
+jinxed
+jmespath
+joblib
+json5
+jsonpointer
+jsonschema
+jupyter-events
+jupyter-lsp
+jupyter_client @ file:///home/conda/feedstock_root/build_artifacts/jupyter_client_1676579893731/work
+
+jupyter_core @ file:///D:/bld/jupyter_core_1675110116927/work
+
+jupyter_server
+jupyter_server_terminals
+jupyterlab
+jupyterlab-pygments
+jupyterlab_server
+kaleido
+keras
+keyring
+kiwisolver
+kombu
+langcodes
+lazy_loader
+libclang
+lightning-utilities
+lockfile
+Markdown @ file:///C:/b/abs_98lv_ucina/croot/markdown_1671541919225/work
+
+markdown-it-py
+MarkupSafe @ file:///C:/ci/markupsafe_1654508036328/work
+
+matplotlib
+matplotlib-inline @ file:///home/conda/feedstock_root/build_artifacts/matplotlib-inline_1660814786464/work
+
+mdurl
+mistune
+mkl-fft
+mkl-random @ file:///C:/ci_310/mkl_random_1643050563308/work
+
+mkl-service
+mnist
+mongoengine
+more-itertools
+motor
+mpmath
+msgpack
+multidict @ file:///C:/b/abs_6cx_8w3cv2/croot/multidict_1665674238352/work
+
+multiprocess
+murmurhash
+nbclient
+nbconvert
+nbformat
+ndjson
+nest-asyncio @ file:///home/conda/feedstock_root/build_artifacts/nest-asyncio_1664684991461/work
+
+networkx
+notebook_shim
+ntplib
+numpy
+nvflare
+nvidia-ml-py
+nvidia-ml-py3
+oauthlib @ file:///C:/b/abs_44riqpe5gg/croot/oauthlib_1679489644705/work
+
+onnx
+onnx-simplifier
+onnxruntime
+opencensus
+opencensus-context
+opencv-python
+opencv-python-headless
+openfl
+opt-einsum
+orderedmultidict
+overrides
+packaging @ file:///home/conda/feedstock_root/build_artifacts/packaging_1673482170163/work
+
+paho-mqtt
+pandas
+pandocfilters
+parso @ file:///home/conda/feedstock_root/build_artifacts/parso_1638334955874/work
+
+pathlib2
+pathtools
+pathy
+patool
+pdfminer.six
+pdfplumber
+pefile
+pexpect
+pickleshare @ file:///home/conda/feedstock_root/build_artifacts/pickleshare_1602536217715/work
+
+Pillow
+pkginfo
+platformdirs
+plotly
+poetry
+poetry-core
+poetry-plugin-export
+pprintpp
+preshed
+priority
+progressbar
+prometheus-client
+promise
+prompt-toolkit @ file:///home/conda/feedstock_root/build_artifacts/prompt-toolkit_1670414775770/work
+
+protobuf
+psutil @ file:///C:/Windows/Temp/abs_b2c2fd7f-9fd5-4756-95ea-8aed74d0039flsd9qufz/croots/recipe/psutil_1656431277748/work
+
+ptyprocess
+pure-eval @ file:///home/conda/feedstock_root/build_artifacts/pure_eval_1642875951954/work
+
+py-spy
+pyasn1 @ file:///Users/ktietz/demo/mc3/conda-bld/pyasn1_1629708007385/work
+
+pyasn1-modules
+pycocotools
+pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+
+pycryptodome
+pydantic
+Pygments @ file:///home/conda/feedstock_root/build_artifacts/pygments_1672682006896/work
+
+PyJWT @ file:///C:/ci/pyjwt_1657529477795/work
+
+pymongo
+PyNaCl
+pynvml
+pyOpenSSL @ file:///C:/b/abs_552w85x1jz/croot/pyopenssl_1677607703691/work
+
+pyparsing
+PyPDF2
+pyperclip
+pyproject_hooks
+pyreadline3
+pyrsistent
+PySocks @ file:///C:/ci_310/pysocks_1642089375450/work
+
+python-box
+python-dateutil @ file:///home/conda/feedstock_root/build_artifacts/python-dateutil_1626286286081/work
+
+python-engineio
+python-json-logger
+python-rapidjson
+python-socketio
+pytorch-lightning
+pytz
+pytz-deprecation-shim
+PyWavelets
+pywin32
+pywin32-ctypes
+pywinpty
+PyYAML
+pyzmq
+rapidfuzz
+ray
+redis
+regex
+requests @ file:///C:/b/abs_41owkd5ymz/croot/requests_1682607524657/work
+
+requests-oauthlib
+requests-toolbelt
+retrying
+rfc3339-validator
+rfc3986
+rfc3986-validator
+rich
+rsa @ file:///tmp/build/80754af9/rsa_1614366226499/work
+
+s3transfer
+scikit-image
+scikit-learn
+scipy
+seaborn
+semantic-version
+Send2Trash
+sentry-sdk
+setproctitle
+shellingham
+shortuuid
+simplejson
+six @ file:///home/conda/feedstock_root/build_artifacts/six_1620240208055/work
+
+sklearn
+smart-open
+smmap
+sniffio
+snowballstemmer
+sortedcontainers
+soupsieve
+spacy
+spacy-legacy
+spacy-loggers
+Sphinx
+sphinx-rtd-theme
+sphinxcontrib-applehelp
+sphinxcontrib-devhelp
+sphinxcontrib-htmlhelp
+sphinxcontrib-jquery
+sphinxcontrib-jsmath
+sphinxcontrib-qthelp
+sphinxcontrib-serializinghtml
+SQLAlchemy
+srsly
+sse-starlette
+sseclient-py
+stack-data @ file:///home/conda/feedstock_root/build_artifacts/stack_data_1669632077133/work
+
+starlette
+strawberry-graphql
+sympy
+tabulate
+tenacity
+tensorboard
+tensorboard-data-server
+tensorboard-plugin-wit @ file:///C:/tf/b/tensorboard-plugin-wit_1660162132996/work/tensorboard_plugin_wit-1.8.1-py3-none-any.whl
+
+tensorboardX
+tensorflow
+tensorflow-estimator
+tensorflow-intel
+tensorflow-io-gcs-filesystem
+termcolor
+terminado
+thinc
+thop
+threadpoolctl
+tifffile
+tinycss2
+toml
+tomli
+tomlkit
+toolz
+torch
+torchaudio
+torchmetrics
+torchvision
+tornado @ file:///D:/bld/tornado_1656937966227/work
+
+tqdm
+traitlets @ file:///home/conda/feedstock_root/build_artifacts/traitlets_1675110562325/work
+
+tritonclient
+trove-classifiers
+typer
+typing_extensions @ file:///home/conda/feedstock_root/build_artifacts/typing_extensions_1665144421445/work
+
+tzdata
+tzlocal
+ultralytics
+universal-analytics-python3
+uri-template
+uritemplate
+urllib3
+uvicorn
+vine
+virtualenv
+voxel51-eta
+Wand
+wandb
+wasabi
+wcwidth @ file:///home/conda/feedstock_root/build_artifacts/wcwidth_1673864653149/work
+
+webcolors
+webencodings
+websocket-client
+Werkzeug
+wget
+win-inet-pton @ file:///C:/ci_310/win_inet_pton_1642658466512/work
+
+wincertstore
+wrapt
+wsproto
+wurlitzer
+xmltodict
+yarl @ file:///C:/Users/BUILDE~1/AppData/Local/Temp/abs_e5nlunspj6/croots/recipe/yarl_1661437086516/work
+
+zipp @ file:///home/conda/feedstock_root/build_artifacts/zipp_1677313463193/work
+
+zope.event
+zope.interface

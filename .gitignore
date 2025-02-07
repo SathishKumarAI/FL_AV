@@ -1,0 +1,173 @@
+# Images
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.tif
+*.tiff
+*.heic
+*.JPG
+*.JPEG
+*.PNG
+*.BMP
+*.TIF
+*.TIFF
+*.HEIC
+
+# yolov5_test/
+Fedml/
+flower/
+run/
+# data/data_bddk100
+data/bdd100k/
+data/bdd10k/
+my-project/runs
+my-project/data
+# test/
+
+# model/
+# Videos
+*.mp4
+*.mov
+*.MOV
+*.avi
+
+# JSON files (except for setup.cfg and cfg/yolov3*.cfg)
+*.json
+!/setup.cfg
+!/cfg/yolov3*.cfg
+
+# Large files (use Git LFS for files larger than 50MB)
+*.{mp4,mov,avi,data,json,mat,weights,pt,pb,onnx,engine,mlmodel,torchscript,tflite,h5} diff=lfs merge=lfs -text
+
+# Ignore all files larger than 50MB (use Git LFS for large files)
+* diff=lfs merge=lfs -text
+
+# Allow .ipynb files (Jupyter Notebook) of any size
+!*.ipynb
+
+
+coco128.zip
+mpich-4.2.0rc2.tar.gz
+mpich-4.2.0rc2.tar.gz:Zone.Identifier
+
+# CSV files with names starting with "results"
+results*.csv
+
+# Datasets
+coco/
+coco128/
+VOC/
+
+# MATLAB files (except for targets*.mat)
+*.m~
+*.mat
+!/targets*.mat
+
+# GitHub Python GitIgnore
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+/wandb/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Translations
+*.mo
+*.pot
+
+# Django and Flask
+*.log
+local_settings.py
+instance/
+.webassets-cache
+
+# Scrapy
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+.venv*
+venv*/
+ENV*/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+
+# macOS-specific
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+Icon?
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
