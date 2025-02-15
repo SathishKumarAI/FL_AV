@@ -17,7 +17,7 @@
 # Ignore all large files above 100MB to prevent GitHub push issues
 *.[0-9][0-9][0-9]MB
 *.[0-9][0-9][0-9][0-9]MB
-logs/yolo_conversion.log
+# logs/yolo_conversion.log
 # json_to_yolo/bdd100k_labels_json/yolo_conversion_json_to_yolov5_100k.log
 
 # yolov5_test/
@@ -177,8 +177,5 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
-json_to_yolo/bdd100k_labels_json/yolo_conversion_json_to_yolov5_100k.log
-*.[0-9][0-9][0-9]MB
-*.[0-9][0-9][0-9][0-9]MB
-logs/yolo_conversion.log
+
 

@@ -1,0 +1,6 @@
+Processing folder: val
+Loaded 10000 annotations.
+Folder: val
+Saved files: 10000
+Skipped files: 0
+
