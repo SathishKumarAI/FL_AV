@@ -1,8 +1,3 @@
-2025-02-15 22:20:09,042 - INFO - Test log entry
-2025-02-15 22:20:09,050 - DEBUG - Debug level message
-2025-02-15 22:20:09,054 - ERROR - This is an error message
-2025-02-15 22:20:09,057 - INFO - This is an info message
-2025-02-15 22:20:40,666 - INFO - Test log entry
-2025-02-15 22:20:40,669 - DEBUG - Debug level message
-2025-02-15 22:20:40,669 - ERROR - This is an error message
-2025-02-15 22:20:40,681 - INFO - This is an info message
+version https://git-lfs.github.com/spec/v1
+oid sha256:39695776443e9f3b6a69f2f55d733e48e47cc0ffef1afcdf08c537dd7f662585
+size 444
