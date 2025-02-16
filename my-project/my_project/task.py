@@ -52,7 +52,7 @@ def validate_data_structure(batch_id, split="train"):
     :param split:    "train", "val", or "test".
     :return:         True if valid structure, else False.
     """
-    base_path = Path(f"C:/Users/sathish/Downloads/FL_ModelForAV/my-project/data/bdd100_batch/batch_{batch_id}")
+    base_path = Path(f"C:/Users/sathish/Downloads/FL_ModelForAV/my-project/batch/batch_{batch_id}")
     split_path = base_path / split
     logger.info(f"Validating dataset structure for batch {batch_id}, split: {split}")
 

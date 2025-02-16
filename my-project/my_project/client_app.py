@@ -122,7 +122,7 @@ class FlowerClient(Client):
             )
 
         # Construct training data path
-        data_yaml_path = f"data/bdd100_mini/batch_{batch_id}/data.yaml"
+        data_yaml_path = f"batch/batch_{batch_id}/data.yaml"
         if not os.path.exists(data_yaml_path):
             logger.error(f"[Client] Training data.yaml not found: {data_yaml_path}")
             return FitRes(
@@ -216,7 +216,7 @@ class FlowerClient(Client):
         )
 
         # 3) Evaluate on the data.yaml
-        data_yaml_path = f"bdd100_batch/batch_{batch_id}/data.yaml"
+        data_yaml_path = f"batch/batch_{batch_id}/data.yaml"
         if not os.path.exists(data_yaml_path):
             logger.error(f"[Client] Evaluation data.yaml not found: {data_yaml_path}")
             return EvaluateRes(
