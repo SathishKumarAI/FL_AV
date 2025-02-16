@@ -1,0 +1,135 @@
+2025-01-26 15:24:57,818 [INFO] Starting Flower server via `flower-superlink`
+2025-01-26 15:24:58,229 [ERROR] Failed to start Flower server: Command '['flower-superlink', '--insecure', '--port=8081']' returned non-zero exit status 2.
+2025-01-26 15:25:24,404 [INFO] Starting Flower server via `flower-superlink`
+2025-01-26 15:25:24,803 [ERROR] Failed to start Flower server: Command '['flower-superlink', '--insecure', '--port=8080']' returned non-zero exit status 2.
+2025-01-26 15:26:20,418 [INFO] Starting Flower server via `flower-superlink`
+2025-01-26 18:46:10,108 - root - INFO - Starting server with config: Namespace(server_address='0.0.0.0:8080', rounds=10, min_clients=3)
+2025-01-26 18:46:10,108 - flwr - WARNING - DEPRECATED FEATURE: flwr.server.start_server() is deprecated.
+	Instead, use the `flower-superlink` CLI command to start a SuperLink as shown below:
+
+		$ flower-superlink --insecure
+
+	To view usage and all available options, run:
+
+		$ flower-superlink --help
+
+	Using `start_server()` is deprecated.
+
+            This is a deprecated feature. It will be removed
+            entirely in future versions of Flower.
+        
+2025-01-26 18:46:10,108 - flwr - INFO - Starting Flower server, config: num_rounds=10, no round_timeout
+2025-01-26 19:02:17,627 - SERVER - INFO - Initializing FedAvg strategy
+2025-01-26 19:02:17,627 - SERVER - WARNING - DEPRECATED FEATURE: flwr.server.start_server() is deprecated.
+	Instead, use the `flower-superlink` CLI command to start a SuperLink as shown below:
+
+		$ flower-superlink --insecure
+
+	To view usage and all available options, run:
+
+		$ flower-superlink --help
+
+	Using `start_server()` is deprecated.
+
+            This is a deprecated feature. It will be removed
+            entirely in future versions of Flower.
+        
+2025-01-26 19:02:17,627 - SERVER - INFO - Starting Flower server, config: num_rounds=10, no round_timeout
+2025-01-26 19:02:17,627 - SERVER - INFO - Flower ECE: gRPC server running (10 rounds), SSL is disabled
+2025-01-26 19:02:17,627 - SERVER - INFO - [INIT]
+2025-01-26 19:02:17,627 - SERVER - INFO - Requesting initial parameters from one random client
+2025-01-26 19:25:16,679 - SERVER - INFO - Initializing FedAvg strategy
+2025-01-26 19:25:16,679 - SERVER - WARNING - DEPRECATED FEATURE: flwr.server.start_server() is deprecated.
+	Instead, use the `flower-superlink` CLI command to start a SuperLink as shown below:
+
+		$ flower-superlink --insecure
+
+	To view usage and all available options, run:
+
+		$ flower-superlink --help
+
+	Using `start_server()` is deprecated.
+
+            This is a deprecated feature. It will be removed
+            entirely in future versions of Flower.
+        
+2025-01-26 19:25:16,680 - SERVER - INFO - Starting Flower server, config: num_rounds=10, no round_timeout
+2025-01-26 19:25:16,687 - SERVER - INFO - Flower ECE: gRPC server running (10 rounds), SSL is disabled
+2025-01-26 19:25:16,687 - SERVER - INFO - [INIT]
+2025-01-26 19:25:16,687 - SERVER - INFO - Requesting initial parameters from one random client
+2025-01-26 20:47:47,155 - SERVER - INFO - Initializing FedAvg strategy
+2025-01-26 20:47:47,155 - SERVER - WARNING - DEPRECATED FEATURE: flwr.server.start_server() is deprecated.
+	Instead, use the `flower-superlink` CLI command to start a SuperLink as shown below:
+
+		$ flower-superlink --insecure
+
+	To view usage and all available options, run:
+
+		$ flower-superlink --help
+
+	Using `start_server()` is deprecated.
+
+            This is a deprecated feature. It will be removed
+            entirely in future versions of Flower.
+        
+2025-01-26 20:47:47,155 - SERVER - INFO - Starting Flower server, config: num_rounds=10, no round_timeout
+2025-01-26 20:47:47,155 - SERVER - INFO - Flower ECE: gRPC server running (10 rounds), SSL is disabled
+2025-01-26 20:47:47,155 - SERVER - INFO - [INIT]
+2025-01-26 20:47:47,155 - SERVER - INFO - Requesting initial parameters from one random client
+2025-01-26 20:51:37,561 - SERVER - INFO - Initializing FedAvg strategy
+2025-01-26 20:51:37,561 - SERVER - WARNING - DEPRECATED FEATURE: flwr.server.start_server() is deprecated.
+	Instead, use the `flower-superlink` CLI command to start a SuperLink as shown below:
+
+		$ flower-superlink --insecure
+
+	To view usage and all available options, run:
+
+		$ flower-superlink --help
+
+	Using `start_server()` is deprecated.
+
+            This is a deprecated feature. It will be removed
+            entirely in future versions of Flower.
+        
+2025-01-26 20:51:37,561 - SERVER - INFO - Starting Flower server, config: num_rounds=10, no round_timeout
+2025-01-26 20:51:37,580 - SERVER - INFO - Flower ECE: gRPC server running (10 rounds), SSL is disabled
+2025-01-26 20:51:37,580 - SERVER - INFO - [INIT]
+2025-01-26 20:51:37,580 - SERVER - INFO - Requesting initial parameters from one random client
+2025-01-26 21:14:14,168 - SERVER - INFO - Initializing FedAvg strategy
+2025-01-26 21:14:14,168 - SERVER - WARNING - DEPRECATED FEATURE: flwr.server.start_server() is deprecated.
+	Instead, use the `flower-superlink` CLI command to start a SuperLink as shown below:
+
+		$ flower-superlink --insecure
+
+	To view usage and all available options, run:
+
+		$ flower-superlink --help
+
+	Using `start_server()` is deprecated.
+
+            This is a deprecated feature. It will be removed
+            entirely in future versions of Flower.
+        
+2025-01-26 21:14:14,168 - SERVER - INFO - Starting Flower server, config: num_rounds=10, no round_timeout
+2025-01-26 21:14:14,191 - SERVER - INFO - Flower ECE: gRPC server running (10 rounds), SSL is disabled
+2025-01-26 21:14:14,192 - SERVER - INFO - [INIT]
+2025-01-26 21:14:14,192 - SERVER - INFO - Requesting initial parameters from one random client
+2025-01-26 21:20:55,719 - SERVER - INFO - Initializing FedAvg strategy
+2025-01-26 21:20:55,719 - SERVER - WARNING - DEPRECATED FEATURE: flwr.server.start_server() is deprecated.
+	Instead, use the `flower-superlink` CLI command to start a SuperLink as shown below:
+
+		$ flower-superlink --insecure
+
+	To view usage and all available options, run:
+
+		$ flower-superlink --help
+
+	Using `start_server()` is deprecated.
+
+            This is a deprecated feature. It will be removed
+            entirely in future versions of Flower.
+        
+2025-01-26 21:20:55,723 - SERVER - INFO - Starting Flower server, config: num_rounds=10, no round_timeout
+2025-01-26 21:20:55,723 - SERVER - INFO - Flower ECE: gRPC server running (10 rounds), SSL is disabled
+2025-01-26 21:20:55,723 - SERVER - INFO - [INIT]
+2025-01-26 21:20:55,723 - SERVER - INFO - Requesting initial parameters from one random client

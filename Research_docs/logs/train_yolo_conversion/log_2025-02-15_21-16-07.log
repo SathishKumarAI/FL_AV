@@ -1,0 +1,4 @@
+2025-02-15 21:16:07,150 - INFO - Training has started.
+2025-02-15 21:16:07,151 - WARNING - Potential issue with dataset size.
+2025-02-15 21:16:07,153 - ERROR - An error occurred during training!
+2025-02-15 21:16:07,154 - CRITICAL - Critical issue - out of memory!

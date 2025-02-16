@@ -1,0 +1,8 @@
+2025-02-15 22:20:09,042 - INFO - Test log entry
+2025-02-15 22:20:09,050 - DEBUG - Debug level message
+2025-02-15 22:20:09,054 - ERROR - This is an error message
+2025-02-15 22:20:09,057 - INFO - This is an info message
+2025-02-15 22:20:40,666 - INFO - Test log entry
+2025-02-15 22:20:40,669 - DEBUG - Debug level message
+2025-02-15 22:20:40,669 - ERROR - This is an error message
+2025-02-15 22:20:40,681 - INFO - This is an info message

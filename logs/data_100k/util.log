@@ -1,8 +1,0 @@
-2025-01-26 15:08:04,094 [ERROR] Error killing process using port 8081: invalid attr name 'connections'
-2025-01-26 15:08:04,094 [INFO] Loading YOLOv5 model using Ultralytics YOLO
-2025-01-26 15:08:04,362 [ERROR] Failed to start Flower server: FedAvg.__init__() got an unexpected keyword argument 'round_timeout'
-2025-01-26 15:08:04,362 [ERROR] An error occurred: FedAvg.__init__() got an unexpected keyword argument 'round_timeout'
-2025-01-26 15:10:53,464 [ERROR] Error killing process using port 8081: invalid attr name 'connections'
-2025-01-26 15:10:53,464 [INFO] Loading YOLOv5 model using Ultralytics YOLO
-2025-01-26 15:10:53,621 [ERROR] Failed to start Flower server: FedAvg.__init__() got an unexpected keyword argument 'round_timeout'
-2025-01-26 15:10:53,621 [ERROR] An error occurred: FedAvg.__init__() got an unexpected keyword argument 'round_timeout'
