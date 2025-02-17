@@ -12,30 +12,22 @@ from typing import List, Tuple
 # Ensure Ultralytics does not use HUB (prevents import issues)
 os.environ["ULTRALYTICS_HUB"] = "0"
 from ultralytics import YOLO
-from my_project.task import get_weights, set_weights  # If needed, though we only do get_weights here
+from my_project.task import  download_model  # If needed, though we only do get_weights here
+from my_project.get_set_model import get_weights, set_weights
+
 from utils.logging_setup import configure_logging
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logger = configure_logging("server", "logs/server.log")
 
-# Model Path
-MODEL_PATH = "models/yolov5su.pt"
-MODEL_URL = "https://github.com/ultralytics/yolov5/releases/download/v6.0/yolov5su.pt"
-
-def download_model():
-    """Download YOLO model if not found."""
-    import urllib.request
-
-    logger.info(f"[Server] Model not found. Downloading from {MODEL_URL}...")
-    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)  # Ensure directory exists
-
-    try:
-        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-        logger.info("[Server] Model downloaded successfully.")
-    except Exception as e:
-        logger.error(f"[Server] Failed to download the model: {e}", exc_info=True)
-        raise RuntimeError("Server cannot start without a valid YOLO model.") from e
-
+import os
+import urllib.request
+import logging
+# Correct Model Path and URL
+MODEL_PATH = "models/yolov8s.pt"
+MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s.pt"
+# Setup logger
+logger = logging.getLogger("server")
 
 class CustomBatchStrategy(FedAvg):
     """

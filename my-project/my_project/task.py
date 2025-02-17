@@ -14,6 +14,33 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 logger = configure_logging("task", "logs/task.log")
 
+import os
+import urllib.request
+import logging
+
+
+# Correct Model Path and URL
+MODEL_PATH = "models/yolov8s.pt"
+MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s.pt"
+
+def download_model():
+    """Download YOLO model if not found."""
+    logger.info(f"[Server] Checking if model exists at {MODEL_PATH}...")
+
+    # Ensure directory exists
+    model_dir = os.path.dirname(MODEL_PATH) or "."  # Use current directory if empty
+    os.makedirs(model_dir, exist_ok=True)
+
+    if not os.path.exists(MODEL_PATH):  # Check before downloading
+        logger.info(f"[Server] Model not found. Downloading from {MODEL_URL}...")
+        try:
+            urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+            logger.info("[Server] Model downloaded successfully.")
+        except Exception as e:
+            logger.error(f"[Server] Failed to download the model from {MODEL_URL}: {e}", exc_info=True)
+            raise RuntimeError(f"Server cannot start without a valid YOLO model at {MODEL_PATH}.") from e
+    else:
+        logger.info(f"[Server] Model already exists at {MODEL_PATH}, skipping download.")
 
 # ----------------------------------------------------------
 # 1) Configuration Loader
@@ -106,66 +133,6 @@ def get_optimal_batch_size():
         return 4
 
 
-# ----------------------------------------------------------
-# 4) YOLO Weight Extraction and Loading
-# ----------------------------------------------------------
-def get_weights(model: YOLO):
-    """
-    Extract YOLO model weights as a list of NumPy arrays.
-    :param model: A loaded ultralytics.YOLO model instance.
-    :return:      A list of NumPy arrays representing each parameter tensor.
-    """
-    try:
-        logger.debug("Extracting YOLOv5 model weights...")
-        weights_list = []
-        for param in model.model.parameters():
-            # Move to CPU before converting to numpy
-            weights_list.append(param.detach().cpu().numpy())
-        logger.debug(f"Extracted {len(weights_list)} weight tensors from model.")
-        return weights_list
-    except Exception as e:
-        logger.error(f"get_weights error: {e}", exc_info=True)
-        return []
-
-
-def set_weights(model: YOLO, parameters):
-    """
-    Load a list of NumPy arrays (parameters) into the YOLO model's state_dict.
-    :param model:       A loaded ultralytics.YOLO model instance.
-    :param parameters:  A list of NumPy arrays that match model.model.state_dict() shape.
-    :return:            Boolean indicating success or failure.
-    """
-    try:
-        logger.debug("Setting YOLOv5 model weights...")
-        state_dict = model.model.state_dict()
-        new_state_dict = OrderedDict()
-
-        idx = 0
-        for name, param in state_dict.items():
-            if idx < len(parameters):
-                w = parameters[idx]
-                # Check shape
-                if param.shape == w.shape:
-                    new_state_dict[name] = torch.from_numpy(w).to(param.device)
-                else:
-                    logger.warning(
-                        f"Shape mismatch for {name}: expected {param.shape}, got {w.shape}. "
-                        "Keeping original parameter."
-                    )
-                    new_state_dict[name] = param
-                idx += 1
-            else:
-                # If fewer weights than state dict items
-                logger.warning(f"No weight found for layer {name}, retaining original.")
-                new_state_dict[name] = param
-
-        # Load updated state dict
-        model.model.load_state_dict(new_state_dict, strict=False)
-        logger.debug("Model weights updated successfully.")
-        return True
-    except Exception as e:
-        logger.error(f"set_weights error: {e}", exc_info=True)
-        return False
 
 
 # ----------------------------------------------------------

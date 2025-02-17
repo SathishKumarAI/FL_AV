@@ -28,10 +28,10 @@ serverapp = "my_project.server_app:app"
 clientapp = "my_project.client_app:app"
 
 [tool.flwr.app.config]
-num_server_rounds = 5
+num_server_rounds = 2
 fraction_fit = 0.75
-local_epochs = 3
-min_clients = 4  # Ensures clarity on the required minimum clients
+local_epochs = 1
+min_clients = 3  # Ensures clarity on the required minimum clients
 
 [tool.flwr.federations]
 default = "local-simulation"
