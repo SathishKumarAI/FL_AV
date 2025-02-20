@@ -228,18 +228,39 @@ class FlowerClient(Client):
         
         batch_id = ins.config.get("batch_id", None)
 
-        if batch_id is None:
-            logger.warning("[Client] EVAL: No batch_id received, using stored batch_id.")
-            batch_id = self.batch_id  # Use stored batch ID as fallback
+        # # Use stored batch_id as fallback if available
+        # if batch_id is None:
+        #     logger.warning("[Client] No batch_id received, using stored batch_id.")
+        #     batch_id = getattr(self, "batch_id", None)
 
-        if batch_id is None:
-            logger.error("[Client] EVAL: No batch_id found, cannot proceed.")
-            return EvaluateRes(
-                loss=float("inf"),
+        # # Validate batch_id
+        # if batch_id is None or not self._validate_batch_id(batch_id):
+        #     logger.error(f"[Client] Invalid batch_id: {batch_id}. Expected range: {self.batch_id_range}.")
+        #     return FitRes(  # or EvaluateRes for evaluate method
+        #         parameters=ins.parameters,
+        #         num_examples=1,
+        #         metrics={},
+        #         status=Status(code=Code.FIT_NOT_IMPLEMENTED, message=f"Invalid batch_id: {batch_id}"),
+        #     )
+
+        # Store valid batch_id for future use
+        self.batch_id = batch_id
+
+        try:
+            self.batch_id = ins.config["batch_id"]        # If missing, KeyError
+            local_epochs = ins.config["local_epochs"] # If missing, KeyError
+            logger.info(
+                f"[Client] Starting local training with batch_id={self.batch_id}, local_epochs={local_epochs}"
+            )
+        except KeyError as ke:
+            logger.error(f"[Client] Missing key in FitIns.config: {ke}", exc_info=True)
+            return FitRes(
+                parameters=ins.parameters,
                 num_examples=1,
                 metrics={},
-                status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="Missing batch_id in evaluation config"),
+                status=Status(code=Code.FIT_NOT_IMPLEMENTED, message="Missing batch_id or local_epochs in training config"),
             )
+
 
         # 3) Evaluate on the data.yaml
         data_yaml_path = f"batch/batch_{batch_id}/data.yaml"
