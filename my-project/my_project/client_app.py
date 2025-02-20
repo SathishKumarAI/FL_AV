@@ -4,12 +4,12 @@ import warnings
 import torch
 from flwr.common import Code, Status
 from flwr.client import ClientApp, Client
-from flwr.common import Context, FitIns, FitRes, EvaluateIns, EvaluateRes, Parameters
+from flwr.common import Context, FitIns, FitRes, EvaluateIns, EvaluateRes, Parameters, RecordSet
 
 from ultralytics import YOLO
 from my_project.task import  download_model  # Custom YOLO utility functions
 import urllib
-from my_project.get_set_model import get_weights, set_weights
+from my_project.get_set_model import get_weights, load_yolo_model, set_weights
 from utils.logging_setup import configure_logging
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -17,19 +17,23 @@ logger = configure_logging("client", "logs/client.log")
 
 
 class FlowerClient(Client):
-    """
-    A low-level Flower Client that uses YOLOv5 for training/validation.
-    It receives `batch_id` and other config from the server's FitIns.config/EvaluateIns.config,
-    thereby referencing a unique data.yaml each round.
-    """
 
-    def __init__(self, model_path: str = "models/yolov8s.pt"):
-        """
-        :param model_path: Path to your YOLOv5 .pt weights (e.g., 'models/yolov8s.pt').
-        """
+    def __init__(self,
+                model_path: str ,
+                # = "models/yolov8s.pt",
+                client_state : RecordSet,
+                local_epochs : int,
+                batch_id_range: tuple = (1, 10),  # Default range for batch IDs
+                ):
+    
         super().__init__()
         self.model_path = model_path
-
+        # self.yolo = YOLO(self.model_path)
+        # self.model = self.yolo.model
+        self.client_state = client_state
+        self.local_epochs = local_epochs
+        self.batch_id_range = batch_id_range
+        
         # Decide GPU/CPU
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -39,30 +43,45 @@ class FlowerClient(Client):
             if not os.path.exists(self.model_path):
                 logger.warning("[Client] Model weights not found. Downloading default YOLOv8 weights.")
                 download_model()  # Ensure we have some valid weights to avoid shape mismatch
-            self.model = YOLO(self.model_path).to(self.device)
+            # self.model = load_yolo_model(self.model_path).to(self.device)
+            # self.model = load_yolo_model(self.model_path)
+            self.yolo = YOLO(self.model_path)
+            self.model = self.yolo.model
+            # Set number of classes if needed
+            self.model.nc = 13
+            if hasattr(self.model, 'head'):
+                self.model.head.nc = 13
+            logger.info("[Client] YOLO model loaded successfully.")
             logger.info("[Client] YOLO model loaded successfully.")
         except Exception as e:
             logger.error("[Client] Failed to load YOLO model!", exc_info=True)
             self.model = None
+            self.yolo = None
 
-            
-    def fit(self, ins: FitIns) -> FitRes:
-        """
-        Called by the Flower server to perform local training.
-        Steps:
-        1) Extract global weights from ins.parameters and load into YOLO model.
-        2) Parse config (batch_id, local_epochs).
-        3) Train the model on local data.yaml (constructed from batch_id).
-        4) Return updated model weights + num_examples + metrics.
-        """
+        # self.model = model
+        
+    def _validate_batch_id(self, batch_id: int) -> bool:
+        """Validate that batch_id is within the acceptable range."""
+        if not isinstance(batch_id, int):
+            logger.warning(f"[Client] Batch ID must be an integer. Got {type(batch_id)}.")
+            return False
+        if batch_id < self.batch_id_range[0] or batch_id > self.batch_id_range[1]:
+            logger.warning(f"[Client] Batch ID {batch_id} is out of range {self.batch_id_range}.")
+            return False
+        return True    
+
+    def fit(self, ins: FitIns ) -> FitRes:
+
         if self.model is None:
             logger.error("[Client] No model available, cannot train.")
             # Return original parameters so server isn't disrupted
             return FitRes(
                 parameters=ins.parameters,
                 num_examples=1,
-                metrics={"train_loss": float("inf")}
+                metrics={"train_loss": float("inf")},
+                status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="Failed to load model for evaluation"),
             )
+            
         # 1️⃣ Ensure Weights Match YOLOv8 Structure
         weights_list = self._parameters_to_list(ins.parameters)
         if not weights_list:
@@ -70,6 +89,7 @@ class FlowerClient(Client):
             weights_list = get_weights(self.model)  # Use YOLOv8 default weights if first iteration
         # logger.info(f"[Client]  weights_list={weights_list}")
         # # 1) Convert parameters to local YOLO weights
+        
         try:
             set_weights(self.model, weights_list)
         except Exception as e:
@@ -83,22 +103,25 @@ class FlowerClient(Client):
 
         # 2) Parse config (no .get usage, so we do direct indexing)
         config = ins.config
-        batch_id = config.get("batch_id", None)
+        # batch_id = config.get("batch_id", None)
+        batch_id = ins.config.get("batch_id", None)
 
+        # Use stored batch_id as fallback if available
         if batch_id is None:
             logger.warning("[Client] No batch_id received, using stored batch_id.")
-            batch_id = getattr(self, "batch_id", None)  # Use attribute if available
+            batch_id = getattr(self, "batch_id", None)
 
-        if batch_id is None:
-            logger.error("[Client] No batch_id available, cannot proceed.")
-            return FitRes(
+        # Validate batch_id
+        if batch_id is None or not self._validate_batch_id(batch_id):
+            logger.error(f"[Client] Invalid batch_id: {batch_id}. Expected range: {self.batch_id_range}.")
+            return FitRes(  # or EvaluateRes for evaluate method
                 parameters=ins.parameters,
                 num_examples=1,
                 metrics={},
-                status=Status(code=Code.FIT_NOT_IMPLEMENTED, message="Missing batch_id in training config"),
+                status=Status(code=Code.FIT_NOT_IMPLEMENTED, message=f"Invalid batch_id: {batch_id}"),
             )
 
-        # Store the batch_id for future use
+        # Store valid batch_id for future use
         self.batch_id = batch_id
 
         try:
@@ -114,7 +137,6 @@ class FlowerClient(Client):
                 num_examples=1,
                 metrics={},
                 status=Status(code=Code.FIT_NOT_IMPLEMENTED, message="Missing batch_id or local_epochs in training config"),
-
             )
 
 
@@ -130,7 +152,7 @@ class FlowerClient(Client):
             )
 
         try:
-            results = self.model.train(
+            results = self.yolo.train(
                 data=data_yaml_path,
                 epochs=local_epochs,
                 imgsz=640,
@@ -143,7 +165,8 @@ class FlowerClient(Client):
             if hasattr(results, "results_dict"):
                 final_loss = results.results_dict.get("loss", float("inf"))
                 num_examples = results.results_dict.get("training/images", 1)
-                logger.info(f"[Client] Training done. Loss={final_loss}, Images={num_examples}")
+                logger.info(f"[Client]{self.batch_id} Training done. Loss={final_loss}, Images={num_examples}  results ={results}"
+                            )
             else:
                 logger.warning("[Client] Training did not return metrics.")
                 final_loss = float("inf")
@@ -167,17 +190,9 @@ class FlowerClient(Client):
         # return FitRes(parameters=updated_params, num_examples=int(num_examples), metrics=metrics, status=Status(code=Code.OK, message="Returning fallback after error"))
 
     def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
-        """
-        Called by the Flower server to perform local evaluation.
-        Steps:
-        1) Load global weights into local YOLO model.
-        2) Parse config (batch_id).
-        3) Evaluate on local data.yaml.
-        4) Return loss, num_examples, and metrics.
-        """
         if self.model is None:
             logger.error("[Client] No model available, cannot evaluate.")
-            return EvaluateRes(loss=float("inf"), num_examples=1, metrics={})
+            return EvaluateRes(loss=float("inf"), num_examples=1, metrics={}, status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="No model available"),)
         #1️⃣ Load Weights (Ensure They Match)
         weights_list = self._parameters_to_list(ins.parameters)
         if not weights_list:
@@ -226,7 +241,6 @@ class FlowerClient(Client):
                 status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="Missing batch_id in evaluation config"),
             )
 
-
         # 3) Evaluate on the data.yaml
         data_yaml_path = f"batch/batch_{batch_id}/data.yaml"
         if not os.path.exists(data_yaml_path):
@@ -239,7 +253,7 @@ class FlowerClient(Client):
             )
 
         try:
-            results = self.model.val(
+            results = self.yolo.val(
                 data=data_yaml_path,
                 imgsz=640,
                 device=self.device,
@@ -268,52 +282,35 @@ class FlowerClient(Client):
                 status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message=error_message),
             )
 
-    # ----------------------------------------------------------------
-    # Helper conversions: Parameters <-> list of numpy arrays
-    # If you use the same approach as "NumPyClient", you can skip these.
-    # But the low-level Client requires manual conversion.
-    # ----------------------------------------------------------------
     def _list_to_parameters(self, weights_list) -> Parameters:
-        """
-        Convert a list of NumPy arrays into Flower Parameters.
-        Equivalent to fl.common.ndarrays_to_parameters, but shown here if you want inline code.
-        """
         from flwr.common import NDArrays, parameters_to_ndarrays, ndarrays_to_parameters
         import numpy as np
 
-        # Each item in weights_list is a np.ndarray
-        # We simply call the utility if you want:
         return ndarrays_to_parameters(weights_list)
 
     def _parameters_to_list(self, parameters: Parameters):
-        """
-        Convert Flower Parameters into a list of NumPy arrays.
-        Equivalent to fl.common.parameters_to_ndarrays.
-        """
         from flwr.common import parameters_to_ndarrays
         return parameters_to_ndarrays(parameters)
 
-# client_batches = {}  # Dictionary to store batch ID per client
-
-# def get_training_config(client_id):
-#     if client_id not in client_batches:
-#         client_batches[client_id] = assign_new_batch_id()  # Assign batch only once
-#     return {"batch_id": client_batches[client_id], "local_epochs": 3}
-
-# def get_evaluation_config(client_id):
-#     return {"batch_id": client_batches.get(client_id, assign_new_batch_id())}  # Use same batch ID
-
 
 def client_fn(context: Context):
-    """
-    The function that Flower calls to create a new client instance.
-    This is used if you run 'flwr run --app client:app'.
-    """
+
     try:
         logger.info("[Client] Creating FlowerClient instance from client_fn.")
-        model_path = "models/yolov8s.pt"  # Or dynamically read from context if desired
-        client = FlowerClient(model_path=model_path)
+        model_path = r"C:\Users\sathish\Downloads\FL_ModelForAV\my-project\models\yolov8s.pt"  # Or dynamically read from context if desired
+
+        local_epochs = context.run_config["local_epochs"]
+        client_state = context.state
+        batch_id_range = context.run_config.get("batch_id_range", (1, 10))  # Default range if not provided
+        client = FlowerClient(
+            model_path = model_path,
+            client_state = client_state,
+            local_epochs = local_epochs,
+            batch_id_range=batch_id_range,
+                            )
+        
         return client
+    # .to_client()
     except Exception as e:
         logger.error("[Client] client_fn failed to create FlowerClient", exc_info=True)
         return None
