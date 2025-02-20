@@ -1,4 +1,4 @@
-path: C:\Users\sathish\Downloads\FL_ModelForAV\test\bdd100_mini
+path: C:\Users\sathish\Downloads\FL_ModelForAV\my-project\batch\batch_1
 train: images/train
 val: images/val
 test: images/test

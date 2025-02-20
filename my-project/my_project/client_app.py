@@ -94,11 +94,11 @@ class FlowerClient(Client):
             set_weights(self.model, weights_list)
         except Exception as e:
             logger.error(f"[Client] set_weights failed: {e}", exc_info=True)
-            return EvaluateRes(
-                loss=float("inf"),
+            return  FitRes(
+                parameters=ins.parameters,
                 num_examples=1,
-                metrics={},
-                status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="Failed to load weights for evaluation"),
+                metrics={"train_loss": float("inf")},
+                status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="Failed to load model for evaluation"),
             )
 
         # 2) Parse config (no .get usage, so we do direct indexing)
@@ -163,10 +163,37 @@ class FlowerClient(Client):
             
             # Ensure training completed
             if hasattr(results, "results_dict"):
-                final_loss = results.results_dict.get("loss", float("inf"))
-                num_examples = results.results_dict.get("training/images", 1)
-                logger.info(f"[Client]{self.batch_id} Training done. Loss={final_loss}, Images={num_examples}  results ={results}"
-                            )
+
+                # num_examples = results.results_dict.get("training/images", 1)
+                num_examples = 10
+                # Assuming 'results' is your DetMetrics object
+                # # First convert the DetMetrics object to a dictionary
+                results_dict = results.results_dict  # This is the correct way to access the dictionary
+
+                fitness_value = results_dict["fitness"]  # Access from the dictionary
+                # Create metrics dictionary
+                metrics = {
+                    # "train_loss": fitness_value,
+                    "precision": results.results_dict.get("metrics/precision(B)", 0),
+                    "recall": results.results_dict.get("metrics/recall(B)", 0),
+                    "mAP50": results.results_dict.get("metrics/mAP50(B)", 0),
+                    "mAP50-95": results.results_dict.get("metrics/mAP50-95(B)", 0)
+                }
+                # dir1 = dir(results)
+                # dir = ['__class__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__format__', '__ge__', '__getattr__', '__getattribute__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__str__', '__subclasshook__', '__weakref__', 
+                # 'ap_class_index', 
+                # 'box', 
+                # 'class_result', 
+                # 'confusion_matrix', 
+                # 'curves', 
+                # 'curves_results', 
+                # 'fitness', 'keys', 'maps', 
+                # 'mean_results', 'names', 'on_plot', 'plot', 'process', 
+                # 'results_dict', 
+                # 'save_dir', 'speed', 'task']
+                
+                logger.info(f"[Client] {self.batch_id}  Training done. metrics = {metrics}    results_dict = {results_dict}   "     )
+                # logger.info(f"[Client]{self.batch_id} Training done. Loss={fitness_value}, Images={num_examples}  results ={results}"           )
             else:
                 logger.warning("[Client] Training did not return metrics.")
                 final_loss = float("inf")
@@ -175,7 +202,7 @@ class FlowerClient(Client):
             return FitRes(
                 parameters=self._list_to_parameters(get_weights(self.model)),
                 num_examples=int(num_examples),
-                metrics={"train_loss": final_loss},
+                metrics=metrics,
                 status=Status(code=Code.OK, message="Training successful"),
             )
         except Exception as e:
@@ -186,8 +213,6 @@ class FlowerClient(Client):
                 metrics={},
                 status=Status(code=Code.FIT_NOT_IMPLEMENTED, message="Training process failed"),
             )
-
-        # return FitRes(parameters=updated_params, num_examples=int(num_examples), metrics=metrics, status=Status(code=Code.OK, message="Returning fallback after error"))
 
     def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
         if self.model is None:
@@ -228,21 +253,6 @@ class FlowerClient(Client):
         
         batch_id = ins.config.get("batch_id", None)
 
-        # # Use stored batch_id as fallback if available
-        # if batch_id is None:
-        #     logger.warning("[Client] No batch_id received, using stored batch_id.")
-        #     batch_id = getattr(self, "batch_id", None)
-
-        # # Validate batch_id
-        # if batch_id is None or not self._validate_batch_id(batch_id):
-        #     logger.error(f"[Client] Invalid batch_id: {batch_id}. Expected range: {self.batch_id_range}.")
-        #     return FitRes(  # or EvaluateRes for evaluate method
-        #         parameters=ins.parameters,
-        #         num_examples=1,
-        #         metrics={},
-        #         status=Status(code=Code.FIT_NOT_IMPLEMENTED, message=f"Invalid batch_id: {batch_id}"),
-        #     )
-
         # Store valid batch_id for future use
         self.batch_id = batch_id
 
@@ -254,8 +264,8 @@ class FlowerClient(Client):
             )
         except KeyError as ke:
             logger.error(f"[Client] Missing key in FitIns.config: {ke}", exc_info=True)
-            return FitRes(
-                parameters=ins.parameters,
+            return EvaluateRes(
+                loss=float("inf"),
                 num_examples=1,
                 metrics={},
                 status=Status(code=Code.FIT_NOT_IMPLEMENTED, message="Missing batch_id or local_epochs in training config"),
@@ -280,17 +290,27 @@ class FlowerClient(Client):
                 device=self.device,
                 verbose=False
             )
-            val_loss = results.results_dict.get("val/loss", float("inf"))
-            mAP50 = results.results_dict.get("metrics/mAP50", 0.0)
-            num_examples = results.results_dict.get("validation/images", 0)
-            metrics = {"mAP50": mAP50}
+            # val_loss = results.results_dict.get("val/loss", float("inf"))
+            # mAP50 = results.results_dict.get("metrics/mAP50", 0.0)
+            # num_examples = results.results_dict.get("validation/images", 0)
+            
+            num_examples = 10
+            fitness_value = results.results_dict["fitness"]  # Access from the dictionary
+            # Create metrics dictionary
+            metrics = {
+                # "train_loss": fitness_value,
+                "precision": results.results_dict.get("metrics/precision(B)", 0),
+                "recall": results.results_dict.get("metrics/recall(B)", 0),
+                "mAP50": results.results_dict.get("metrics/mAP50(B)", 0),
+                "mAP50-95": results.results_dict.get("metrics/mAP50-95(B)", 0)
+            }
 
-            logger.info(f"[Client] Evaluation done. Loss={val_loss}, mAP50={mAP50}, Images Processed={num_examples}")
+            logger.info(f"[Client] Evaluation done. Loss = {fitness_value}, metrics = {metrics}, Images Processed = {num_examples} ")
 
             return EvaluateRes(
-                loss=float(val_loss),
+                loss=float(fitness_value),
                 num_examples=1,
-                metrics={"mAP50": mAP50},
+                metrics= metrics,
                 status=Status(code=Code.OK, message="Evaluation successful"),
             )
         except Exception as e:
