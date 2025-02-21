@@ -154,7 +154,7 @@ def server_fn(_):
     strategy = CustomBatchStrategy(
         fraction_fit=1.0,        # For demonstration, we use all clients each round
         min_fit_clients=1,       # Minimum 1 client needed to proceed
-        min_available_clients=1, # Start FL with 1 client
+        min_available_clients=3, # Start FL with 1 client
         initial_parameters=fl.common.ndarrays_to_parameters(initial_weights)
     )
 
