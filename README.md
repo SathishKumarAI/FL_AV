@@ -1,4 +1,141 @@
 
+**Subject:** 🚀 Optimized **README.md** for Running Flower on GPU  
+
+Hey,  
+
+I've structured and refined the **README.md** file for the **Flower (FLWR)** project. It provides clear, step-by-step instructions for setting up, running, and troubleshooting the project on a **GPU-enabled system**.  
+
+### 📌 **Key Highlights**  
+✅ Well-defined setup process  
+✅ GPU optimization steps included  
+✅ Troubleshooting common issues  
+
+---
+
+## **Running the Flower Project on a GPU**  
+
+This guide walks you through setting up and running the **Flower (FLWR)** project on a **GPU**-enabled system. It covers dependency installation, environment configuration, and troubleshooting.  
+
+---
+
+### **📖 Table of Contents**  
+1️⃣ [Prerequisites](#prerequisites)  
+2️⃣ [Setting Up the Environment](#step-1-setting-up-the-environment)  
+3️⃣ [Cloning and Configuring the FL_AV Repository](#step-2-cloning-and-configuring-the-fl_av-repository)  
+4️⃣ [Running the Flower Project on GPU](#step-3-running-the-flower-project-on-gpu)  
+5️⃣ [Verifying GPU Usage](#step-4-verifying-gpu-usage)  
+6️⃣ [Troubleshooting](#step-5-troubleshooting)  
+
+---
+
+## **✅ Prerequisites**  
+
+Before you start, make sure you have:  
+🔹 **Python** (>=3.8 recommended)  
+🔹 **Conda** (optional but recommended)  
+🔹 **CUDA Toolkit** (Check your version using `nvidia-smi`)  
+🔹 **GPU Drivers** (Updated to the latest version)  
+🔹 **Git**  
+
+---
+
+## **🛠️ Step 1: Setting Up the Environment**  
+
+Setting up a virtual environment ensures dependency isolation.  
+
+### 🔹 1.1 Create a Conda Environment (Recommended)  
+```bash
+conda create -n flower-env python=3.8
+conda activate flower-env
+```  
+
+### 🔹 1.2 Install PyTorch with GPU Support  
+Find the correct command for your CUDA version [here](https://pytorch.org/get-started/locally/).  
+
+For CUDA **11.3**, install PyTorch with:  
+```bash
+pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu113
+```  
+
+### 🔹 1.3 Install Flower  
+```bash
+pip install flwr
+```  
+
+---
+
+## **📥 Step 2: Cloning and Configuring the FL_AV Repository**  
+
+### 🔹 2.1 Clone the Repository  
+```bash
+git clone https://github.com/SathishKumarAI/FL_AV
+cd FL_AV
+```  
+
+### 🔹 2.2 Install Dependencies  
+```bash
+pip install -r requirements.txt
+```  
+
+(Optional) If the project uses an editable install:  
+```bash
+cd my-project
+pip install -e .
+```  
+
+---
+
+## **🚀 Step 3: Running the Flower Project on GPU**  
+
+### 🔹 3.1 Enable GPU in PyTorch  
+Modify your code to use GPU if available:  
+```python
+import torch
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")  # Expected output: "cuda" if GPU is detected
+```  
+
+### 🔹 3.2 Run the Flower Project  
+```bash
+flwr run .
+```  
+
+---
+
+## **📊 Step 4: Verifying GPU Usage**  
+
+To check GPU utilization, run:  
+```bash
+nvidia-smi
+```  
+This command displays **GPU utilization**, **memory usage**, and active processes.  
+
+---
+
+## **🛠️ Step 5: Troubleshooting**  
+
+### ❌ **CUDA Out of Memory**  
+🔹 Reduce the batch size  
+🔹 Use **gradient accumulation** to process smaller batches  
+
+### ❌ **No GPU Detected**  
+🔹 Ensure PyTorch is installed with GPU support (`torch.cuda.is_available()` should return `True`)  
+🔹 Verify drivers using `nvidia-smi`  
+🔹 Reinstall CUDA and PyTorch if necessary  
+
+### ❌ **Runtime Errors in PyTorch**  
+🔹 Ensure tensors and models are moved to the correct device (`.to(device)`)  
+
+---
+
+## **📌 Additional Notes**  
+💡 Use **memory-efficient training techniques** (e.g., mixed-precision training) for large datasets.  
+💡 Modify the PyTorch installation command based on your **CUDA version**.  
+
+By following this guide, you can efficiently run your **Flower** project on a **GPU**. 🚀 Let me know if you need any refinements!  
+
+
 # **Project**
 Why Federated Learning over a Centralized Model?
 
