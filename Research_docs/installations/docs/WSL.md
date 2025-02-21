@@ -21,7 +21,7 @@ Download and Install WSL 2 Linux Kernel Update Package:
 * ### Restart Your Computer
 
 Given username: siuadmin
-password : Sathish@123
+password : devil@123
 password: siuadmin
 
 

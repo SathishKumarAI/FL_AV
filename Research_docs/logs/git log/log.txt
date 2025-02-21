@@ -939,7 +939,7 @@ warning: in the working copy of 'trash/copying_of_files.ipynb', LF will be repla
 2023-05-27 11:17:46.162 [info] > git status -z -uall [78ms]
 2023-05-27 11:17:51.068 [info] > git log --oneline --cherry master...master@{upstream} -- [51ms]
 2023-05-27 11:17:53.148 [info] > git pull --tags origin master [2074ms]
-2023-05-27 11:17:53.148 [info] From https://github.com/SathishPaloju/major
+2023-05-27 11:17:53.148 [info] From https://github.com/devilPaloju/major
  * branch            master     -> FETCH_HEAD
 2023-05-27 11:17:55.490 [info] > git push origin master:master [2336ms]
 2023-05-27 11:17:55.490 [info] remote: Resolving deltas:   0% (0/9)        
@@ -953,7 +953,7 @@ remote: Resolving deltas:  77% (7/9)
 remote: Resolving deltas:  88% (8/9)        
 remote: Resolving deltas: 100% (9/9)        
 remote: Resolving deltas: 100% (9/9), completed with 6 local objects.        
-To https://github.com/SathishPaloju/major.git
+To https://github.com/devilPaloju/major.git
    fbe7dd2..b82afa1  master -> master
 2023-05-27 11:17:55.574 [info] > git for-each-ref --format=%(refname)%00%(upstream:short)%00%(objectname)%00%(upstream:track)%00%(upstream:remotename)%00%(upstream:remoteref) refs/heads/master refs/remotes/master [64ms]
 2023-05-27 11:17:55.577 [info] > git config --get commit.template [77ms]

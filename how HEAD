@@ -1,0 +1,282 @@
+[33mcommit d2738dd269a59947114bf60384bc19f781cecf46[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mcheck_copy_1[m[33m, [m[1;31morigin/check_copy_1[m[33m)[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Thu Feb 6 03:08:14 2025 +0000
+
+    test add
+
+[33mcommit 2ee3b5d55367e4bccdc02ad6c003f5e61d111765[m
+Author: SATHISH <50115705+SathishKumarAI@users.noreply.github.com>
+Date:   Wed Feb 5 21:05:19 2025 -0600
+
+    Created using Colab
+
+[33mcommit df73066a968b7852e458fe909a0708175bea3951[m
+Author: SATHISH <50115705+SathishKumarAI@users.noreply.github.com>
+Date:   Wed Feb 5 20:43:42 2025 -0600
+
+    Update README.md
+
+[33mcommit fe752f0e9c8266398848df7a1b371c2984681c38[m
+Author: sathish paloju <sathish.paloju99@gmail.com>
+Date:   Wed Feb 5 20:41:32 2025 -0600
+
+    dir reorg
+
+[33mcommit fd09d97472d9f2b953644aa5d318dba2a6d4c8f4[m[33m ([m[1;31morigin/check[m[33m, [m[1;32mcheck_copy[m[33m, [m[1;32mcheck[m[33m)[m
+Merge: 8386bd8 f2d1950
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Tue Feb 4 05:24:02 2025 +0000
+
+    Merge branch 'check' of https://github.com/SathishKumar9866/FL_AV into check
+
+[33mcommit 8386bd8e4bea681adb33a69a2abe97b2259888fc[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Tue Feb 4 05:21:54 2025 +0000
+
+    move files to data in my-project
+
+[33mcommit f2d19506d4dfca88d85f2745cd782ffdccf131c5[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Mon Feb 3 23:21:04 2025 -0600
+
+    Created using Colab
+
+[33mcommit 54881f7eb20f5bff5a315ec41906a97f2c286e2e[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Tue Feb 4 04:38:57 2025 +0000
+
+    change the test_CPU colab name
+
+[33mcommit e0950f3bb2a6a9b8c50ef32b4d72741eaea7ac69[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Tue Feb 4 04:36:16 2025 +0000
+
+    commit test_cpu changes
+
+[33mcommit d30202147184c33aedb7676cf64166471c70b5e8[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Tue Feb 4 04:26:53 2025 +0000
+
+    ad them
+
+[33mcommit 6d81d220c461f814137cbf3d47b9cc2670ddf635[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Mon Feb 3 22:20:44 2025 -0600
+
+    Created using Colab
+
+[33mcommit b9557d8f6d318e803eb20520d148bf93409db8c1[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Mon Feb 3 20:10:32 2025 -0600
+
+    Created using Colab
+
+[33mcommit 52cd207fec2acc94cac43f2ebb71fb0699d8e662[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Mon Feb 3 20:09:02 2025 -0600
+
+    Created using Colab
+
+[33mcommit 5f10d56d6a03ab18691fdad2d26301b0b39710ee[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Sun Feb 2 04:43:55 2025 -0600
+
+    mini batches adding to git
+
+[33mcommit 00085589ba8d6ed2999938f702dfb2064fbcf509[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Sun Feb 2 04:35:35 2025 -0600
+
+    success feels like
+
+[33mcommit a5e2e9346752e83ca2a3e63921c9d53facb24462[m[33m ([m[1;31morigin/test[m[33m)[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Sun Feb 2 03:27:24 2025 -0600
+
+    add content
+
+[33mcommit 1f72d8be69b9a8fc410e44f48577b070df906836[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Sat Feb 1 13:10:13 2025 -0600
+
+    code push to main
+
+[33mcommit 32ebf6d7fb5cbdcb28c5eb3bfc21e3a913dd924b[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Sun Sep 8 21:06:31 2024 -0500
+
+    Update README.md
+
+[33mcommit 68fa4dcc1f2a16c808d2db825f2794d0a74df091[m
+Author: SATHISH <50115705+SathishKumar9866@users.noreply.github.com>
+Date:   Sun Sep 8 21:06:06 2024 -0500
+
+    Update README.md
+
+[33mcommit b6e1bbe4d1f68daa8db59a5a9cca63fff6d52492[m
+Author: SATHISH <50115705+SathishKumarChary@users.noreply.github.com>
+Date:   Mon Aug 12 11:37:06 2024 -0500
+
+    Update README.md
+
+[33mcommit aac5ff5868fcd9a37ad2ffb76bcf504d9846059b[m
+Author: Sathish Paloju <sathish.paloju99@gmail.com>
+Date:   Fri Jul 19 22:13:03 2024 -0400
+
+    modified content
+
+[33mcommit cfe2e75c31438f737e63c01cf7104fc716a7f8c2[m
+Merge: 0f407f1 689f444
+Author: SATHISH <50115705+SathishPaloju@users.noreply.github.com>
+Date:   Mon Jun 17 23:46:46 2024 -0400
+
+    Merge pull request #10 from SathishPaloju/test_data_temp
+    
+    test branch add
+
+[33mcommit 0f407f1bad73de1cbd4c39a6ae41362439471a69[m
+Author: Sathish Paloju <sathish.paloju99@gmail.com>
+Date:   Mon Jun 17 23:45:12 2024 -0400
+
+    adding markdown copier file into the git
+
+[33mcommit 689f444d54191331f442ed01fd440b19673f00f1[m[33m ([m[1;31morigin/test_data_temp[m[33m)[m
+Author: Sathish 53 <sathish.paloju99@gmail.com>
+Date:   Fri Jun 7 02:22:35 2024 -0500
+
+    test branch add
+
+[33mcommit 91cbffd554288cb0c53287281e4b82b5a4d463c8[m
+Author: Sathish Paloju <sathish.paloju99@gmail.com>
+Date:   Thu Jun 6 22:34:56 2024 -0400
+
+    git update addon with new files and path.yaml extraction file is completed
+
+[33mcommit a0a3536170333d871fc3c8dd3c882d8c51ec09ff[m
+Merge: 3eb2399 0731461
+Author: SATHISH <50115705+SathishPaloju@users.noreply.github.com>
+Date:   Thu Jun 6 17:21:14 2024 -0400
+
+    Merge pull request #9 from SathishPaloju/test_data_temp
+    
+    add of path dir
+
+[33mcommit 0731461369391c17d548494e8b451c54436b3bbf[m
+Author: Sathish 53 <sathish.paloju99@gmail.com>
+Date:   Thu Jun 6 16:19:56 2024 -0500
+
+    add of path dir
+
+[33mcommit 3eb23990c3e1b0e994af056f7d63f06364647d7d[m
+Merge: 13e73ed b7d3f5c
+Author: SATHISH <50115705+SathishPaloju@users.noreply.github.com>
+Date:   Wed Jun 5 19:14:57 2024 -0400
+
+    Merge pull request #8 from SathishPaloju/test_data_temp
+    
+    Path.yaml file added
+
+[33mcommit b7d3f5c68a29f13c4805d9bf6567c1cb6ab28174[m
+Author: Sathish 53 <sathish.paloju99@gmail.com>
+Date:   Wed Jun 5 18:13:08 2024 -0500
+
+    Path.yaml file added
+
+[33mcommit 13e73ed4781d766d1ea958881723903f7442d77c[m
+Author: Sathish Paloju <sathish.paloju99@gmail.com>
+Date:   Wed Jun 5 16:28:27 2024 -0400
+
+    data dir added
+
+[33mcommit 0bb0a1032fb03e10a0c84e2e156cf97e71c6c451[m
+Merge: 126790b ea003ef
+Author: SATHISH <50115705+SathishPaloju@users.noreply.github.com>
+Date:   Wed Jun 5 14:34:42 2024 -0400
+
+    Merge pull request #7 from SathishPaloju/docker_create
+    
+    Merge pull request #6 from SathishPaloju/main
+
+[33mcommit ea003ef032b073c1c6a9253631fed2e118d2bc88[m
+Merge: d235b0e 126790b
+Author: SATHISH <50115705+SathishPaloju@users.noreply.github.com>
+Date:   Wed Jun 5 14:34:09 2024 -0400
+
+    Merge pull request #6 from SathishPaloju/main
+    
+    Merge pull request #5 from SathishPaloju/docker_create
+
+[33mcommit 126790b092a356c1f8d366722b42f0130c14ce5c[m
+Merge: 49cf830 d235b0e
+Author: SATHISH <50115705+SathishPaloju@users.noreply.github.com>
+Date:   Wed Jun 5 14:16:26 2024 -0400
+
+    Merge pull request #5 from SathishPaloju/docker_create
+    
+    Merge pull request #4 from SathishPaloju/main
+
+[33mcommit d235b0e6a50ef9b463a4e72a46b7437e960b4c21[m
+Merge: 7018a54 49cf830
+Author: SATHISH <50115705+SathishPaloju@users.noreply.github.com>
+Date:   Wed Jun 5 14:16:00 2024 -0400
+
+    Merge pull request #4 from SathishPaloju/main
+    
+    pr
+
+[33mcommit 49cf830180aaf1159b43351eec9fc79ff2f5cc0b[m
+Merge: d155397 7018a54
+Author: SATHISH <50115705+SathishPaloju@users.noreply.github.com>
+Date:   Wed Jun 5 14:15:20 2024 -0400
+
+    Merge pull request #3 from SathishPaloju/docker_create
+    
+    clean up stage 3
+
+[33mcommit 7018a54948d68c0f96a92b72b232cd844c569670[m
+Author: Sathish Paloju <sathish.paloju99@gmail.com>
+Date:   Wed Jun 5 14:13:53 2024 -0400
+
+    clean up stage 3
+
+[33mcommit d1553975fec4506ca64f795ffd1e7e8f073648bf[m
+Merge: 9850a3b 5bb2ad3
+Author: SATHISH <50115705+SathishPaloju@users.noreply.github.com>
+Date:   Wed Jun 5 13:32:21 2024 -0400
+
+    Merge pull request #2 from SathishPaloju/docker_create
+    
+    clean up stage 2
+
+[33mcommit 5bb2ad3dbc56cce7debc3b1ebf4dac6ee3a08496[m
+Author: Sathish Paloju <sathish.paloju99@gmail.com>
+Date:   Wed Jun 5 13:27:44 2024 -0400
+
+    clean up stage 2
+
+[33mcommit 9850a3b380593e5c08e47bdc340168ae19561f40[m
+Merge: bf3a32f 565c1eb
+Author: SATHISH <50115705+SathishPaloju@users.noreply.github.com>
+Date:   Wed Jun 5 12:03:20 2024 -0400
+
+    Merge pull request #1 from SathishPaloju/docker_create
+    
+    clean up stage 1
+
+[33mcommit 565c1eb0f63de650192a8a4ce18583820d123785[m
+Author: Sathish Paloju <sathish.paloju99@gmail.com>
+Date:   Wed Jun 5 12:01:51 2024 -0400
+
+    clean up stage 1
+
+[33mcommit bf3a32f74d9210747ac6eaafea42d2da3618697b[m
+Author: Sathish 53 <sathish.paloju99@gmail.com>
+Date:   Wed Mar 6 17:10:50 2024 -0600
+
+    new add  model
+
+[33mcommit 8522a24b218c057d4f22f6fd88aef2b3040d801f[m
+Author: Sathish 53 <sathish.paloju99@gmail.com>
+Date:   Wed Mar 6 16:55:23 2024 -0600
+
+    new add

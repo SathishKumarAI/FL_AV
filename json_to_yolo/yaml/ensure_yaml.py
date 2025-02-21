@@ -148,5 +148,5 @@ def process_batches(batch_root):
     print("Batch processing completed. Check logs/process.log for details.")
 
 if __name__ == "__main__":
-    batch_root = r"C:\Users\sathish\Downloads\FL_ModelForAV\my-project\bdd100_mini"  # Update this path if necessary
+    batch_root = r"C:\Users\sathish\Downloads\FL_AV\my-project\bdd100_mini"  # Update this path if necessary
     process_batches(batch_root)

@@ -2,7 +2,7 @@ import os
 import logging
 
 # Define log directory and file
-log_dir = os.path.abspath(r"C:\Users\sathish\Downloads\FL_ModelForAV\logs")  # Ensure logs are directly in "logs/"
+log_dir = os.path.abspath(r"C:\Users\devil\Downloads\FL_AV\logs")  # Ensure logs are directly in "logs/"
 os.makedirs(log_dir, exist_ok=True)  # Create if not exists
 
 log_file = os.path.join(log_dir, "yolo_conversion_json_to_yolov5_100k.log")

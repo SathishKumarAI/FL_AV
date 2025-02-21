@@ -5,18 +5,18 @@ To configure your Git user information in Git Bash, run the following commands:
 1. **Set Global User Name:**
 
     ```bash
-    git config --global user.name "Sathish"
+    git config --global user.name "devil"
     ```
 
-    This command sets your global Git user name to "Sathish."
+    This command sets your global Git user name to "devil."
 
 2. **Set Global User Email:**
 
     ```bash
-    git config --global user.email "sathish.paloju99@gmail.com"
+    git config --global user.email "devil.paloju99@gmail.com"
     ```
 
-    This command sets your global Git user email to "sathish.paloju99@gmail.com."
+    This command sets your global Git user email to "devil.paloju99@gmail.com."
 
 ## Additional Information:
 

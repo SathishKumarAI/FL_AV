@@ -71,7 +71,7 @@ class LoggerManager:
         self.db_lock = threading.Lock()  # Thread safety for database operations
 
         # Set up log directory
-        base_log_dir = Path(r"C:\Users\sathish\Downloads\FL_ModelForAV\Research_docs\logs")
+        base_log_dir = Path(r"C:\Users\devil\Downloads\FL_AV\Research_docs\logs")
         self.base_log_dir = base_log_dir / category / notebook_name
         # self.base_log_dir.mkdir(parents=True, exist_ok=True)
         # self.base_log_dir = Path.cwd() / "logs" / category / notebook_name

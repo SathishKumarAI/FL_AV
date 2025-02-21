@@ -65,8 +65,8 @@ def create_mini_dataset(source_root, dest_root, num_images=10, num_batches=3):
     print(f"Mini dataset created successfully at {dest_root}")
 
 # Define source and destination paths
-source_root = r"C:\Users\sathish\Downloads\FL_ModelForAV\my-project\data\bdd100_batch"
-dest_root = r"C:\Users\sathish\Downloads\FL_ModelForAV\my-project\data\bdd100_mini"
+source_root = r"C:\Users\sathish\Downloads\FL_AV\my-project\data\bdd100_batch"
+dest_root = r"C:\Users\sathish\Downloads\FL_AV\my-project\data\bdd100_mini"
 
 # Run the function to create the mini dataset
 create_mini_dataset(source_root, dest_root, num_images=10, num_batches=5)
