@@ -30,7 +30,7 @@ clientapp = "my_project.client_app:app"
 [tool.flwr.app.config]
 num_server_rounds = 2
 fraction_fit = 0.75
-local_epochs = 1
+local_epochs = 4
 min_clients = 5  # Ensures clarity on the required minimum clients
 
 
