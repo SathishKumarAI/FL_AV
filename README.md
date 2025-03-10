@@ -1,283 +1,195 @@
 
-# **Project**
-Why Federated Learning over a Centralized Model?
+# 🚀 Federated Object Detection with YOLOv8 and Flower  
 
-Federated Learning (FL) allows each data owner (or device) to keep its sensitive data locally, sending only model parameters (gradients) to a central server. This approach not only enhances privacy by avoiding the need for a massive centralized data repository, but also lowers bandwidth costs and reduces the risk of data leaks. In many real-world applications-such as autonomous vehicles or edge-based surveillance-transferring large volumes of raw images to a single server can be impractical or raise confidentiality concerns. FL addresses these challenges by keeping the training data closer to its source.
-
-Why Object Detection?
-
-Object detection is a fundamental task in computer vision, enabling systems to recognize and localize objects within images or video frames. By federating an object detection model, we allow multiple independent data silos---such as cameras from different traffic intersections or vehicle fleets-to collaboratively train a model without ever pooling their raw images. This is critical in scenarios like smart city infrastructure, where privacy laws may restrict data sharing between agencies, or fleet management, where each vehicle has limited connectivity and must remain operationally secure. FL with object detection meets both practical deployment needs (e.g., edge devices with limited bandwidth) and regulatory requirements (data privacy, security) while still benefiting from diverse, real-world data for improved model robustness.
-
-## **Overview**
-
-This repository demonstrates how to perform **federated learning** for **object detection** with [Flower](https://flower.dev), **YOLOv5** (via [Ultralytics](https://github.com/ultralytics/ultralytics)), and a **BDD100K** dataset split. The setup uses **Python**, **Conda**, **CUDA**, and **Git Bash** on **Windows** (with optional **WSL2** support).
-
-**Key Highlights:**
-
-1. **Federated Approach**  
-   - Multiple clients (nodes) each hold a subset of the data (BDD100K images/labels).  
-   - Each client trains locally (YOLOv5) and sends model updates to a central server (Flower).  
-   - The server aggregates updates (e.g., via FedAvg) and broadcasts new global weights back to clients.
-
-2. **BDD100K Dataset**  
-   - **Largest driving dataset** with 100K videos and a variety of tasks (including object detection).  
-   - Highly diverse (geography, weather, environment), making models more robust.  
-   - References:  
-       - [Official BDD100K Website](https://bdd-data.berkeley.edu/)  
-       - [About the Dataset](https://doc.bdd100k.com/download.html)  
-       - [Papers with Code link](https://paperswithcode.com/dataset/bdd100k)  
-       - [Original Paper (ArXiv)](https://arxiv.org/abs/1805.04687)
-
-3. **YOLOv5 Model**  
-   - Provided by [Ultralytics](https://github.com/ultralytics/ultralytics).  
-   - Used for high-performance object detection tasks.  
-   - Pretrained checkpoints like `yolov5s.pt`, `yolov5m.pt`, etc.
-
-4. **Project Files**  
-   - `train_config.py` – Global config (num rounds, batch size, etc.)  
-   - `label_utils.py` – BDD100K → YOLO label conversion & verification  
-   - `data_utils.py` – Helpers for data paths and `data.yaml` verification  
-   - `client.py` – Federated client code (runs local YOLO training)  
-   - `server.py` – Federated server code (coordinates aggregation with Flower)  
-   - `run_federation.bat` – Windows batch script to launch the server and multiple clients  
-   - `requirements.txt` – Python dependencies
+**Collaboratively train YOLOv8 models on distributed datasets while preserving data privacy.**  
 
 ---
 
-## **Resources**
-
-Below are the primary resources you will need:
-
-1. **Dataset**:  
-   - [BDD100K](https://bdd-data.berkeley.edu/)  
-   - Download the images and any JSON/COCO annotations you need for your object detection tasks.  
-
-2. **Dependencies/Installations** (see next section for detailed steps):  
-   - **Python 3.10.8.6** (or a similar 3.10+ release)  
-   - **Git Bash**  
-   - **Conda** (Miniconda/Anaconda)  
-   - **CUDA Toolkit** (matching your GPU drivers)  
-   - **WSL2** (optional, but can help if you prefer a Linux environment on Windows)
-
----
-
-## **Installations**
-
-Below is the recommended approach to ensure a clean environment and avoid module conflicts. Check out the provided documentation links for more detailed instructions.
-
-1. **Install Python 3.10.8.6**  
-   - [Download for Windows](https://www.python.org/downloads/windows/)  
-   - Make sure to enable “Add Python to PATH” during installation (or handle manually).
-
-2. **Git Bash Setup**  
-   - Refer to [`installations/docs/Git_setup.md`](installations/docs/Git_setup.md).  
-   - Git Bash offers a handy terminal environment on Windows.
-
-3. **Conda Environment**  
-   - See [`installations/docs/GitBash_Conda_Setup.md`](installations/docs/GitBash_Conda_Setup.md).  
-   - Example commands to create and activate a new Conda environment:
-     ```bash
-     conda create -n federated_yolov5 python=3.10 -y
-     conda activate federated_yolov5
-     ```
-   - We recommend using a **separate environment** so that your dependencies do not clash with other projects.
-
-4. **CUDA Installations**  
-   - Check out [`installations/docs/CUDA_installations.md`](installations/docs/CUDA_installations.md).  
-   - You need an NVIDIA GPU and matching drivers (e.g., RTX 4070) for efficient YOLO training.
-
-5. **WSL-2 (Optional)**  
-   - Detailed guide in [`installations/docs/WSL.md`](installations/docs/WSL.md).  
-   - WSL2 allows you to run a Linux-like environment inside Windows, which can simplify some tool installations.
+## 🌐 Table of Contents  
+- [🔒 Why Federated Learning?](#-why-federated-learning)  
+- [🤖 Why YOLOv8?](#-why-yolov8)  
+- [⚙️ Tech Stack](#️-tech-stack)  
+- [📥 Installation](#-installation)  
+  - [1. Prerequisites](#1-prerequisites)  
+  - [2. Set Up Conda Environment](#2-set-up-conda-environment)  
+  - [3. Install Dependencies](#3-install-dependencies)  
+- [📂 Dataset Preparation](#-dataset-preparation)  
+  - [1. Download Preprocessed Data](#1-download-preprocessed-data)  
+  - [2. Partition Data for Federated Clients](#2-partition-data-for-federated-clients)  
+- [🚀 Quick Start](#-quick-start)  
+  - [1. Launch the Flower Server](#1-launch-the-flower-server)  
+  - [2. Start Federated Clients](#2-start-federated-clients)  
+  - [3. Monitor Training](#3-monitor-training)  
+- [🎛️ Simulation Setup](#️-simulation-setup)  
+  - [1. Set Up a Flower Simulation Project](#1-set-up-a-flower-simulation-project)  
+  - [4. Clean Up](#4-clean-up)  
+- [🏗️ Project Architecture](#️-project-architecture)  
+- [🛠️ Troubleshooting](#️-troubleshooting)  
+- [📚 References](#-references)  
+- [🗺️ Future Roadmap](#️-future-roadmap)  
 
 ---
 
-## **Repository Setup**
-
-### **1. Git Clone**
-
-Make sure you have configured Git with SSH or HTTPS. Refer to [this StackOverflow link](https://stackoverflow.com/questions/68775869/message-support-for-password-authentication-was-removed) if you encounter issues:
-
-```bash
-git clone git@github.com:yourusername/federated_yolov5.git
-cd federated_yolov5
-```
-
-*(Replace the repo URL with your actual GitHub repository.)*
-
-### **2. Install Python Dependencies**
-
-From inside the cloned repo, install the required packages:
-
-```bash
-conda activate federated_yolov5
-
-# Option 1: Use pip directly
-pip install -r requirements.txt
-
-# Option 2: Or install them one by one, especially if you need custom PyTorch wheels
-# pip install flwr[simulation]>=1.8.0
-# pip install torch>=2.2.1 torchvision>=0.15.2 --extra-index-url https://download.pytorch.org/whl/cu118
-# pip install ultralytics>=8.2.0 opencv-python-headless numpy tqdm pyyaml
-```
-
-> **Note**: Make sure the version of PyTorch you install matches your CUDA version (e.g., CUDA 11.8 for an RTX 4070).
+## 🔒 Why Federated Learning?  
+- **Data Privacy**: Sensitive data (e.g., surveillance footage, vehicle sensors) stays on-device.  
+- **Bandwidth Efficiency**: Only model gradients (not raw images) are transmitted.  
+- **Regulatory Compliance**: Ideal for GDPR, HIPAA, or industry-specific data policies.  
+- **Edge Optimization**: Train models directly on edge devices (cameras, drones, IoT sensors).  
 
 ---
 
-## **Prepare Data**
-
-1. **Download or Acquire BDD100K**  
-   - Official site: [BDD100K](https://bdd-data.berkeley.edu/)  
-   - Once downloaded, you should have images (possibly 100k) and annotation files.  
-
-2. **Convert Labels (If Needed)**  
-   - If your BDD100K annotations are in JSON format, convert them to YOLO format using `label_utils.py`.  
-   - Example:
-     ```python
-     from label_utils import convert_bdd_to_yolo
-
-     # Suppose you have a file "bdd_annotations.json" and want to convert it
-     convert_bdd_to_yolo(
-         bdd_annotation_file="path/to/bdd_annotations.json",
-         output_label_dir="data/labels/",
-         class_names=["car", "bus", "person", ...]
-     )
-     ```
-   - This step ensures each image has a corresponding `.txt` file in the YOLO bounding-box specification (i.e., `<class_index> <x_center> <y_center> <width> <height>` in [0,1]).
-
-3. **Partition Data for Federated Clients**  
-   - Create subfolders like `client_0`, `client_1`, …, `client_9`.  
-   - Inside each client folder, create `train/images`, `train/labels`, `val/images`, and `val/labels`.  
-   - Move or copy your subset of images/labels into these subfolders.  
-   - Provide a `data.yaml` for each client that points to those folders:
-     ```yaml
-     # data/client_0/data.yaml (example)
-     train: data/client_0/train/images
-     val: data/client_0/val/images
-     nc: 10
-     names: ["car","person","traffic_light","bus", ...]
-     ```
-
-> **Note**: More detailed instructions on your data-splitting approach are in [update.md](update.md) (placeholder). You can adapt or rename that file as needed.
+## 🤖 Why YOLOv8?  
+- **State-of-the-Art Performance**: Outperforms YOLOv5 in accuracy and speed.  
+- **Multi-Task Support**: Object detection, segmentation, and classification.  
+- **Scalability**: Pre-trained models (`yolov8n`, `yolov8s`, etc.) for diverse hardware.  
+- **Ease of Use**: Simplified training API and extensive documentation.  
 
 ---
 
-## **Project Architecture**
-
-### **Files & Directories**
-
-1. **`server.py`**  
-   - Flower server orchestrating federated training and aggregation.  
-
-2. **`client.py`**  
-   - Flower client that trains a local YOLOv5 model using each client’s portion of data.  
-
-3. **`train_config.py`**  
-   - Central place for hyperparameters: number of rounds, local epochs, batch size, etc.  
-
-4. **`label_utils.py`**  
-   - Functions to convert BDD100K bounding boxes into YOLO format.  
-   - Verifies correctness of YOLO label files.  
-
-5. **`data_utils.py`**  
-   - Helpers for locating and verifying `data.yaml` for each client.  
-
-6. **`run_federation.bat`**  
-   - Windows batch script launching one server process and multiple client processes in separate CMD windows.  
-
-7. **`requirements.txt`**  
-   - Lists pinned or recommended packages.  
+## ⚙️ Tech Stack  
+- **Frameworks**: [Flower](https://flower.dev) (FL), [Ultralytics YOLOv8](https://ultralytics.com)  
+- **Dataset**: [BDD100K](https://bdd-data.berkeley.edu/) (preprocessed and hosted on Google Drive)  
+- **GPU Support**: CUDA 11.x, NVIDIA Drivers  
+- **Tools**: Conda, Git, WSL2 (optional)  
 
 ---
 
-## **Step-by-Step Usage**
+## 📥 Installation  
 
-1. **Activate Environment**  
-   ```bash
-   conda activate federated_yolov5
-   ```
+### 1. Prerequisites  
+- **Python 3.10+**  
+- **NVIDIA GPU** with CUDA 11.8+  
+- **Git** and **Conda**  
 
-2. **(Optional) Label Conversion**  
-   ```bash
-   python -c "import label_utils; label_utils.convert_bdd_to_yolo('bdd_annotations.json', 'data/labels', ['car','bus','person'])"
-   ```
-   - Adjust the annotation file path and classes as needed.
+### 2. Set Up Conda Environment  
+```bash  
+conda create -n fl_yolov8 python=3.10 -y  
+conda activate fl_yolov8  
+```  
 
-3. **Organize Partitions**  
-   - Create `data/client_0`, `data/client_1`, …, each with `train` and `val` subfolders and a `data.yaml`.  
+### 3. Install Dependencies  
+```bash  
+# PyTorch with CUDA  
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118  
 
-4. **Run Federated Training**  
-   - **Windows**: Double-click or run:
-     ```bash
-     ./run_federation.bat
-     ```
-   - This will:  
-     1. Launch `server.py` in a new window.  
-     2. Wait a few seconds.  
-     3. Launch 10 client windows (`client.py --id=0` through `client.py --id=9`).  
+# YOLOv8 and Flower  
+pip install ultralytics flwr[simulation]  
 
-5. **Monitor Logs**  
-   - Each client window displays YOLO training logs.  
-   - The server window shows progress on each federated round.
-
-6. **Result**  
-   - After **NUM_ROUNDS** (in `train_config.py`), the global model parameters converge.  
-   - You can see each round’s aggregated performance (mAP, etc.) in the logs.
+# Additional utilities  
+pip install opencv-python numpy tqdm pyyaml  
+```  
 
 ---
 
-## **Computational Setup**
+## 📂 Dataset Preparation  
 
-- **Operating System**: Windows 10/11  
-- **GPU**: e.g., NVIDIA RTX 4070 or similar (ensure CUDA drivers match)  
-- **Python**: 3.10.x  
-- **Memory Requirements**:  
-  - 10 concurrent clients with YOLOv5 training may require substantial GPU VRAM.  
-  - If OOM errors occur, lower the `BATCH_SIZE` or run fewer clients concurrently.
+### 1. Download Preprocessed Data  
+The BDD100K dataset (already in YOLOv8 format) is hosted on Google Drive:  
+🔗 [Download Dataset](https://drive.google.com/drive/folders/1R-lelZR3LBgeHfMlRR_OhOIzfUuxPBcZ?usp=sharing)  
 
----
+```bash  
+mkdir -p federated_yolov8/data  
+mv ~/Downloads/bdd100k_yolov8.zip federated_yolov8/data/  
+cd federated_yolov8/data  
+unzip bdd100k_yolov8.zip  
+```  
 
-## **Model Used**
+### 2. Partition Data for Federated Clients  
+Split the dataset into client-specific subsets using `split_clients.py`:  
+```bash  
+python split_clients.py \  
+    --source="data" \  
+    --output="data_clients" \  
+    --num_clients=10  
+```  
 
-We utilize **YOLOv5** from [Ultralytics](https://github.com/ultralytics/ultralytics) (e.g., `yolov5s.pt` base weights), which provides:
-
-- High-speed inference.  
-- Good performance on real-world object detection tasks.  
-- Straightforward fine-tuning & customization.
-
----
-
-## **References**
-
-1. **BDD100K**  
-   - [Dataset Homepage](https://bdd-data.berkeley.edu/)  
-   - [Documentation & Download](https://doc.bdd100k.com/download.html)  
-   - [Papers with Code](https://paperswithcode.com/dataset/bdd100k)  
-   - [Paper (ArXiv)](https://arxiv.org/abs/1805.04687)  
-
-2. **YOLOv5**  
-   - [Ultralytics GitHub](https://github.com/ultralytics/ultralytics)  
-
-3. **Flower**  
-   - [Official Site](https://flower.dev)  
-   - [GitHub Repo](https://github.com/adap/flower)  
-
-4. **Environment Setup Docs**  
-   - [`installations/docs/Git_setup.md`](installations/docs/Git_setup.md)  
-   - [`installations/docs/GitBash_Conda_Setup.md`](installations/docs/GitBash_Conda_Setup.md)  
-   - [`installations/docs/CUDA_installations.md`](installations/docs/CUDA_installations.md)  
-   - [`installations/docs/WSL.md`](installations/docs/WSL.md)
+Each client directory requires a `data.yaml` file. Example for `client_0`:  
+```yaml  
+train: ../client_0/train/images  
+val: ../client_0/val/images  
+nc: 13  # Number of classes  
+names: ["car", "person", "bus", "traffic light", ...]  
+```  
 
 ---
 
-## **Future Plans**
+## 🚀 Quick Start  
 
-- **Extend** to YOLOv8 or custom detection architectures.  
-- **Incorporate** advanced federated algorithms (e.g., FedProx, FedNova).  
-- **Use** more robust data splits or real-time streaming of images.  
-- **Experiment** with half-precision vs. full-precision trade-offs.
+### 1. Launch the Flower Server  
+```bash  
+python server.py --num_rounds=10 --batch_size=32  
+```  
+
+### 2. Start Federated Clients  
+Open separate terminals for each client:  
+```bash  
+# Client 0  
+python client.py --id=0 --data_path="data_clients/client_0/data.yaml"  
+
+# Client 1  
+python client.py --id=1 --data_path="data_clients/client_1/data.yaml"  
+```  
+
+### 3. Monitor Training  
+- **Server Logs**: Global model accuracy, round duration, client participation.  
+- **Client Logs**: Local training loss, validation mAP, GPU utilization.  
 
 ---
 
-### **End of Document**
+## 🎛️ Simulation Setup  
+
+Flower provides a **simulation engine** to test federated learning on a single machine.
+
+### 1. Set Up a Flower Simulation Project  
+```bash  
+flwr new my-project --framework PyTorch --username flower  
+cd my-project  
+pip install -e .  
+flwr run .  
+```  
+
+### 4. Clean Up  
+Use **Ctrl+C** in each terminal to stop the processes.
+
+---
+
+## 🏗️ Project Architecture  
+
+| File | Purpose |  
+|------|---------|  
+| `server.py` | Flower server for aggregating client updates. |  
+| `client.py` | Flower client to train YOLOv8 locally. |  
+| `simulation.py` | Runs multiple simulated FL clients on a single machine. |  
+| `train_config.py` | Configures training hyperparameters. |  
+| `split_clients.py` | Partitions dataset into client-specific subsets. |  
+| `label_utils.py` | Converts BDD100K annotations to YOLO format. |  
+
+---
+
+## 🛠️ Troubleshooting  
+
+| Issue | Solution |  
+|-------|----------|  
+| **CUDA Out of Memory** | Reduce `BATCH_SIZE` or use `yolov8n`. |  
+| **No GPU Detected** | Verify `torch.cuda.is_available()` and reinstall PyTorch with CUDA. |  
+| **Dataset Path Errors** | Ensure `data.yaml` paths match the client directory structure. |  
+| **Dependency Conflicts** | Use a fresh Conda environment. |  
+
+---
+
+## 📚 References  
+- **YOLOv8**: [Ultralytics Documentation](https://docs.ultralytics.com)  
+- **Flower**: [Official Documentation](https://flower.dev/docs)  
+- **BDD100K**: [Dataset Paper](https://arxiv.org/abs/1805.04687)  
+
+---
+
+## 🗺️ Future Roadmap  
+1. **Advanced FL Strategies**: Implement FedProx/FedNova for non-IID data.  
+2. **Edge Deployment**: Optimize for NVIDIA Jetson/Raspberry Pi.  
+3. **Real-Time Inference**: On-device inference with periodic FL updates.  
+4. **Multi-Task Learning**: Add segmentation support with YOLOv8.  
+
+---
+
+Thanks! 😊
