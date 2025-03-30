@@ -44,8 +44,8 @@ def set_weights(model, parameters: List[np.ndarray]) -> bool:
         return False
 
 
-def load_yolo_model(yaml_path=r"C:\Users\sathish\Downloads\FL_ModelForAV\my-project\models\yolo8n.yaml", 
-                weight_path=r"C:\Users\sathish\Downloads\FL_ModelForAV\my-project\models\yolov8s.pt"):
+def load_yolo_model(yaml_path="models/yolo8n.yaml", 
+                weight_path="models/yolov8s.pt"):
 
     try:
         logger.debug(f"Loading YOLOv8 model from {yaml_path} with weights from {weight_path}...")
