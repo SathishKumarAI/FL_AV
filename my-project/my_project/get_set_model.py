@@ -2,6 +2,8 @@ from typing import List, Optional
 import warnings
 import torch
 import numpy as np
+import platform
+import os
 from ultralytics import YOLO
 from collections import OrderedDict
 from utils.logging_setup import configure_logging
@@ -9,8 +11,28 @@ from utils.logging_setup import configure_logging
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logger = configure_logging("get_set", "logs/get_set.log")
 
+# OS detection
+IS_WINDOWS = platform.system() == "Windows"
+OS_NAME = platform.system()
+logger.info(f"[GetSet] Detected operating system: {OS_NAME}")
+
 # Constants
 DEFAULT_NUM_CLASSES = 13  # The default number of classes for our model
+
+def get_normalized_path(path):
+    """
+    Normalize path to the current operating system format.
+    
+    Args:
+        path: Path to normalize
+        
+    Returns:
+        str: Normalized path for the current OS
+    """
+    if IS_WINDOWS:
+        return str(path).replace('/', '\\')
+    else:
+        return str(path).replace('\\', '/')
 
 def get_weights(model):
     """
@@ -96,10 +118,14 @@ def load_yolo_model(yaml_path="models/yolo8n.yaml",
         The loaded model or None on error
     """
     try:
-        logger.debug(f"[GetSet] Loading YOLOv8 model from {yaml_path} with weights from {weight_path}...")
+        # Normalize paths for current OS
+        yaml_path = get_normalized_path(yaml_path)
+        weight_path = get_normalized_path(weight_path)
+        
+        logger.debug(f"[GetSet] Loading YOLOv8 model from {yaml_path} with weights from {weight_path}")
+        logger.debug(f"[GetSet] Current OS: {OS_NAME}, using normalized paths")
         
         # Check if files exist
-        import os
         if not os.path.exists(yaml_path):
             logger.error(f"[GetSet] Model config not found: {yaml_path}")
             return None
@@ -124,7 +150,7 @@ def load_yolo_model(yaml_path="models/yolo8n.yaml",
         if hasattr(model, 'head'):
             model.head.nc = DEFAULT_NUM_CLASSES
         
-        logger.debug(f"[GetSet] Model loaded successfully with nc={DEFAULT_NUM_CLASSES}.")
+        logger.debug(f"[GetSet] Model loaded successfully with nc={DEFAULT_NUM_CLASSES}")
         return model
     except Exception as e:
         logger.error(f"[GetSet] Failed to load YOLOv8 model: {e}", exc_info=True)

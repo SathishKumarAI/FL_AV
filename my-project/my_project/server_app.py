@@ -2,6 +2,7 @@ import logging
 import os
 import random
 import warnings
+import platform
 from typing import List, Tuple, Dict, Optional, Union, Any
 import numpy as np
 
@@ -15,13 +16,16 @@ from flwr.server.client_manager import ClientManager
 # Ensure Ultralytics does not use HUB (prevents import issues)
 os.environ["ULTRALYTICS_HUB"] = "0"
 from ultralytics import YOLO
-from my_project.task import download_model
+from my_project.task import download_model, IS_WINDOWS, OS_NAME
 from my_project.get_set_model import get_weights, set_weights
 
 from utils.logging_setup import configure_logging
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logger = configure_logging("server", "logs/server.log")
+
+# Log OS detection
+logger.info(f"[Server] Detected operating system: {OS_NAME}, IS_WINDOWS={IS_WINDOWS}")
 
 # Constants
 MODEL_PATH = "models/yolov8s.pt"
@@ -75,6 +79,7 @@ class CustomBatchStrategy(FedAvg):
         self.batch_id_range = batch_id_range
         self.used_batch_ids = set()
         self.client_to_batch_id: Dict[str, int] = {}
+        self.client_os_info: Dict[str, str] = {}  # Track client OS information
         logger.info(f"[Server] CustomBatchStrategy initialized with batch_id_range={batch_id_range}")
     
     def _get_unused_batch_id(self, client_id: str) -> int:
@@ -240,6 +245,13 @@ class CustomBatchStrategy(FedAvg):
             logger.warning(f"[Server] No results to aggregate in round {server_round}")
             return None, {}
         
+        # Track OS information from clients
+        for client_proxy, fit_res in results:
+            if "os" in fit_res.metrics:
+                client_os = fit_res.metrics["os"]
+                self.client_os_info[client_proxy.cid] = client_os
+                logger.info(f"[Server] Client {client_proxy.cid} is running on {client_os}")
+        
         # Log results and failures
         logger.info(f"[Server] Aggregating {len(results)} fit results and {len(failures)} failures")
         
@@ -252,8 +264,17 @@ class CustomBatchStrategy(FedAvg):
             weights_checksum = sum(w.sum() for w in weights if w.size > 0)
             logger.info(f"[Server] Aggregated parameters with checksum: {weights_checksum}")
             
-            # Add checksum to metrics for tracking
+            # Add checksum and OS counts to metrics for tracking
             metrics["weights_checksum"] = float(weights_checksum)
+            metrics["server_os"] = OS_NAME
+            
+            # Count clients by OS
+            os_counts = {}
+            for os_name in self.client_os_info.values():
+                os_counts[f"client_count_{os_name}"] = os_counts.get(f"client_count_{os_name}", 0) + 1
+            
+            # Add OS counts to metrics
+            metrics.update({k: float(v) for k, v in os_counts.items()})
             
             # Log metrics
             logger.info(f"[Server] Round {server_round} metrics: {metrics}")
@@ -261,6 +282,49 @@ class CustomBatchStrategy(FedAvg):
             logger.warning(f"[Server] No aggregated parameters produced in round {server_round}")
             
         return parameters, metrics
+        
+    def aggregate_evaluate(
+        self,
+        server_round: int,
+        results: List[Tuple[ClientProxy, FitIns]],
+        failures: List[Union[Tuple[ClientProxy, FitIns], BaseException]],
+    ) -> Tuple[Optional[float], Dict[str, Scalar]]:
+        """
+        Aggregate evaluation results from clients.
+        
+        Args:
+            server_round: Current round number
+            results: Evaluation results from each client
+            failures: List of client failures
+            
+        Returns:
+            Tuple of (loss, metrics dict)
+        """
+        if not results:
+            return None, {}
+            
+        # Track OS information from clients
+        for client_proxy, eval_res in results:
+            if "os" in eval_res.metrics:
+                client_os = eval_res.metrics["os"]
+                self.client_os_info[client_proxy.cid] = client_os
+                logger.info(f"[Server] Client {client_proxy.cid} evaluated on {client_os}")
+        
+        # Call the parent's aggregation method
+        loss, metrics = super().aggregate_evaluate(server_round, results, failures)
+        
+        # Add OS information to metrics
+        metrics["server_os"] = OS_NAME
+        
+        # Count clients by OS
+        os_counts = {}
+        for os_name in self.client_os_info.values():
+            os_counts[f"client_count_{os_name}"] = os_counts.get(f"client_count_{os_name}", 0) + 1
+        
+        # Add OS counts to metrics
+        metrics.update({k: float(v) for k, v in os_counts.items()})
+        
+        return loss, metrics
 
 
 def server_fn(_):
@@ -303,7 +367,7 @@ def server_fn(_):
     server_config = ServerConfig(num_rounds=DEFAULT_NUM_ROUNDS)
 
     logger.info(f"[Server] FedAvg-based strategy configured for {DEFAULT_NUM_ROUNDS} rounds")
-    logger.info("[Server] Server initialization complete and ready for clients")
+    logger.info(f"[Server] Server running on {OS_NAME} is ready for clients")
     
     return ServerAppComponents(
         strategy=strategy, 

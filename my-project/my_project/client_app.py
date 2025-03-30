@@ -2,18 +2,28 @@ import logging
 import os
 import warnings
 import torch
+import platform
 from flwr.common import Code, Status
 from flwr.client import ClientApp, Client
 from flwr.common import Context, FitIns, FitRes, EvaluateIns, EvaluateRes, Parameters, RecordSet
 
 from ultralytics import YOLO
-from my_project.task import download_model  # Custom YOLO utility functions
+from my_project.task import (
+    download_model, 
+    get_data_yaml_path, 
+    update_data_yaml_paths, 
+    IS_WINDOWS, 
+    OS_NAME
+)  # Import OS detection
 import urllib
 from my_project.get_set_model import get_weights, load_yolo_model, set_weights
 from utils.logging_setup import configure_logging
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logger = configure_logging("client", "logs/client.log")
+
+# Log OS detection information
+logger.info(f"[Client] Detected operating system: {OS_NAME}, IS_WINDOWS={IS_WINDOWS}")
 
 # Constants
 DEFAULT_BATCH_ID_RANGE = (1, 10)
@@ -69,9 +79,24 @@ class FlowerClient(Client):
             return False
         return True    
 
-    def _get_data_path(self, batch_id):
-        """Constructs consistent data path based on batch_id"""
-        return f"batch/batch_{batch_id}/data.yaml"
+    def _get_data_yaml_path(self, batch_id):
+        """
+        Gets the data.yaml path and ensures it's updated for the current OS.
+        
+        Args:
+            batch_id: The batch ID
+            
+        Returns:
+            Path: Path to the data.yaml file
+        """
+        # Get the path
+        yaml_path = get_data_yaml_path(batch_id)
+        
+        # Update the path in data.yaml if needed
+        if os.path.exists(yaml_path):
+            update_data_yaml_paths(batch_id)
+            
+        return yaml_path
 
     def fit(self, ins: FitIns) -> FitRes:
         if self.model is None:
@@ -130,7 +155,7 @@ class FlowerClient(Client):
         logger.info(f"[Client] Starting local training with batch_id={self.batch_id}, local_epochs={local_epochs}")
 
         # 3) Build data path and verify it exists
-        data_yaml_path = self._get_data_path(self.batch_id)
+        data_yaml_path = str(self._get_data_yaml_path(self.batch_id))
         if not os.path.exists(data_yaml_path):
             logger.error(f"[Client] Training data.yaml not found: {data_yaml_path}")
             return FitRes(
@@ -142,6 +167,7 @@ class FlowerClient(Client):
 
         # 4) Train the model
         try:
+            logger.info(f"[Client] Training with data config: {data_yaml_path}")
             results = self.yolo.train(
                 data=data_yaml_path,
                 epochs=local_epochs,
@@ -161,14 +187,15 @@ class FlowerClient(Client):
                     "recall": results_dict.get("metrics/recall(B)", 0),
                     "mAP50": results_dict.get("metrics/mAP50(B)", 0),
                     "mAP50-95": results_dict.get("metrics/mAP50-95(B)", 0),
-                    "fitness": results_dict.get("fitness", 0)
+                    "fitness": results_dict.get("fitness", 0),
+                    "os": OS_NAME  # Include OS information in metrics for tracking
                 }
                 
                 logger.info(f"[Client] {self.batch_id} Training done. metrics={metrics}")
             else:
                 logger.warning("[Client] Training did not return metrics.")
                 num_examples = 0
-                metrics = {"error": "No metrics returned from training"}
+                metrics = {"error": "No metrics returned from training", "os": OS_NAME}
 
             # 6) Extract updated weights for sending back to server
             updated_weights = get_weights(self.model)
@@ -186,7 +213,7 @@ class FlowerClient(Client):
             return FitRes(
                 parameters=ins.parameters,
                 num_examples=1,
-                metrics={"error": str(e)},
+                metrics={"error": str(e), "os": OS_NAME},
                 status=Status(code=Code.FIT_NOT_IMPLEMENTED, message="Training process failed"),
             )
 
@@ -196,7 +223,7 @@ class FlowerClient(Client):
             return EvaluateRes(
                 loss=float("inf"), 
                 num_examples=1, 
-                metrics={}, 
+                metrics={"os": OS_NAME}, 
                 status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="No model available")
             )
             
@@ -221,7 +248,7 @@ class FlowerClient(Client):
             return EvaluateRes(
                 loss=float("inf"),
                 num_examples=1,
-                metrics={},
+                metrics={"os": OS_NAME},
                 status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="Failed to load weights for evaluation"),
             )
 
@@ -239,7 +266,7 @@ class FlowerClient(Client):
             return EvaluateRes(
                 loss=float("inf"),
                 num_examples=1,
-                metrics={},
+                metrics={"os": OS_NAME},
                 status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message=f"Invalid batch_id: {batch_id}"),
             )
             
@@ -248,18 +275,19 @@ class FlowerClient(Client):
         logger.info(f"[Client] Starting evaluation with batch_id={self.batch_id}")
 
         # 4) Build data path and verify it exists
-        data_yaml_path = self._get_data_path(self.batch_id)
+        data_yaml_path = str(self._get_data_yaml_path(self.batch_id))
         if not os.path.exists(data_yaml_path):
             logger.error(f"[Client] Evaluation data.yaml not found: {data_yaml_path}")
             return EvaluateRes(
                 loss=float("inf"),
                 num_examples=1,
-                metrics={},
+                metrics={"os": OS_NAME},
                 status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="Missing evaluation data.yaml"),
             )
 
         # 5) Evaluate the model
         try:
+            logger.info(f"[Client] Evaluating with data config: {data_yaml_path}")
             results = self.yolo.val(
                 data=data_yaml_path,
                 imgsz=DEFAULT_IMAGE_SIZE,
@@ -276,7 +304,8 @@ class FlowerClient(Client):
                 "precision": results.results_dict.get("metrics/precision(B)", 0),
                 "recall": results.results_dict.get("metrics/recall(B)", 0),
                 "mAP50": results.results_dict.get("metrics/mAP50(B)", 0),
-                "mAP50-95": results.results_dict.get("metrics/mAP50-95(B)", 0)
+                "mAP50-95": results.results_dict.get("metrics/mAP50-95(B)", 0),
+                "os": OS_NAME  # Include OS information in metrics for tracking
             }
 
             logger.info(f"[Client] Evaluation done. Loss={fitness_value}, metrics={metrics}, Images Processed={num_examples}")
@@ -293,7 +322,7 @@ class FlowerClient(Client):
             return EvaluateRes(
                 loss=float("inf"),
                 num_examples=1,
-                metrics={"error": error_message},
+                metrics={"error": error_message, "os": OS_NAME},
                 status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message=error_message),
             )
 
