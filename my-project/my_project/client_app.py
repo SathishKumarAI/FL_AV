@@ -7,7 +7,7 @@ from flwr.client import ClientApp, Client
 from flwr.common import Context, FitIns, FitRes, EvaluateIns, EvaluateRes, Parameters, RecordSet
 
 from ultralytics import YOLO
-from my_project.task import  download_model  # Custom YOLO utility functions
+from my_project.task import download_model  # Custom YOLO utility functions
 import urllib
 from my_project.get_set_model import get_weights, load_yolo_model, set_weights
 from utils.logging_setup import configure_logging
@@ -15,24 +15,25 @@ from utils.logging_setup import configure_logging
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logger = configure_logging("client", "logs/client.log")
 
+# Constants
+DEFAULT_BATCH_ID_RANGE = (1, 10)
+DEFAULT_IMAGE_SIZE = 640
 
 class FlowerClient(Client):
 
     def __init__(self,
-                model_path: str ,
-                # = "models/yolov8s.pt",
+                model_path: str,
                 client_state : RecordSet,
                 local_epochs : int,
-                batch_id_range: tuple = (1, 10),  # Default range for batch IDs
+                batch_id_range: tuple = DEFAULT_BATCH_ID_RANGE,  # Using constant
                 ):
     
         super().__init__()
         self.model_path = model_path
-        # self.yolo = YOLO(self.model_path)
-        # self.model = self.yolo.model
         self.client_state = client_state
         self.local_epochs = local_epochs
         self.batch_id_range = batch_id_range
+        self.batch_id = None
         
         # Decide GPU/CPU
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -43,22 +44,20 @@ class FlowerClient(Client):
             if not os.path.exists(self.model_path):
                 logger.warning("[Client] Model weights not found. Downloading default YOLOv8 weights.")
                 download_model()  # Ensure we have some valid weights to avoid shape mismatch
-            # self.model = load_yolo_model(self.model_path).to(self.device)
-            # self.model = load_yolo_model(self.model_path)
+            
             self.yolo = YOLO(self.model_path)
             self.model = self.yolo.model
+            
             # Set number of classes if needed
             self.model.nc = 13
             if hasattr(self.model, 'head'):
                 self.model.head.nc = 13
-            logger.info("[Client] YOLO model loaded successfully.")
+                
             logger.info("[Client] YOLO model loaded successfully.")
         except Exception as e:
             logger.error("[Client] Failed to load YOLO model!", exc_info=True)
             self.model = None
             self.yolo = None
-
-        # self.model = model
         
     def _validate_batch_id(self, batch_id: int) -> bool:
         """Validate that batch_id is within the acceptable range."""
@@ -70,8 +69,11 @@ class FlowerClient(Client):
             return False
         return True    
 
-    def fit(self, ins: FitIns ) -> FitRes:
+    def _get_data_path(self, batch_id):
+        """Constructs consistent data path based on batch_id"""
+        return f"batch/batch_{batch_id}/data.yaml"
 
+    def fit(self, ins: FitIns) -> FitRes:
         if self.model is None:
             logger.error("[Client] No model available, cannot train.")
             # Return original parameters so server isn't disrupted
@@ -79,42 +81,44 @@ class FlowerClient(Client):
                 parameters=ins.parameters,
                 num_examples=1,
                 metrics={"train_loss": float("inf")},
-                status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="Failed to load model for evaluation"),
+                status=Status(code=Code.FIT_NOT_IMPLEMENTED, message="Failed to load model for training"),
             )
             
-        # 1️⃣ Ensure Weights Match YOLOv8 Structure
+        # 1) Load weights from parameters 
         weights_list = self._parameters_to_list(ins.parameters)
         if not weights_list:
-            logger.warning("[Client] Received empty weights. Using default YOLOv8 pretrained weights.")
-            weights_list = get_weights(self.model)  # Use YOLOv8 default weights if first iteration
-        # logger.info(f"[Client]  weights_list={weights_list}")
-        # # 1) Convert parameters to local YOLO weights
+            logger.warning("[Client] Received empty weights. Using current model weights.")
+            weights_list = get_weights(self.model)
+        
+        # Track weights checksum for debugging weight transfer
+        weights_checksum = sum(w.sum() for w in weights_list if w.size > 0)
+        logger.info(f"[Client] Received weights with checksum: {weights_checksum}")
         
         try:
             set_weights(self.model, weights_list)
+            logger.info("[Client] Successfully applied received weights to model")
         except Exception as e:
             logger.error(f"[Client] set_weights failed: {e}", exc_info=True)
-            return  FitRes(
+            return FitRes(
                 parameters=ins.parameters,
                 num_examples=1,
                 metrics={"train_loss": float("inf")},
-                status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="Failed to load model for evaluation"),
+                status=Status(code=Code.FIT_NOT_IMPLEMENTED, message="Failed to load weights for training"),
             )
 
-        # 2) Parse config (no .get usage, so we do direct indexing)
-        config = ins.config
-        # batch_id = config.get("batch_id", None)
+        # 2) Parse config from server
         batch_id = ins.config.get("batch_id", None)
+        local_epochs = ins.config.get("local_epochs", self.local_epochs)
 
         # Use stored batch_id as fallback if available
         if batch_id is None:
             logger.warning("[Client] No batch_id received, using stored batch_id.")
-            batch_id = getattr(self, "batch_id", None)
+            batch_id = self.batch_id
 
         # Validate batch_id
         if batch_id is None or not self._validate_batch_id(batch_id):
             logger.error(f"[Client] Invalid batch_id: {batch_id}. Expected range: {self.batch_id_range}.")
-            return FitRes(  # or EvaluateRes for evaluate method
+            return FitRes(
                 parameters=ins.parameters,
                 num_examples=1,
                 metrics={},
@@ -123,25 +127,10 @@ class FlowerClient(Client):
 
         # Store valid batch_id for future use
         self.batch_id = batch_id
+        logger.info(f"[Client] Starting local training with batch_id={self.batch_id}, local_epochs={local_epochs}")
 
-        try:
-            self.batch_id = config["batch_id"]        # If missing, KeyError
-            local_epochs = config["local_epochs"] # If missing, KeyError
-            logger.info(
-                f"[Client] Starting local training with batch_id={self.batch_id}, local_epochs={local_epochs}"
-            )
-        except KeyError as ke:
-            logger.error(f"[Client] Missing key in FitIns.config: {ke}", exc_info=True)
-            return FitRes(
-                parameters=ins.parameters,
-                num_examples=1,
-                metrics={},
-                status=Status(code=Code.FIT_NOT_IMPLEMENTED, message="Missing batch_id or local_epochs in training config"),
-            )
-
-
-        # Construct training data path
-        data_yaml_path = f"batch/batch_{self.batch_id}/data.yaml"
+        # 3) Build data path and verify it exists
+        data_yaml_path = self._get_data_path(self.batch_id)
         if not os.path.exists(data_yaml_path):
             logger.error(f"[Client] Training data.yaml not found: {data_yaml_path}")
             return FitRes(
@@ -151,56 +140,43 @@ class FlowerClient(Client):
                 status=Status(code=Code.FIT_NOT_IMPLEMENTED, message="Missing training data.yaml"),
             )
 
+        # 4) Train the model
         try:
             results = self.yolo.train(
                 data=data_yaml_path,
                 epochs=local_epochs,
-                imgsz=640,
+                imgsz=DEFAULT_IMAGE_SIZE,
                 device=self.device,
                 verbose=False
             )
-
             
-            # Ensure training completed
+            # 5) Process results
             if hasattr(results, "results_dict"):
-
-                # num_examples = results.results_dict.get("training/images", 1)
-                num_examples = 10
-                # Assuming 'results' is your DetMetrics object
-                # # First convert the DetMetrics object to a dictionary
-                results_dict = results.results_dict  # This is the correct way to access the dictionary
-
-                fitness_value = results_dict["fitness"]  # Access from the dictionary
+                num_examples = 10  # Default value if exact count is not available
+                results_dict = results.results_dict
+                
                 # Create metrics dictionary
                 metrics = {
-                    # "train_loss": fitness_value,
-                    "precision": results.results_dict.get("metrics/precision(B)", 0),
-                    "recall": results.results_dict.get("metrics/recall(B)", 0),
-                    "mAP50": results.results_dict.get("metrics/mAP50(B)", 0),
-                    "mAP50-95": results.results_dict.get("metrics/mAP50-95(B)", 0)
+                    "precision": results_dict.get("metrics/precision(B)", 0),
+                    "recall": results_dict.get("metrics/recall(B)", 0),
+                    "mAP50": results_dict.get("metrics/mAP50(B)", 0),
+                    "mAP50-95": results_dict.get("metrics/mAP50-95(B)", 0),
+                    "fitness": results_dict.get("fitness", 0)
                 }
-                # dir1 = dir(results)
-                # dir = ['__class__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__format__', '__ge__', '__getattr__', '__getattribute__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__str__', '__subclasshook__', '__weakref__', 
-                # 'ap_class_index', 
-                # 'box', 
-                # 'class_result', 
-                # 'confusion_matrix', 
-                # 'curves', 
-                # 'curves_results', 
-                # 'fitness', 'keys', 'maps', 
-                # 'mean_results', 'names', 'on_plot', 'plot', 'process', 
-                # 'results_dict', 
-                # 'save_dir', 'speed', 'task']
                 
-                logger.info(f"[Client] {self.batch_id}  Training done. metrics = {metrics}    results_dict = {results_dict}   "     )
-                # logger.info(f"[Client]{self.batch_id} Training done. Loss={fitness_value}, Images={num_examples}  results ={results}"           )
+                logger.info(f"[Client] {self.batch_id} Training done. metrics={metrics}")
             else:
                 logger.warning("[Client] Training did not return metrics.")
-                final_loss = float("inf")
                 num_examples = 0
+                metrics = {"error": "No metrics returned from training"}
 
+            # 6) Extract updated weights for sending back to server
+            updated_weights = get_weights(self.model)
+            updated_checksum = sum(w.sum() for w in updated_weights if w.size > 0)
+            logger.info(f"[Client] Sending back weights with checksum: {updated_checksum}")
+            
             return FitRes(
-                parameters=self._list_to_parameters(get_weights(self.model)),
+                parameters=self._list_to_parameters(updated_weights),
                 num_examples=int(num_examples),
                 metrics=metrics,
                 status=Status(code=Code.OK, message="Training successful"),
@@ -210,29 +186,31 @@ class FlowerClient(Client):
             return FitRes(
                 parameters=ins.parameters,
                 num_examples=1,
-                metrics={},
+                metrics={"error": str(e)},
                 status=Status(code=Code.FIT_NOT_IMPLEMENTED, message="Training process failed"),
             )
 
     def evaluate(self, ins: EvaluateIns) -> EvaluateRes:
         if self.model is None:
             logger.error("[Client] No model available, cannot evaluate.")
-            return EvaluateRes(loss=float("inf"), num_examples=1, metrics={}, status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="No model available"),)
-        #1️⃣ Load Weights (Ensure They Match)
+            return EvaluateRes(
+                loss=float("inf"), 
+                num_examples=1, 
+                metrics={}, 
+                status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="No model available")
+            )
+            
+        # 1) Load weights from parameters
         weights_list = self._parameters_to_list(ins.parameters)
         if not weights_list:
-            if self.model is None:
-                logger.error("[Client] No model and no weights received, cannot evaluate.")
-                return EvaluateRes(
-                    loss=float("inf"),
-                    num_examples=1,
-                    metrics={},
-                    status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="No model weights available"),
-                )
-            logger.warning("[Client] Received empty weights. Using current YOLO model weights.")
+            logger.warning("[Client] Received empty weights for evaluation. Using current model weights.")
             weights_list = get_weights(self.model)
             
-        # 1) Load global YOLO weights
+        # Track weights checksum for debugging weight transfer
+        weights_checksum = sum(w.sum() for w in weights_list if w.size > 0)
+        logger.info(f"[Client] Received evaluation weights with checksum: {weights_checksum}")
+            
+        # 2) Apply weights to model
         try:
             logger.info("[Client] Setting evaluation weights.")
             success = set_weights(self.model, weights_list)
@@ -241,76 +219,72 @@ class FlowerClient(Client):
         except Exception as e:
             logger.error(f"[Client] evaluate() set_weights failed: {e}", exc_info=True)
             return EvaluateRes(
-            loss=float("inf"),
-            num_examples=1,
-            metrics={},
-            status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED , message="Failed to load weights for evaluation"),
-        )
-
-        # 2) Parse config\\
-        
-        # config = ins.config.get()
-        
-        batch_id = ins.config.get("batch_id", None)
-
-        # Store valid batch_id for future use
-        self.batch_id = batch_id
-
-        try:
-            self.batch_id = ins.config["batch_id"]        # If missing, KeyError
-            local_epochs = ins.config["local_epochs"] # If missing, KeyError
-            logger.info(
-                f"[Client] Starting local training with batch_id={self.batch_id}, local_epochs={local_epochs}"
+                loss=float("inf"),
+                num_examples=1,
+                metrics={},
+                status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="Failed to load weights for evaluation"),
             )
-        except KeyError as ke:
-            logger.error(f"[Client] Missing key in FitIns.config: {ke}", exc_info=True)
+
+        # 3) Parse config from server
+        batch_id = ins.config.get("batch_id", None)
+        
+        # Use stored batch_id as fallback if available
+        if batch_id is None:
+            logger.warning("[Client] No batch_id received for evaluation, using stored batch_id.")
+            batch_id = self.batch_id
+            
+        # Validate batch_id
+        if batch_id is None or not self._validate_batch_id(batch_id):
+            logger.error(f"[Client] Invalid batch_id for evaluation: {batch_id}. Expected range: {self.batch_id_range}.")
             return EvaluateRes(
                 loss=float("inf"),
                 num_examples=1,
                 metrics={},
-                status=Status(code=Code.FIT_NOT_IMPLEMENTED, message="Missing batch_id or local_epochs in training config"),
+                status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message=f"Invalid batch_id: {batch_id}"),
             )
+            
+        # Store valid batch_id for future use
+        self.batch_id = batch_id
+        logger.info(f"[Client] Starting evaluation with batch_id={self.batch_id}")
 
-
-        # 3) Evaluate on the data.yaml
-        data_yaml_path = f"batch/batch_{batch_id}/data.yaml"
+        # 4) Build data path and verify it exists
+        data_yaml_path = self._get_data_path(self.batch_id)
         if not os.path.exists(data_yaml_path):
             logger.error(f"[Client] Evaluation data.yaml not found: {data_yaml_path}")
             return EvaluateRes(
                 loss=float("inf"),
                 num_examples=1,
                 metrics={},
-                status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED , message="Missing evaluation data.yaml"),
+                status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message="Missing evaluation data.yaml"),
             )
 
+        # 5) Evaluate the model
         try:
             results = self.yolo.val(
                 data=data_yaml_path,
-                imgsz=640,
+                imgsz=DEFAULT_IMAGE_SIZE,
                 device=self.device,
                 verbose=False
             )
-            # val_loss = results.results_dict.get("val/loss", float("inf"))
-            # mAP50 = results.results_dict.get("metrics/mAP50", 0.0)
-            # num_examples = results.results_dict.get("validation/images", 0)
             
-            num_examples = 10
-            fitness_value = results.results_dict["fitness"]  # Access from the dictionary
+            # 6) Process results
+            num_examples = 10  # Default value if exact count is not available
+            fitness_value = results.results_dict.get("fitness", float("inf"))
+            
             # Create metrics dictionary
             metrics = {
-                # "train_loss": fitness_value,
                 "precision": results.results_dict.get("metrics/precision(B)", 0),
                 "recall": results.results_dict.get("metrics/recall(B)", 0),
                 "mAP50": results.results_dict.get("metrics/mAP50(B)", 0),
                 "mAP50-95": results.results_dict.get("metrics/mAP50-95(B)", 0)
             }
 
-            logger.info(f"[Client] Evaluation done. Loss = {fitness_value}, metrics = {metrics}, Images Processed = {num_examples} ")
+            logger.info(f"[Client] Evaluation done. Loss={fitness_value}, metrics={metrics}, Images Processed={num_examples}")
 
             return EvaluateRes(
                 loss=float(fitness_value),
-                num_examples=1,
-                metrics= metrics,
+                num_examples=num_examples,
+                metrics=metrics,
                 status=Status(code=Code.OK, message="Evaluation successful"),
             )
         except Exception as e:
@@ -319,14 +293,12 @@ class FlowerClient(Client):
             return EvaluateRes(
                 loss=float("inf"),
                 num_examples=1,
-                metrics={"error": error_message},  # Return error message in metrics
+                metrics={"error": error_message},
                 status=Status(code=Code.EVALUATE_NOT_IMPLEMENTED, message=error_message),
             )
 
     def _list_to_parameters(self, weights_list) -> Parameters:
-        from flwr.common import NDArrays, parameters_to_ndarrays, ndarrays_to_parameters
-        import numpy as np
-
+        from flwr.common import ndarrays_to_parameters
         return ndarrays_to_parameters(weights_list)
 
     def _parameters_to_list(self, parameters: Parameters):
@@ -335,25 +307,24 @@ class FlowerClient(Client):
 
 
 def client_fn(context: Context):
-
     try:
         logger.info("[Client] Creating FlowerClient instance from client_fn.")
-        model_path = "models/yolov8s.pt"  # Use a relative path
+        model_path = "models/yolov8s.pt"  # Relative path
 
-        local_epochs = context.run_config["local_epochs"]
+        local_epochs = context.run_config.get("local_epochs", 1)
         client_state = context.state
-        batch_id_range = context.run_config.get("batch_id_range", (1, 10))  # Default range if not provided
+        batch_id_range = context.run_config.get("batch_id_range", DEFAULT_BATCH_ID_RANGE)
+        
         client = FlowerClient(
-            model_path = model_path,
-            client_state = client_state,
-            local_epochs = local_epochs,
+            model_path=model_path,
+            client_state=client_state,
+            local_epochs=local_epochs,
             batch_id_range=batch_id_range,
-                            )
+        )
         
         return client
-    # .to_client()
     except Exception as e:
-        logger.error("[Client] client_fn failed to create FlowerClient", exc_info=True)
+        logger.error(f"[Client] client_fn failed to create FlowerClient: {e}", exc_info=True)
         return None
 
 

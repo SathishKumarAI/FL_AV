@@ -14,33 +14,55 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 logger = configure_logging("task", "logs/task.log")
 
-import os
-import urllib.request
-import logging
-
-
-# Correct Model Path and URL
+# Constants for model paths and URLs
 MODEL_PATH = "models/yolov8s.pt"
 MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s.pt"
+DEFAULT_IMAGE_SIZE = 640  # Default image size for training/validation
+DEFAULT_BATCH_ID_RANGE = (1, 10)  # Consistent with server and client
 
 def download_model():
     """Download YOLO model if not found."""
-    logger.info(f"[Server] Checking if model exists at {MODEL_PATH}...")
+    logger.info(f"[Task] Checking if model exists at {MODEL_PATH}...")
 
     # Ensure directory exists
     model_dir = os.path.dirname(MODEL_PATH) or "."  # Use current directory if empty
     os.makedirs(model_dir, exist_ok=True)
 
     if not os.path.exists(MODEL_PATH):  # Check before downloading
-        logger.info(f"[Server] Model not found. Downloading from {MODEL_URL}...")
+        logger.info(f"[Task] Model not found. Downloading from {MODEL_URL}...")
         try:
+            import urllib.request
             urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-            logger.info("[Server] Model downloaded successfully.")
+            logger.info("[Task] Model downloaded successfully.")
         except Exception as e:
-            logger.error(f"[Server] Failed to download the model from {MODEL_URL}: {e}", exc_info=True)
-            raise RuntimeError(f"Server cannot start without a valid YOLO model at {MODEL_PATH}.") from e
+            logger.error(f"[Task] Failed to download the model from {MODEL_URL}: {e}", exc_info=True)
+            raise RuntimeError(f"Cannot download a valid YOLO model to {MODEL_PATH}.") from e
     else:
-        logger.info(f"[Server] Model already exists at {MODEL_PATH}, skipping download.")
+        logger.info(f"[Task] Model already exists at {MODEL_PATH}, skipping download.")
+
+def get_batch_path(batch_id):
+    """
+    Get the path to a batch directory.
+    
+    Args:
+        batch_id: The batch ID
+        
+    Returns:
+        Path: Path to the batch directory
+    """
+    return Path(f"batch/batch_{batch_id}")
+
+def get_data_yaml_path(batch_id):
+    """
+    Get the path to a batch's data.yaml file.
+    
+    Args:
+        batch_id: The batch ID
+        
+    Returns:
+        Path: Path to the data.yaml file
+    """
+    return get_batch_path(batch_id) / "data.yaml"
 
 # ----------------------------------------------------------
 # 1) Configuration Loader
@@ -55,10 +77,10 @@ def load_config(config_path):
     try:
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
-        logger.info(f"Loaded config from {config_path}")
+        logger.info(f"[Task] Loaded config from {config_path}")
         return config
     except Exception as e:
-        logger.error(f"Failed to load config from {config_path}: {e}", exc_info=True)
+        logger.error(f"[Task] Failed to load config from {config_path}: {e}", exc_info=True)
         return {}
 
 
@@ -70,38 +92,33 @@ def validate_data_structure(batch_id, split="train"):
     Checks if the directories for a given batch_id and data split exist
     and contain the necessary images (and labels, if not 'test').
 
-    Example path used below:
-      C:/Users/sathish/Downloads/FL_ModelForAV/my-project/data/bdd100_batch/batch_{batch_id}/{split}/
-        - images/
-        - labels/ (if split != "test")
-
     :param batch_id: Numeric or string ID for the dataset batch.
     :param split:    "train", "val", or "test".
     :return:         True if valid structure, else False.
     """
-    base_path = Path(f"batch/batch_{batch_id}")
+    base_path = get_batch_path(batch_id)
     split_path = base_path / split
-    logger.info(f"Validating dataset structure for batch {batch_id}, split: {split}")
+    logger.info(f"[Task] Validating dataset structure for batch {batch_id}, split: {split}")
 
     if not split_path.exists():
-        logger.error(f"Missing directory: {split_path}")
+        logger.error(f"[Task] Missing directory: {split_path}")
         return False
 
     img_path = split_path / "images"
     if not img_path.exists() or not any(img_path.iterdir()):
-        logger.error(f"Missing or empty image directory: {img_path}")
+        logger.error(f"[Task] Missing or empty image directory: {img_path}")
         return False
 
     label_path = split_path / "labels" if split != "test" else None
     if label_path and (not label_path.exists() or not any(label_path.iterdir())):
-        logger.error(f"Missing or empty label directory: {label_path}")
+        logger.error(f"[Task] Missing or empty label directory: {label_path}")
         return False
     
-    yaml_path = base_path / "data.yaml"
+    yaml_path = get_data_yaml_path(batch_id)
     if not yaml_path.exists():
-        logger.warning(f"Missing data.yaml file: {yaml_path}, you may need to create it.")
+        logger.warning(f"[Task] Missing data.yaml file: {yaml_path}, you may need to create it.")
     
-    logger.info(f"Validation successful for batch {batch_id}, split: {split}")
+    logger.info(f"[Task] Validation successful for batch {batch_id}, split: {split}")
     return True
 
 
@@ -118,7 +135,7 @@ def get_optimal_batch_size():
             # mem_get_info()[0] -> total free memory on current GPU in bytes
             free_memory = torch.cuda.mem_get_info()[0]
             free_gb = free_memory / 1e9
-            logger.info(f"Detected GPU with {free_gb:.2f} GB free memory.")
+            logger.info(f"[Task] Detected GPU with {free_gb:.2f} GB free memory.")
 
             # Simple heuristic for batch size
             if free_memory > 10e9:
@@ -129,10 +146,8 @@ def get_optimal_batch_size():
         # Default fallback for CPU or smaller GPU memory
         return 4
     except Exception as e:
-        logger.warning(f"Batch size detection failed: {str(e)}. Falling back to 4.")
+        logger.warning(f"[Task] Batch size detection failed: {str(e)}. Falling back to 4.")
         return 4
-
-
 
 
 # ----------------------------------------------------------
@@ -148,19 +163,19 @@ def train_custom(model: YOLO, device: str, epochs: int = 1, data_yaml: str = "da
     :return:          Float representing the final training loss.
     """
     try:
-        logger.info(f"Training YOLO model for {epochs} epoch(s) on device: {device}")
+        logger.info(f"[Task] Training YOLO model for {epochs} epoch(s) on device: {device}")
         results = model.train(
             data=data_yaml,
             epochs=epochs,
-            imgsz=1280,     # Example for large images
+            imgsz=DEFAULT_IMAGE_SIZE,
             device=device,
             verbose=False
         )
         final_loss = results.results_dict.get("train/loss", float("inf"))
-        logger.info(f"Training completed with loss={final_loss}")
+        logger.info(f"[Task] Training completed with loss={final_loss}")
         return final_loss
     except Exception as e:
-        logger.error(f"train_custom error: {e}", exc_info=True)
+        logger.error(f"[Task] train_custom error: {e}", exc_info=True)
         return float("inf")
 
 
@@ -173,17 +188,17 @@ def test_custom(model: YOLO, device: str, data_yaml: str = "data.yaml"):
     :return:          (loss, mAP50) as float and float.
     """
     try:
-        logger.info(f"Evaluating YOLO model on device: {device}")
+        logger.info(f"[Task] Evaluating YOLO model on device: {device}")
         results = model.val(
             data=data_yaml,
-            imgsz=1280,     # Example for large images
+            imgsz=DEFAULT_IMAGE_SIZE,
             device=device,
             verbose=False
         )
         loss = results.results_dict.get("val/loss", float("inf"))
         map50 = results.results_dict.get("metrics/mAP50", 0.0)
-        logger.info(f"Validation completed: loss={loss}, mAP50={map50}")
+        logger.info(f"[Task] Validation completed: loss={loss}, mAP50={map50}")
         return float(loss), map50
     except Exception as e:
-        logger.error(f"test_custom error: {e}", exc_info=True)
+        logger.error(f"[Task] test_custom error: {e}", exc_info=True)
         return float("inf"), 0.0
