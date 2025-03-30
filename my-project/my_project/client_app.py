@@ -338,7 +338,7 @@ def client_fn(context: Context):
 
     try:
         logger.info("[Client] Creating FlowerClient instance from client_fn.")
-        model_path = r"C:\Users\sathish\Downloads\FL_ModelForAV\my-project\models\yolov8s.pt"  # Or dynamically read from context if desired
+        model_path = "models/yolov8s.pt"  # Use a relative path
 
         local_epochs = context.run_config["local_epochs"]
         client_state = context.state
