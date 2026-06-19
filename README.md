@@ -115,24 +115,26 @@ names: ["car", "person", "bus", "traffic light", ...]
 
 ## 🚀 Quick Start  
 
-### 1. Launch the Flower Server  
+This project runs through the Flower simulation engine — one command launches the
+server and all simulated clients. Full details in [`docs/RUNNING.md`](docs/RUNNING.md).
+
+### 1. Install  
 ```bash  
-python server.py --num_rounds=10 --batch_size=32  
+cd my-project  
+pip install -e .  
 ```  
 
-### 2. Start Federated Clients  
-Open separate terminals for each client:  
+### 2. Run the federation  
 ```bash  
-# Client 0  
-python client.py --id=0 --data_path="data_clients/client_0/data.yaml"  
-
-# Client 1  
-python client.py --id=1 --data_path="data_clients/client_1/data.yaml"  
+flwr run .  
+# override config without editing pyproject.toml:  
+flwr run . --run-config "num_server_rounds=5 local_epochs=2"  
 ```  
 
 ### 3. Monitor Training  
-- **Server Logs**: Global model accuracy, round duration, client participation.  
-- **Client Logs**: Local training loss, validation mAP, GPU utilization.  
+Per-module logs land in `my-project/logs/` (`server.log`, `client.log`, `task.log`,
+`get_set.log`): round setup, batch-id assignment, weight checksums, and aggregated
+metrics (precision, recall, mAP).  
 
 ---
 
@@ -155,14 +157,19 @@ Use **Ctrl+C** in each terminal to stop the processes.
 
 ## 🏗️ Project Architecture  
 
-| File | Purpose |  
+> Run via Flower's app entrypoints (`cd my-project && flwr run .`), **not** standalone
+> scripts. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
+> [`docs/RUNNING.md`](docs/RUNNING.md) for the full picture.
+
+| Path | Purpose |  
 |------|---------|  
-| `server.py` | Flower server for aggregating client updates. |  
-| `client.py` | Flower client to train YOLOv8 locally. |  
-| `simulation.py` | Runs multiple simulated FL clients on a single machine. |  
-| `train_config.py` | Configures training hyperparameters. |  
-| `split_clients.py` | Partitions dataset into client-specific subsets. |  
-| `label_utils.py` | Converts BDD100K annotations to YOLO format. |  
+| `my-project/pyproject.toml` | Flower app + federation config and hyperparameters (`[tool.flwr.app.config]`). |  
+| `my-project/my_project/server_app.py` | `ServerApp` + `CustomBatchStrategy` (FedAvg, batch-id assignment, aggregation). |  
+| `my-project/my_project/client_app.py` | `ClientApp` + `FlowerClient` that trains/evaluates YOLOv8 locally. |  
+| `my-project/my_project/task.py` | OS detection, model download, data.yaml path handling, dataset validation. |  
+| `my-project/my_project/get_set_model.py` | Converts weights between the YOLO model and NumPy arrays. |  
+| `my-project/utils/logging_setup.py` | Per-module file loggers under `logs/`. |  
+| `json_to_yolo/` | BDD100K JSON → YOLO label conversion. |  
 
 ---
 
