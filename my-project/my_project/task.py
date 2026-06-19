@@ -1,3 +1,5 @@
+from __future__ import annotations  # lazy annotations: YOLO type hints need no import
+
 import os
 import logging
 import warnings
@@ -8,7 +10,9 @@ import platform
 import sys
 from pathlib import Path
 from collections import OrderedDict
-from ultralytics import YOLO
+# ultralytics (YOLO) is only referenced in type hints below; with future
+# annotations it is never evaluated at import time, so dataset/path helpers like
+# count_shard_examples stay importable without the heavy ultralytics dependency.
 
 from utils.logging_setup import configure_logging
 
@@ -91,6 +95,50 @@ def get_data_yaml_path(batch_id):
         Path: Path to the data.yaml file
     """
     return get_batch_path(batch_id) / "data.yaml"
+
+
+def count_shard_examples(batch_id, split="train"):
+    """
+    Count the number of examples in a client's data shard for a given split.
+
+    FedAvg weights each client's update by ``num_examples``; reporting a real
+    count (instead of a constant) makes aggregation correctly proportional to
+    shard size. Primary source is the split list file (``train.txt`` / ``val.txt``
+    / ``test.txt``, one image per line); falls back to counting image files under
+    ``images/<split>/`` if the list file is absent.
+
+    Args:
+        batch_id: The batch ID.
+        split: "train", "val", or "test".
+
+    Returns:
+        int: Number of examples (>= 1, so a client never gets zero weight).
+    """
+    base = get_batch_path(batch_id)
+
+    # Primary: count non-empty lines in the split list file.
+    list_file = base / f"{split}.txt"
+    if list_file.exists():
+        try:
+            with open(list_file, "r") as f:
+                count = sum(1 for line in f if line.strip())
+            if count > 0:
+                logger.debug(f"[Task] batch {batch_id} {split}: {count} examples (from {list_file.name})")
+                return count
+        except Exception as e:
+            logger.warning(f"[Task] Failed reading {list_file}: {e}; falling back to file count.")
+
+    # Fallback: count image files under images/<split>/.
+    img_dir = base / "images" / split
+    if img_dir.exists():
+        exts = {".jpg", ".jpeg", ".png", ".bmp"}
+        count = sum(1 for p in img_dir.iterdir() if p.suffix.lower() in exts)
+        logger.debug(f"[Task] batch {batch_id} {split}: {count} examples (from {img_dir})")
+        if count > 0:
+            return count
+
+    logger.warning(f"[Task] Could not count examples for batch {batch_id} split {split}; defaulting to 1.")
+    return 1
 
 def update_data_yaml_paths(batch_id):
     """
