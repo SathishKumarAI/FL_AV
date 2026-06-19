@@ -1,0 +1,39 @@
+# Configuration for actions/labeler@v4 (used by .github/workflows/label.yml).
+# Maps PR labels to the file globs that, when changed, trigger the label.
+
+documentation:
+  - '**/*.md'
+  - 'docs/**'
+  - 'Research_docs/**'
+
+federated-learning:
+  - 'my-project/my_project/**'
+
+server:
+  - 'my-project/my_project/server_app.py'
+
+client:
+  - 'my-project/my_project/client_app.py'
+
+model:
+  - 'my-project/models/**'
+  - 'my-project/my_project/get_set_model.py'
+
+data-pipeline:
+  - 'json_to_yolo/**'
+  - 'my-project/my_project/task.py'
+
+ci:
+  - '.github/**'
+
+config:
+  - '**/pyproject.toml'
+  - '**/*.toml'
+  - '**/data.yaml'
+
+notebook:
+  - '**/*.ipynb'
+
+dependencies:
+  - '**/pyproject.toml'
+  - '**/requirements*.txt'
