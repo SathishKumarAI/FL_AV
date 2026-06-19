@@ -131,9 +131,14 @@ class FlowerClient(Client):
                 status=Status(code=Code.FIT_NOT_IMPLEMENTED, message="Failed to load weights for training"),
             )
 
+        # Snapshot the global weights so we can apply a FedProx proximal pull
+        # after local training (see step 6).
+        global_weights = [w.copy() for w in weights_list]
+
         # 2) Parse config from server
         batch_id = ins.config.get("batch_id", None)
         local_epochs = ins.config.get("local_epochs", self.local_epochs)
+        proximal_mu = float(ins.config.get("proximal_mu", 0.0))
 
         # Use stored batch_id as fallback if available
         if batch_id is None:
@@ -199,6 +204,20 @@ class FlowerClient(Client):
 
             # 6) Extract updated weights for sending back to server
             updated_weights = get_weights(self.model)
+
+            # FedProx: pull the locally-trained weights back toward the global model
+            # by factor mu, i.e. w <- w - mu * (w - w_global). mu == 0 is plain FedAvg.
+            # This is a round-level approximation of the FedProx proximal term, applied
+            # in weight space because Ultralytics' high-level trainer does not expose a
+            # per-step loss hook. See docs/FEDPROX.md.
+            if proximal_mu > 0 and len(updated_weights) == len(global_weights):
+                logger.info(f"[Client] Applying FedProx proximal term (mu={proximal_mu}).")
+                updated_weights = [
+                    w - proximal_mu * (w - g)
+                    for w, g in zip(updated_weights, global_weights)
+                ]
+                metrics["proximal_mu"] = proximal_mu
+
             updated_checksum = sum(w.sum() for w in updated_weights if w.size > 0)
             logger.info(f"[Client] Sending back weights with checksum: {updated_checksum}")
             

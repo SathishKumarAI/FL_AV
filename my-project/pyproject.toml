@@ -33,6 +33,8 @@ fraction_fit = 0.75
 local_epochs = 4
 # Must be <= num-supernodes below, otherwise FL never starts (waits forever for clients).
 min_clients = 3
+strategy = "fedavg"   # "fedavg" or "fedprox"
+proximal_mu = 0.0     # FedProx proximal strength; >0 enables FedProx (default 0.1 if strategy=fedprox)
 
 
 [tool.flwr.federations]

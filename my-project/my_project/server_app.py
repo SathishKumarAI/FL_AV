@@ -61,6 +61,7 @@ class CustomBatchStrategy(FedAvg):
         fit_metrics_aggregation_fn: Optional[Any] = None,
         evaluate_metrics_aggregation_fn: Optional[Any] = None,
         batch_id_range: tuple = DEFAULT_BATCH_ID_RANGE,
+        proximal_mu: float = 0.0,
         num_rounds: int = DEFAULT_NUM_ROUNDS,
     ):
         super().__init__(
@@ -84,7 +85,13 @@ class CustomBatchStrategy(FedAvg):
         self.client_os_info: Dict[str, str] = {}  # Track client OS information
         self.num_rounds = num_rounds
         self.metrics_logger = MetricsLogger()  # writes logs/metrics.csv
-        logger.info(f"[Server] CustomBatchStrategy initialized with batch_id_range={batch_id_range}")
+        # proximal_mu > 0 turns on FedProx-style proximal regularization on clients.
+        self.proximal_mu = float(proximal_mu)
+        strategy_name = "FedProx" if self.proximal_mu > 0 else "FedAvg"
+        logger.info(
+            f"[Server] CustomBatchStrategy initialized with batch_id_range={batch_id_range}, "
+            f"strategy={strategy_name} (proximal_mu={self.proximal_mu})"
+        )
     
     def _get_unused_batch_id(self, client_id: str) -> int:
         """
@@ -160,6 +167,9 @@ class CustomBatchStrategy(FedAvg):
                 # Insert batch_id into the config. local_epochs is supplied by
                 # on_fit_config_fn (driven by run_config), so we do not override it here.
                 fit_config["batch_id"] = batch_id
+                # Tell the client how strongly to pull local weights back toward the
+                # global model (0.0 => plain FedAvg, no proximal term).
+                fit_config["proximal_mu"] = self.proximal_mu
 
                 logger.info(
                     f"[Server] Assigning batch_id={batch_id} "
@@ -363,9 +373,17 @@ def server_fn(context: Context):
     fraction_fit = float(run_config.get("fraction_fit", 1.0))
     local_epochs = int(run_config.get("local_epochs", 1))
     min_clients = int(run_config.get("min_clients", 2))
+    # Strategy selection from run_config: strategy = "fedavg" | "fedprox".
+    strategy_name = str(run_config.get("strategy", "fedavg")).lower()
+    proximal_mu = float(run_config.get("proximal_mu", 0.0))
+    if strategy_name == "fedprox" and proximal_mu <= 0:
+        proximal_mu = 0.1  # sensible default when FedProx is requested without a mu
+    if strategy_name != "fedprox":
+        proximal_mu = 0.0  # force plain FedAvg
     logger.info(
         f"[Server] run_config -> num_rounds={num_rounds}, fraction_fit={fraction_fit}, "
-        f"local_epochs={local_epochs}, min_clients={min_clients}"
+        f"local_epochs={local_epochs}, min_clients={min_clients}, "
+        f"strategy={strategy_name}, proximal_mu={proximal_mu}"
     )
 
     # Check if model exists, otherwise download
@@ -400,7 +418,8 @@ def server_fn(context: Context):
         on_evaluate_config_fn=fit_config_fn,
         initial_parameters=fl.common.ndarrays_to_parameters(initial_weights),
         batch_id_range=DEFAULT_BATCH_ID_RANGE,
-        num_rounds=DEFAULT_NUM_ROUNDS,
+        proximal_mu=proximal_mu,
+        num_rounds=num_rounds,
     )
 
     # Configure server
