@@ -60,6 +60,7 @@ class CustomBatchStrategy(FedAvg):
         fit_metrics_aggregation_fn: Optional[Any] = None,
         evaluate_metrics_aggregation_fn: Optional[Any] = None,
         batch_id_range: tuple = DEFAULT_BATCH_ID_RANGE,
+        proximal_mu: float = 0.0,
     ):
         super().__init__(
             fraction_fit=fraction_fit,
@@ -80,7 +81,13 @@ class CustomBatchStrategy(FedAvg):
         self.used_batch_ids = set()
         self.client_to_batch_id: Dict[str, int] = {}
         self.client_os_info: Dict[str, str] = {}  # Track client OS information
-        logger.info(f"[Server] CustomBatchStrategy initialized with batch_id_range={batch_id_range}")
+        # proximal_mu > 0 turns on FedProx-style proximal regularization on clients.
+        self.proximal_mu = float(proximal_mu)
+        strategy_name = "FedProx" if self.proximal_mu > 0 else "FedAvg"
+        logger.info(
+            f"[Server] CustomBatchStrategy initialized with batch_id_range={batch_id_range}, "
+            f"strategy={strategy_name} (proximal_mu={self.proximal_mu})"
+        )
     
     def _get_unused_batch_id(self, client_id: str) -> int:
         """
@@ -156,6 +163,9 @@ class CustomBatchStrategy(FedAvg):
                 # Insert it into the config
                 fit_config["batch_id"] = batch_id
                 fit_config["local_epochs"] = 1
+                # Tell the client how strongly to pull local weights back toward the
+                # global model (0.0 => plain FedAvg, no proximal term).
+                fit_config["proximal_mu"] = self.proximal_mu
 
                 logger.info(
                     f"[Server] Assigning batch_id={batch_id} "
@@ -336,6 +346,16 @@ def server_fn(_):
     """
     logger.info("[Server] Initializing YOLO model for FL...")
 
+    # Strategy selection from run_config: strategy = "fedavg" | "fedprox".
+    run_config = getattr(_, "run_config", {}) or {}
+    strategy_name = str(run_config.get("strategy", "fedavg")).lower()
+    proximal_mu = float(run_config.get("proximal_mu", 0.0))
+    if strategy_name == "fedprox" and proximal_mu <= 0:
+        proximal_mu = 0.1  # sensible default when FedProx is requested without a mu
+    if strategy_name != "fedprox":
+        proximal_mu = 0.0  # force plain FedAvg
+    logger.info(f"[Server] Strategy={strategy_name}, proximal_mu={proximal_mu}")
+
     # Check if model exists, otherwise download
     if not os.path.exists(MODEL_PATH):
         logger.info(f"[Server] Model not found at {MODEL_PATH}, downloading...")
@@ -360,7 +380,8 @@ def server_fn(_):
         min_fit_clients=2,       # Minimum clients needed for training
         min_available_clients=2, # Minimum clients needed to start FL (consistent with min_fit_clients)
         initial_parameters=fl.common.ndarrays_to_parameters(initial_weights),
-        batch_id_range=DEFAULT_BATCH_ID_RANGE
+        batch_id_range=DEFAULT_BATCH_ID_RANGE,
+        proximal_mu=proximal_mu,
     )
 
     # Configure server
