@@ -10,7 +10,7 @@ import flwr as fl
 from flwr.server import ServerApp, ServerConfig, ServerAppComponents
 from flwr.server.strategy import FedAvg
 from flwr.server.client_proxy import ClientProxy
-from flwr.common import Parameters, FitIns, EvaluateIns, NDArrays, Scalar, parameters_to_ndarrays
+from flwr.common import Context, Parameters, FitIns, EvaluateIns, NDArrays, Scalar, parameters_to_ndarrays
 from flwr.server.client_manager import ClientManager
 
 # Ensure Ultralytics does not use HUB (prevents import issues)
@@ -153,9 +153,9 @@ class CustomBatchStrategy(FedAvg):
                 # Assign a unique batch_id for this client
                 batch_id = self._get_unused_batch_id(client_proxy.cid)
                 
-                # Insert it into the config
+                # Insert batch_id into the config. local_epochs is supplied by
+                # on_fit_config_fn (driven by run_config), so we do not override it here.
                 fit_config["batch_id"] = batch_id
-                fit_config["local_epochs"] = 1
 
                 logger.info(
                     f"[Server] Assigning batch_id={batch_id} "
@@ -211,7 +211,6 @@ class CustomBatchStrategy(FedAvg):
                 batch_id = self._get_unused_batch_id(client_proxy.cid)
                 
                 eval_config["batch_id"] = batch_id
-                eval_config["local_epochs"] = 1 
                 logger.info(f"[Server] Assigned batch_id={batch_id} to client {client_proxy.cid} for evaluation.")
 
                 # Create new EvaluateIns with updated config
@@ -327,14 +326,29 @@ class CustomBatchStrategy(FedAvg):
         return loss, metrics
 
 
-def server_fn(_):
+def server_fn(context: Context):
     """
     Initialize the Flower server with a YOLO model and custom federated learning strategy.
-    
+
+    Hyperparameters are read from ``context.run_config`` (defined in pyproject.toml under
+    ``[tool.flwr.app.config]``) instead of being hardcoded, so they can be overridden with
+    ``flwr run --run-config "num_server_rounds=5 local_epochs=2"``.
+
     Returns:
         ServerAppComponents: Configured server components for federated learning
     """
     logger.info("[Server] Initializing YOLO model for FL...")
+
+    # Read run configuration (with safe fallbacks).
+    run_config = getattr(context, "run_config", {}) or {}
+    num_rounds = int(run_config.get("num_server_rounds", DEFAULT_NUM_ROUNDS))
+    fraction_fit = float(run_config.get("fraction_fit", 1.0))
+    local_epochs = int(run_config.get("local_epochs", 1))
+    min_clients = int(run_config.get("min_clients", 2))
+    logger.info(
+        f"[Server] run_config -> num_rounds={num_rounds}, fraction_fit={fraction_fit}, "
+        f"local_epochs={local_epochs}, min_clients={min_clients}"
+    )
 
     # Check if model exists, otherwise download
     if not os.path.exists(MODEL_PATH):
@@ -354,19 +368,26 @@ def server_fn(_):
         logger.error("[Server] Could not load YOLO model or extract weights!", exc_info=True)
         raise RuntimeError("Server cannot start without a valid YOLO model.") from e
 
+    # Push local_epochs to every client each round via config callbacks.
+    def fit_config_fn(server_round: int) -> Dict[str, Scalar]:
+        return {"local_epochs": local_epochs, "server_round": server_round}
+
     # Build custom strategy
     strategy = CustomBatchStrategy(
-        fraction_fit=1.0,        # Use all available clients each round
-        min_fit_clients=2,       # Minimum clients needed for training
-        min_available_clients=2, # Minimum clients needed to start FL (consistent with min_fit_clients)
+        fraction_fit=fraction_fit,            # From run_config
+        min_fit_clients=min_clients,          # From run_config
+        min_evaluate_clients=min_clients,
+        min_available_clients=min_clients,    # Minimum clients needed to start FL
+        on_fit_config_fn=fit_config_fn,
+        on_evaluate_config_fn=fit_config_fn,
         initial_parameters=fl.common.ndarrays_to_parameters(initial_weights),
         batch_id_range=DEFAULT_BATCH_ID_RANGE
     )
 
     # Configure server
-    server_config = ServerConfig(num_rounds=DEFAULT_NUM_ROUNDS)
+    server_config = ServerConfig(num_rounds=num_rounds)
 
-    logger.info(f"[Server] FedAvg-based strategy configured for {DEFAULT_NUM_ROUNDS} rounds")
+    logger.info(f"[Server] FedAvg-based strategy configured for {num_rounds} rounds")
     logger.info(f"[Server] Server running on {OS_NAME} is ready for clients")
     
     return ServerAppComponents(

@@ -31,7 +31,8 @@ clientapp = "my_project.client_app:app"
 num_server_rounds = 2
 fraction_fit = 0.75
 local_epochs = 4
-min_clients = 5  # Ensures clarity on the required minimum clients
+# Must be <= num-supernodes below, otherwise FL never starts (waits forever for clients).
+min_clients = 3
 
 
 [tool.flwr.federations]
@@ -40,6 +41,7 @@ default = "local-simulation"
 [tool.flwr.federations.local-simulation]
 options.num-supernodes = 3
 options.backend.client-resources.num-cpus = 2
-options.backend.client-resources.num-gpus = 1
+# Set num-gpus = 1 only on a CUDA machine; 0 lets the simulation run on CPU-only hosts.
+options.backend.client-resources.num-gpus = 0
 options.backend.init_args.num_cpus = 2
-options.backend.init_args.num_gpus = 1
+options.backend.init_args.num_gpus = 0
