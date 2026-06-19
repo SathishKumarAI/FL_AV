@@ -20,6 +20,7 @@ from my_project.task import download_model, IS_WINDOWS, OS_NAME
 from my_project.get_set_model import get_weights, set_weights
 
 from utils.logging_setup import configure_logging
+from utils.metrics_logger import MetricsLogger, aggregate_client_metrics
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 logger = configure_logging("server", "logs/server.log")
@@ -60,6 +61,7 @@ class CustomBatchStrategy(FedAvg):
         fit_metrics_aggregation_fn: Optional[Any] = None,
         evaluate_metrics_aggregation_fn: Optional[Any] = None,
         batch_id_range: tuple = DEFAULT_BATCH_ID_RANGE,
+        num_rounds: int = DEFAULT_NUM_ROUNDS,
     ):
         super().__init__(
             fraction_fit=fraction_fit,
@@ -80,6 +82,8 @@ class CustomBatchStrategy(FedAvg):
         self.used_batch_ids = set()
         self.client_to_batch_id: Dict[str, int] = {}
         self.client_os_info: Dict[str, str] = {}  # Track client OS information
+        self.num_rounds = num_rounds
+        self.metrics_logger = MetricsLogger()  # writes logs/metrics.csv
         logger.info(f"[Server] CustomBatchStrategy initialized with batch_id_range={batch_id_range}")
     
     def _get_unused_batch_id(self, client_id: str) -> int:
@@ -253,7 +257,11 @@ class CustomBatchStrategy(FedAvg):
         
         # Log results and failures
         logger.info(f"[Server] Aggregating {len(results)} fit results and {len(failures)} failures")
-        
+
+        # Persist a weighted-average of client training metrics for this round.
+        fit_metrics = aggregate_client_metrics(results)
+        self.metrics_logger.log_round(server_round, "fit", fit_metrics, num_clients=len(results))
+
         # Call the parent's aggregation method
         parameters, metrics = super().aggregate_fit(server_round, results, failures)
         
@@ -309,9 +317,19 @@ class CustomBatchStrategy(FedAvg):
                 self.client_os_info[client_proxy.cid] = client_os
                 logger.info(f"[Server] Client {client_proxy.cid} evaluated on {client_os}")
         
+        # Persist a weighted-average of client evaluation metrics for this round.
+        eval_metrics = aggregate_client_metrics(results)
+
         # Call the parent's aggregation method
         loss, metrics = super().aggregate_evaluate(server_round, results, failures)
-        
+
+        self.metrics_logger.log_round(
+            server_round, "evaluate", eval_metrics, num_clients=len(results), loss=loss
+        )
+        # Emit the run summary once the final round has been evaluated.
+        if server_round >= self.num_rounds:
+            self.metrics_logger.summary()
+
         # Add OS information to metrics
         metrics["server_os"] = OS_NAME
         
@@ -381,7 +399,8 @@ def server_fn(context: Context):
         on_fit_config_fn=fit_config_fn,
         on_evaluate_config_fn=fit_config_fn,
         initial_parameters=fl.common.ndarrays_to_parameters(initial_weights),
-        batch_id_range=DEFAULT_BATCH_ID_RANGE
+        batch_id_range=DEFAULT_BATCH_ID_RANGE,
+        num_rounds=DEFAULT_NUM_ROUNDS,
     )
 
     # Configure server
