@@ -11,7 +11,7 @@ from ultralytics import YOLO
 from my_project.task import (
     download_model,
     get_data_yaml_path,
-    update_data_yaml_paths,
+    materialize_data_yaml,
     count_shard_examples,
     IS_WINDOWS,
     OS_NAME
@@ -82,22 +82,20 @@ class FlowerClient(Client):
 
     def _get_data_yaml_path(self, batch_id):
         """
-        Gets the data.yaml path and ensures it's updated for the current OS.
-        
+        Return a runtime data.yaml with correct absolute paths for this machine.
+
+        Uses materialize_data_yaml(), which writes a gitignored data.runtime.yaml
+        instead of mutating the tracked data.yaml.
+
         Args:
             batch_id: The batch ID
-            
+
         Returns:
-            Path: Path to the data.yaml file
+            Path: Path to the runtime data.yaml (falls back to the tracked one).
         """
-        # Get the path
-        yaml_path = get_data_yaml_path(batch_id)
-        
-        # Update the path in data.yaml if needed
-        if os.path.exists(yaml_path):
-            update_data_yaml_paths(batch_id)
-            
-        return yaml_path
+        if os.path.exists(get_data_yaml_path(batch_id)):
+            return materialize_data_yaml(batch_id)
+        return get_data_yaml_path(batch_id)
 
     def fit(self, ins: FitIns) -> FitRes:
         if self.model is None:

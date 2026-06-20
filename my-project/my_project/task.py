@@ -31,24 +31,14 @@ MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolo
 DEFAULT_IMAGE_SIZE = 640  # Default image size for training/validation
 DEFAULT_BATCH_ID_RANGE = (1, 10)  # Consistent with server and client
 
-# Base path for data - OS dependent
-BASE_DATA_PATH = "C:/Users/sathish/Downloads/FL_ModelForAV/my-project" if IS_WINDOWS else os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# Base path for data. Defaults to the package's parent dir (so the repo layout
+# works out-of-the-box on any OS); override with FL_AV_DATA_ROOT to point at a
+# mounted data volume in containers/production. No hardcoded per-machine paths.
+BASE_DATA_PATH = os.environ.get(
+    "FL_AV_DATA_ROOT",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
+)
 logger.info(f"[Task] Using base data path: {BASE_DATA_PATH}")
-
-def get_normalized_path(path):
-    """
-    Normalize path for the current operating system.
-    
-    Args:
-        path: The input path
-        
-    Returns:
-        str: Normalized path suitable for the current OS
-    """
-    if IS_WINDOWS:
-        return str(path).replace('/', '\\')
-    else:
-        return str(path).replace('\\', '/')
 
 def download_model():
     """Download YOLO model if not found."""
@@ -96,7 +86,6 @@ def get_data_yaml_path(batch_id):
     """
     return get_batch_path(batch_id) / "data.yaml"
 
-
 def count_shard_examples(batch_id, split="train"):
     """
     Count the number of examples in a client's data shard for a given split.
@@ -140,39 +129,46 @@ def count_shard_examples(batch_id, split="train"):
     logger.warning(f"[Task] Could not count examples for batch {batch_id} split {split}; defaulting to 1.")
     return 1
 
-def update_data_yaml_paths(batch_id):
+
+def materialize_data_yaml(batch_id):
     """
-    Update the paths in data.yaml to use the correct OS-specific formats.
-    
+    Produce a runtime data.yaml with an absolute, machine-correct ``path``,
+    WITHOUT mutating the tracked ``data.yaml``.
+
+    The committed ``batch/*/data.yaml`` may carry a stale/foreign ``path``. Rather
+    than rewriting that tracked file on every run (which dirtied the git tree and
+    baked machine-specific paths into version control), we read it, set ``path`` to
+    the resolved absolute batch directory, and write a sibling ``data.runtime.yaml``
+    (gitignored). Training/validation point at this runtime copy.
+
     Args:
-        batch_id: The batch ID
-        
+        batch_id: The batch ID.
+
     Returns:
-        bool: True if successful, False otherwise
+        Path: Path to the runtime data.yaml, or the original path if generation
+              fails (so callers still have something to try).
     """
-    yaml_path = get_data_yaml_path(batch_id)
-    if not yaml_path.exists():
-        logger.warning(f"[Task] data.yaml not found at {yaml_path}, cannot update")
-        return False
-        
+    src = get_data_yaml_path(batch_id)
+    if not src.exists():
+        logger.warning(f"[Task] data.yaml not found at {src}, cannot materialize runtime copy")
+        return src
+
     try:
-        # Read the existing data.yaml
-        with open(yaml_path, 'r') as f:
-            data = yaml.safe_load(f)
-            
-        # Update the path based on OS
-        batch_path = get_batch_path(batch_id)
-        data['path'] = str(batch_path)
-        
-        # Write back the updated data.yaml
-        with open(yaml_path, 'w') as f:
+        with open(src, "r") as f:
+            data = yaml.safe_load(f) or {}
+
+        # Absolute path to this batch dir, resolved for the current machine/OS.
+        data["path"] = str(get_batch_path(batch_id).resolve())
+
+        runtime = src.parent / "data.runtime.yaml"
+        with open(runtime, "w") as f:
             yaml.dump(data, f, default_flow_style=False)
-            
-        logger.info(f"[Task] Updated data.yaml path for batch {batch_id} to: {batch_path}")
-        return True
+
+        logger.info(f"[Task] Materialized runtime data.yaml for batch {batch_id} at {runtime} (path={data['path']})")
+        return runtime
     except Exception as e:
-        logger.error(f"[Task] Failed to update data.yaml for batch {batch_id}: {e}", exc_info=True)
-        return False
+        logger.error(f"[Task] Failed to materialize data.yaml for batch {batch_id}: {e}", exc_info=True)
+        return src
 
 # ----------------------------------------------------------
 # 1) Configuration Loader
@@ -228,9 +224,9 @@ def validate_data_structure(batch_id, split="train"):
     if not yaml_path.exists():
         logger.warning(f"[Task] Missing data.yaml file: {yaml_path}, you may need to create it.")
     else:
-        # Make sure data.yaml has correct paths for this OS
-        update_data_yaml_paths(batch_id)
-    
+        # Generate a runtime data.yaml with correct absolute paths (non-mutating).
+        materialize_data_yaml(batch_id)
+
     logger.info(f"[Task] Validation successful for batch {batch_id}, split: {split}")
     return True
 
@@ -276,11 +272,8 @@ def train_custom(model: YOLO, device: str, epochs: int = 1, data_yaml: str = "da
     :return:          Float representing the final training loss.
     """
     try:
-        # Ensure data.yaml has correct paths before training
-        if os.path.exists(data_yaml):
-            batch_id = int(data_yaml.split("_")[-1].split("/")[0])
-            update_data_yaml_paths(batch_id)
-            
+        # data_yaml is expected to already point at a valid (absolute-path) config,
+        # e.g. produced by materialize_data_yaml(); no in-place mutation here.
         logger.info(f"[Task] Training YOLO model for {epochs} epoch(s) on device: {device}")
         results = model.train(
             data=data_yaml,
@@ -306,11 +299,8 @@ def test_custom(model: YOLO, device: str, data_yaml: str = "data.yaml"):
     :return:          (loss, mAP50) as float and float.
     """
     try:
-        # Ensure data.yaml has correct paths before validation
-        if os.path.exists(data_yaml):
-            batch_id = int(data_yaml.split("_")[-1].split("/")[0])
-            update_data_yaml_paths(batch_id)
-            
+        # data_yaml is expected to already point at a valid (absolute-path) config,
+        # e.g. produced by materialize_data_yaml(); no in-place mutation here.
         logger.info(f"[Task] Evaluating YOLO model on device: {device}")
         results = model.val(
             data=data_yaml,
