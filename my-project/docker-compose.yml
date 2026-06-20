@@ -1,0 +1,71 @@
+# Local distributed FL bring-up: 1 SuperLink + 3 GPU SuperNodes over TLS.
+# Requires the NVIDIA Container Toolkit for GPU passthrough.
+#
+#   bash scripts/gen_certs.sh <superlink-host>   # once, writes certs/
+#   docker compose up --build                    # starts SuperLink + SuperNodes
+#   flwr run . remote-deployment                 # push the app (from the host)
+#
+# Each SuperNode mounts only its own data shard to enforce data locality.
+
+services:
+  superlink:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.superlink
+    ports:
+      - "9091:9091"
+      - "9092:9092"
+      - "9093:9093"
+    volumes:
+      - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "true"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  supernode-0: &supernode
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.supernode
+    depends_on: [superlink]
+    environment:
+      FL_SUPERLINK_HOST: superlink
+      FL_SUPERLINK_FLEET_PORT: "9092"
+      FL_PARTITION_ID: "0"
+      FL_NUM_PARTITIONS: "3"
+      FL_AV_DATA_ROOT: /data
+    volumes:
+      - ./certs:/app/certs:ro
+      - ./batch/batch_1:/data/batch/batch_1:ro   # this node's shard only
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  supernode-1:
+    <<: *supernode
+    environment:
+      FL_SUPERLINK_HOST: superlink
+      FL_SUPERLINK_FLEET_PORT: "9092"
+      FL_PARTITION_ID: "1"
+      FL_NUM_PARTITIONS: "3"
+      FL_AV_DATA_ROOT: /data
+    volumes:
+      - ./certs:/app/certs:ro
+      - ./batch/batch_2:/data/batch/batch_2:ro
+
+  supernode-2:
+    <<: *supernode
+    environment:
+      FL_SUPERLINK_HOST: superlink
+      FL_SUPERLINK_FLEET_PORT: "9092"
+      FL_PARTITION_ID: "2"
+      FL_NUM_PARTITIONS: "3"
+      FL_AV_DATA_ROOT: /data
+    volumes:
+      - ./certs:/app/certs:ro
+      - ./batch/batch_3:/data/batch/batch_3:ro

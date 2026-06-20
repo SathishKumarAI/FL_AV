@@ -1,0 +1,13 @@
+# Keep build context small — data, weights, logs, caches stay out of the image.
+batch/
+batch34/
+../full_data_run/
+logs/
+checkpoints/
+certs/
+**/__pycache__/
+**/*.pyc
+**/data.runtime.yaml
+*.pt
+.venv/
+.git/

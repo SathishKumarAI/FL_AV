@@ -52,3 +52,11 @@ options.backend.client-resources.num-cpus = 2
 options.backend.client-resources.num-gpus = 0
 options.backend.init_args.num_cpus = 2
 options.backend.init_args.num_gpus = 0
+
+# Real distributed deployment (Flower Deployment Engine): one SuperLink + N
+# SuperNodes over gRPC+TLS. Point `address` at the SuperLink Exec API (9093) and
+# `root-certificates` at the CA cert. Run with: flwr run . remote-deployment
+# Override the host with the FL_SUPERLINK_HOST env at launch time if templating.
+[tool.flwr.federations.remote-deployment]
+address = "127.0.0.1:9093"
+root-certificates = "certs/ca.crt"

@@ -185,3 +185,6 @@ Temporary Items
 
 # Federated global-model checkpoints
 checkpoints/
+
+# TLS certificates (secrets)
+certs/
