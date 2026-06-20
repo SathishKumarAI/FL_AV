@@ -188,3 +188,6 @@ checkpoints/
 
 # TLS certificates (secrets)
 certs/
+
+# Local secrets
+.env

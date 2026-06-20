@@ -1,0 +1,4 @@
+# Patterns DVC should ignore when hashing tracked directories.
+**/data.runtime.yaml
+**/*.cache
+**/__pycache__/
