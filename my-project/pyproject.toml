@@ -35,6 +35,8 @@ local_epochs = 4
 min_clients = 3
 strategy = "fedavg"   # "fedavg" or "fedprox"
 proximal_mu = 0.0     # FedProx proximal strength; >0 enables FedProx (default 0.1 if strategy=fedprox)
+checkpoint_dir = "checkpoints"  # where the aggregated global model is saved
+save_every = 1                  # save a global checkpoint every N rounds (always on final round)
 
 
 [tool.flwr.federations]

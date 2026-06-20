@@ -16,7 +16,7 @@ from flwr.server.client_manager import ClientManager
 # Ensure Ultralytics does not use HUB (prevents import issues)
 os.environ["ULTRALYTICS_HUB"] = "0"
 from ultralytics import YOLO
-from my_project.task import download_model, IS_WINDOWS, OS_NAME
+from my_project.task import download_model, should_checkpoint, IS_WINDOWS, OS_NAME
 from my_project.get_set_model import get_weights, set_weights
 
 from utils.logging_setup import configure_logging
@@ -63,6 +63,8 @@ class CustomBatchStrategy(FedAvg):
         batch_id_range: tuple = DEFAULT_BATCH_ID_RANGE,
         proximal_mu: float = 0.0,
         num_rounds: int = DEFAULT_NUM_ROUNDS,
+        checkpoint_dir: str = "checkpoints",
+        save_every: int = 1,
     ):
         super().__init__(
             fraction_fit=fraction_fit,
@@ -85,6 +87,14 @@ class CustomBatchStrategy(FedAvg):
         self.client_os_info: Dict[str, str] = {}  # Track client OS information
         self.num_rounds = num_rounds
         self.metrics_logger = MetricsLogger()  # writes logs/metrics.csv
+
+        # Global-model checkpointing: persist the aggregated model to disk so the
+        # federated result survives process exit. Lazily instantiate one YOLO to
+        # hold/save weights (created on first save to avoid a redundant load).
+        self.checkpoint_dir = checkpoint_dir
+        self.save_every = max(int(save_every), 1)
+        self._save_model = None
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
         # proximal_mu > 0 turns on FedProx-style proximal regularization on clients.
         self.proximal_mu = float(proximal_mu)
         strategy_name = "FedProx" if self.proximal_mu > 0 else "FedAvg"
@@ -127,7 +137,30 @@ class CustomBatchStrategy(FedAvg):
         """Clear state that should be reset between rounds."""
         logger.debug(f"[Server] Clearing round state, resetting {len(self.used_batch_ids)} used batch IDs")
         self.used_batch_ids = set()
-    
+
+    def _save_global_model(self, weights, server_round: int) -> None:
+        """
+        Save the aggregated global weights as a self-contained YOLO checkpoint.
+
+        Loads the ndarray weights into a held YOLO model (via set_weights, which
+        now includes BatchNorm buffers) and writes both a per-round checkpoint and
+        a stable ``global_last.pt`` pointer. Failures are logged, never fatal —
+        a checkpointing error must not abort the federation.
+        """
+        try:
+            if self._save_model is None:
+                self._save_model = YOLO(MODEL_PATH)
+            if not set_weights(self._save_model.model, weights):
+                logger.error(f"[Server] Round {server_round}: set_weights failed; skipping checkpoint.")
+                return
+            round_path = os.path.join(self.checkpoint_dir, f"global_round_{server_round}.pt")
+            last_path = os.path.join(self.checkpoint_dir, "global_last.pt")
+            self._save_model.save(round_path)
+            self._save_model.save(last_path)
+            logger.info(f"[Server] Saved global checkpoint: {round_path} (and {last_path})")
+        except Exception as e:
+            logger.error(f"[Server] Failed to save global checkpoint at round {server_round}: {e}", exc_info=True)
+
     def configure_fit(
         self,
         server_round: int,
@@ -280,7 +313,12 @@ class CustomBatchStrategy(FedAvg):
             weights = parameters_to_ndarrays(parameters)
             weights_checksum = sum(w.sum() for w in weights if w.size > 0)
             logger.info(f"[Server] Aggregated parameters with checksum: {weights_checksum}")
-            
+
+            # Persist the aggregated global model on the configured cadence and on
+            # the final round, so the federated result is recoverable after exit.
+            if should_checkpoint(server_round, self.save_every, self.num_rounds):
+                self._save_global_model(weights, server_round)
+
             # Add checksum and OS counts to metrics for tracking
             metrics["weights_checksum"] = float(weights_checksum)
             metrics["server_os"] = OS_NAME
@@ -380,6 +418,8 @@ def server_fn(context: Context):
         proximal_mu = 0.1  # sensible default when FedProx is requested without a mu
     if strategy_name != "fedprox":
         proximal_mu = 0.0  # force plain FedAvg
+    checkpoint_dir = str(run_config.get("checkpoint_dir", "checkpoints"))
+    save_every = int(run_config.get("save_every", 1))
     logger.info(
         f"[Server] run_config -> num_rounds={num_rounds}, fraction_fit={fraction_fit}, "
         f"local_epochs={local_epochs}, min_clients={min_clients}, "
@@ -420,6 +460,8 @@ def server_fn(context: Context):
         batch_id_range=DEFAULT_BATCH_ID_RANGE,
         proximal_mu=proximal_mu,
         num_rounds=num_rounds,
+        checkpoint_dir=checkpoint_dir,
+        save_every=save_every,
     )
 
     # Configure server
