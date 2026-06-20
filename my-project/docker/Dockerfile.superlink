@@ -1,0 +1,12 @@
+# SuperLink (coordinator) image. CPU is sufficient — it aggregates, it doesn't train.
+# Pin to the same Flower version as pyproject (see docs/ENGINEERING_NOTES.md).
+FROM flwr/superlink:1.31.0
+
+# TLS certs are mounted at runtime (see docker-compose.yml), not baked in.
+# Exposed APIs: 9091 (Driver/ServerApp), 9092 (Fleet/SuperNodes), 9093 (Exec/flwr run).
+EXPOSE 9091 9092 9093
+
+ENTRYPOINT ["flower-superlink"]
+CMD ["--ssl-ca-certfile", "/app/certs/ca.crt", \
+     "--ssl-certfile", "/app/certs/server.pem", \
+     "--ssl-keyfile", "/app/certs/server.key"]

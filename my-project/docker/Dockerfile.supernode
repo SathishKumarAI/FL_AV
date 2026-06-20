@@ -1,0 +1,32 @@
+# SuperNode (data owner / trainer) image. GPU-capable: trains YOLOv8 locally.
+# Base on CUDA runtime so torch can use the GPU; install the project so
+# ultralytics + the FL client app are available.
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.10 python3-pip git libgl1 libglib2.0-0 && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . /app
+
+# CUDA-enabled torch, then the project (flwr supernode + ultralytics).
+RUN python3 -m pip install --no-cache-dir --upgrade pip && \
+    python3 -m pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu124 && \
+    python3 -m pip install --no-cache-dir -e .
+
+# Fail fast/loud if CUDA isn't actually visible inside the container.
+RUN python3 -c "import torch; print('CUDA available at build:', torch.cuda.is_available())"
+
+# SuperLink host/port and partition come from the environment at run time.
+ENV FL_SUPERLINK_HOST=superlink FL_SUPERLINK_FLEET_PORT=9092 \
+    FL_PARTITION_ID=0 FL_NUM_PARTITIONS=3
+
+ENTRYPOINT ["bash", "-lc", "\
+  python3 -c 'import torch; assert torch.cuda.is_available(), \"No GPU visible — check NVIDIA Container Toolkit\"' && \
+  flower-supernode \
+    --superlink ${FL_SUPERLINK_HOST}:${FL_SUPERLINK_FLEET_PORT} \
+    --root-certificates /app/certs/ca.crt \
+    --node-config \"partition-id=${FL_PARTITION_ID} num-partitions=${FL_NUM_PARTITIONS}\" \
+"]
