@@ -86,6 +86,19 @@ def get_data_yaml_path(batch_id):
     """
     return get_batch_path(batch_id) / "data.yaml"
 
+
+def should_checkpoint(server_round, save_every, num_rounds):
+    """
+    Whether to persist the global model after a given round.
+
+    True on the configured cadence (every ``save_every`` rounds) and always on
+    the final round, so the federated result is never lost. Pure/dependency-free
+    so it is unit-testable without the flwr/ultralytics runtime.
+    """
+    save_every = max(int(save_every), 1)
+    return (server_round % save_every == 0) or (server_round >= num_rounds)
+
+
 def count_shard_examples(batch_id, split="train"):
     """
     Count the number of examples in a client's data shard for a given split.
