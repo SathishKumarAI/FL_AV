@@ -12,6 +12,7 @@ from my_project.task import (
     download_model,
     get_data_yaml_path,
     materialize_data_yaml,
+    count_shard_examples,
     IS_WINDOWS,
     OS_NAME
 )  # Import OS detection
@@ -181,7 +182,8 @@ class FlowerClient(Client):
             
             # 5) Process results
             if hasattr(results, "results_dict"):
-                num_examples = 10  # Default value if exact count is not available
+                # Real shard size → FedAvg aggregation weight proportional to data.
+                num_examples = count_shard_examples(self.batch_id, "train")
                 results_dict = results.results_dict
                 
                 # Create metrics dictionary
@@ -313,7 +315,8 @@ class FlowerClient(Client):
             )
             
             # 6) Process results
-            num_examples = 10  # Default value if exact count is not available
+            # Real val-shard size → correct weighting of the aggregated loss.
+            num_examples = count_shard_examples(self.batch_id, "val")
             fitness_value = results.results_dict.get("fitness", float("inf"))
             
             # Create metrics dictionary
