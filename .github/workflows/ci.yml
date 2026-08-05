@@ -17,16 +17,103 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          # 3.12, not 3.13: flwr[simulation] pulls ray, whose dependency marker is
+          # python>=3.11,<3.13. flwr itself also requires >=3.11.
+          python-version: "3.12"
           cache: pip
 
       - name: Install test dependencies (CPU-only torch)
         run: |
           python -m pip install --upgrade pip
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install numpy pyyaml pytest
+          # flwr is a real import for the strategy tests. ultralytics is not
+          # installed — tests/conftest.py stubs it.
+          pip install flwr numpy pyyaml pytest
 
       - name: Run unit tests
         env:
           PYTHONPATH: ${{ github.workspace }}/my-project
         run: pytest tests -q
+
+  simulation-smoke:
+    name: federated simulation smoke (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: my-project
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Populate shards from the laptop_copy fixture
+        working-directory: .
+        run: |
+          git fetch --depth=1 origin laptop_copy
+          for b in 1 2; do
+            for s in train val; do
+              git archive FETCH_HEAD "my-project/batch/batch_$b/images/$s" | tar -x
+              git archive FETCH_HEAD "my-project/batch/batch_$b/labels/$s" | tar -x
+            done
+          done
+          rm -f my-project/batch/batch_*/labels/*.cache
+          test "$(ls my-project/batch/batch_1/images/train | wc -l)" -eq 10
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e .
+
+      - name: Run a 2-round federation
+        env:
+          # flwr >= 1.31 otherwise builds an isolated runtime env via `uv sync` and
+          # reinstalls torch from PyPI, discarding the CPU wheel pinned above.
+          FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION: "1"
+          FL_AV_DATA_ROOT: ${{ github.workspace }}/my-project
+        # local_epochs=20 is not padding. Ultralytics accumulates to a nominal batch
+        # of 64, so at batch=16 it steps the optimizer only every 4 batches; a
+        # 10-image shard gives 1 batch/epoch, and a 1-epoch round therefore finishes
+        # without a single step and legitimately returns unchanged weights. The
+        # client logs a warning when that happens.
+        run: |
+          flwr run . --stream \
+            --run-config "num_server_rounds=2 local_epochs=20 min_clients=2 fraction_fit=1.0"
+
+      - name: Assert the federation actually learned
+        run: |
+          python - <<'EOF'
+          import glob, re, sys
+
+          def checksums(pattern, marker):
+              out = []
+              for path in glob.glob(pattern):
+                  with open(path) as fh:
+                      out += [float(m) for m in re.findall(rf"{marker}: ([-\d.e+]+)", fh.read())]
+              return out
+
+          agg = checksums("logs/server.*.log", "Aggregated parameters with checksum")
+          sent = checksums("logs/client.*.log", "Sending back weights with checksum")
+          recv = checksums("logs/client.*.log", "Received weights with checksum")
+
+          # The B4 regression guard: identical round-over-round aggregates mean the
+          # clients returned the weights they were handed and FedAvg averaged its
+          # own input. The run still "succeeds" in that state, which is the trap.
+          assert len(agg) >= 2, f"expected >=2 aggregate checksums, got {agg}"
+          assert len(set(agg)) == len(agg), f"global weights did not change between rounds: {agg}"
+          assert sent and recv and set(sent) != set(recv), "client returned what it received"
+
+          rows = open("logs/metrics.csv").read().strip().splitlines()
+          assert len(rows) >= 5, f"expected fit+evaluate rows for 2 rounds, got {rows}"
+
+          for ck in ("checkpoints/global_round_2.pt", "checkpoints/global_last.pt"):
+              import os
+              assert os.path.exists(ck), f"missing {ck}"
+          print("simulation smoke OK:", agg)
+          EOF

@@ -6,9 +6,21 @@ single FitIns/EvaluateIns and hands the same object to every client, so writing
 different assignments while both clients actually received the last one, and the
 federation silently trained one shard twice.
 """
-from flwr.common import Code, Parameters, Status
+import pytest
+from flwr.common import Parameters
 
 from my_project.server_app import CustomBatchStrategy
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path, monkeypatch):
+    """Run in a scratch dir.
+
+    Constructing the strategy has side effects on relative paths: MetricsLogger
+    truncates ``logs/metrics.csv`` and ``__init__`` mkdirs ``checkpoints/``. Without
+    this the suite would wipe the artifacts of a real run.
+    """
+    monkeypatch.chdir(tmp_path)
 
 
 class _Proxy:
@@ -70,3 +82,15 @@ def test_a_client_keeps_its_shard_across_rounds():
     first = _batch_ids(strategy.configure_fit(1, params, manager))
     second = _batch_ids(strategy.configure_fit(2, params, manager))
     assert first == second
+
+
+def test_a_late_joining_client_does_not_get_a_held_shard():
+    """A separate per-round `used_batch_ids` set was cleared each round while the
+    client->shard map was not, so a client arriving in round 2 could be handed a
+    shard another client was already training."""
+    strategy = _strategy()
+    params = Parameters(tensors=[], tensor_type="numpy.ndarray")
+    held = _batch_ids(strategy.configure_fit(1, params, _Manager(2)))
+    # Round 2: the original two plus a third that has never been seen.
+    all_ids = _batch_ids(strategy.configure_fit(2, params, _Manager(3)))
+    assert len(set(all_ids)) == 3, f"late joiner collided: {held} then {all_ids}"

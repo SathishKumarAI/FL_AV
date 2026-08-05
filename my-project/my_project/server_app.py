@@ -41,8 +41,8 @@ class CustomBatchStrategy(FedAvg):
     
     Attributes:
         batch_id_range (tuple): Min and max range for batch IDs (inclusive)
-        used_batch_ids (set): Tracks batch IDs used in the current round
-        client_to_batch_id (dict): Maps client IDs to their assigned batch IDs
+        client_to_batch_id (dict): Maps each client to its shard, for the whole run
+            (FL data locality: a client keeps the same shard every round)
     """
 
     def __init__(
@@ -82,7 +82,6 @@ class CustomBatchStrategy(FedAvg):
         )
         
         self.batch_id_range = batch_id_range
-        self.used_batch_ids = set()
         self.client_to_batch_id: Dict[str, int] = {}
         self.client_os_info: Dict[str, str] = {}  # Track client OS information
         self.num_rounds = num_rounds
@@ -105,13 +104,16 @@ class CustomBatchStrategy(FedAvg):
     
     def _get_unused_batch_id(self, client_id: str) -> int:
         """
-        Get a batch_id that hasn't been used yet in the current round.
-        
+        Return this client's shard, assigning a free one on first sight.
+
+        A client keeps the same shard for the whole run — that is the FL data
+        locality premise, not an optimisation.
+
         Args:
             client_id: The client's identifier
-            
+
         Returns:
-            int: A unique batch ID for this client
+            int: The batch ID this client owns
         """
         # Check if client already has a batch_id assigned
         if client_id in self.client_to_batch_id:
@@ -119,25 +121,25 @@ class CustomBatchStrategy(FedAvg):
             return self.client_to_batch_id[client_id]
             
         min_id, max_id = self.batch_id_range
-        available_ids = set(range(min_id, max_id + 1)) - self.used_batch_ids
-        
+        # Derive what is taken from what clients actually hold. A separate
+        # used_batch_ids set was cleared every round while client_to_batch_id was
+        # not, so a client joining in a later round could be handed a shard another
+        # client was already training.
+        taken = set(self.client_to_batch_id.values())
+        available_ids = set(range(min_id, max_id + 1)) - taken
+
         if not available_ids:
-            # If all batches have been used, log warning and reset tracking
-            logger.warning(f"[Server] All batch_ids in range {min_id}-{max_id} have been used. Resetting usage tracking.")
-            self.used_batch_ids = set()  # Reset used batches
+            logger.warning(
+                f"[Server] More clients than shards in range {min_id}-{max_id}; "
+                f"{client_id} will share a shard with another client."
+            )
             available_ids = set(range(min_id, max_id + 1))
-            
-        batch_id = random.choice(list(available_ids))
-        self.used_batch_ids.add(batch_id)
+
+        batch_id = random.choice(sorted(available_ids))
         self.client_to_batch_id[client_id] = batch_id
         logger.debug(f"[Server] Assigned new batch_id={batch_id} to client {client_id}")
         return batch_id
     
-    def _clear_round_state(self) -> None:
-        """Clear state that should be reset between rounds."""
-        logger.debug(f"[Server] Clearing round state, resetting {len(self.used_batch_ids)} used batch IDs")
-        self.used_batch_ids = set()
-
     def _save_global_model(self, weights, server_round: int) -> None:
         """
         Save the aggregated global weights as a self-contained YOLO checkpoint.
@@ -179,7 +181,6 @@ class CustomBatchStrategy(FedAvg):
             List of tuples containing client proxies and their fit instructions
         """
         logger.info(f"[Server] configure_fit: Round={server_round}. Assigning batch IDs to clients...")
-        self._clear_round_state()  # Reset state for new round
 
         # Log parameter information for debugging
         weights = parameters_to_ndarrays(parameters)

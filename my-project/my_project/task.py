@@ -105,9 +105,11 @@ def count_shard_examples(batch_id, split="train"):
 
     FedAvg weights each client's update by ``num_examples``; reporting a real
     count (instead of a constant) makes aggregation correctly proportional to
-    shard size. Primary source is the split list file (``train.txt`` / ``val.txt``
-    / ``test.txt``, one image per line); falls back to counting image files under
-    ``images/<split>/`` if the list file is absent.
+    shard size. Counts the images actually present under ``images/<split>/``, and
+    only falls back to the committed split list (``train.txt`` / ``val.txt`` /
+    ``test.txt``) when that directory is missing. The split list is a manifest of
+    what *should* be there; when the two disagree the files on disk are what get
+    trained on, and weighting by the manifest silently skews aggregation.
 
     Args:
         batch_id: The batch ID.
@@ -118,7 +120,16 @@ def count_shard_examples(batch_id, split="train"):
     """
     base = get_batch_path(batch_id)
 
-    # Primary: count non-empty lines in the split list file.
+    # Primary: the images actually on disk -- that is what Ultralytics trains on.
+    img_dir = base / "images" / split
+    if img_dir.exists():
+        exts = {".jpg", ".jpeg", ".png", ".bmp"}
+        count = sum(1 for p in img_dir.iterdir() if p.suffix.lower() in exts)
+        if count > 0:
+            logger.debug(f"[Task] batch {batch_id} {split}: {count} examples (from {img_dir})")
+            return count
+
+    # Fallback: the committed split list, when the images are not populated yet.
     list_file = base / f"{split}.txt"
     if list_file.exists():
         try:
@@ -128,16 +139,7 @@ def count_shard_examples(batch_id, split="train"):
                 logger.debug(f"[Task] batch {batch_id} {split}: {count} examples (from {list_file.name})")
                 return count
         except Exception as e:
-            logger.warning(f"[Task] Failed reading {list_file}: {e}; falling back to file count.")
-
-    # Fallback: count image files under images/<split>/.
-    img_dir = base / "images" / split
-    if img_dir.exists():
-        exts = {".jpg", ".jpeg", ".png", ".bmp"}
-        count = sum(1 for p in img_dir.iterdir() if p.suffix.lower() in exts)
-        logger.debug(f"[Task] batch {batch_id} {split}: {count} examples (from {img_dir})")
-        if count > 0:
-            return count
+            logger.warning(f"[Task] Failed reading {list_file}: {e}")
 
     logger.warning(f"[Task] Could not count examples for batch {batch_id} split {split}; defaulting to 1.")
     return 1
@@ -201,47 +203,6 @@ def load_config(config_path):
     except Exception as e:
         logger.error(f"[Task] Failed to load config from {config_path}: {e}", exc_info=True)
         return {}
-
-
-# ----------------------------------------------------------
-# 2) Dataset Validation
-# ----------------------------------------------------------
-def validate_data_structure(batch_id, split="train"):
-    """
-    Checks if the directories for a given batch_id and data split exist
-    and contain the necessary images (and labels, if not 'test').
-
-    :param batch_id: Numeric or string ID for the dataset batch.
-    :param split:    "train", "val", or "test".
-    :return:         True if valid structure, else False.
-    """
-    base_path = get_batch_path(batch_id)
-    split_path = base_path / split
-    logger.info(f"[Task] Validating dataset structure for batch {batch_id}, split: {split}")
-
-    if not split_path.exists():
-        logger.error(f"[Task] Missing directory: {split_path}")
-        return False
-
-    img_path = split_path / "images"
-    if not img_path.exists() or not any(img_path.iterdir()):
-        logger.error(f"[Task] Missing or empty image directory: {img_path}")
-        return False
-
-    label_path = split_path / "labels" if split != "test" else None
-    if label_path and (not label_path.exists() or not any(label_path.iterdir())):
-        logger.error(f"[Task] Missing or empty label directory: {label_path}")
-        return False
-    
-    yaml_path = get_data_yaml_path(batch_id)
-    if not yaml_path.exists():
-        logger.warning(f"[Task] Missing data.yaml file: {yaml_path}, you may need to create it.")
-    else:
-        # Generate a runtime data.yaml with correct absolute paths (non-mutating).
-        materialize_data_yaml(batch_id)
-
-    logger.info(f"[Task] Validation successful for batch {batch_id}, split: {split}")
-    return True
 
 
 # ----------------------------------------------------------

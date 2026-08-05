@@ -42,45 +42,68 @@ exactly why `tests/test_batch_assignment.py` now guards it.
 
 Cost: ~15 min, mostly download. Proves CUDA works and answers B4/B5.
 
+**Use a venv on a python.org interpreter, not conda** — Smart App Control blocks
+conda-forge's `_bz2.pyd` on this host and training dies inside `torchvision`. Full
+diagnosis in [ENV_WINDOWS.md](ENV_WINDOWS.md). Python **3.12**, not 3.13: `ray`'s
+Windows dependency marker is `python>=3.11,<3.13`.
+
 ```powershell
-conda create -n fl_yolov8 python=3.11 -y
-conda activate fl_yolov8
+& "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe" -m venv C:\Users\PRANAS\venvs\fl_yolov8
+$py = "C:\Users\PRANAS\venvs\fl_yolov8\Scripts\python.exe"
 
-# Blackwell (sm_120) needs a cu128 build. NOT cu118.
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+# Blackwell (sm_120) needs a cu128 build. NOT cu118. Install it BEFORE the project,
+# or ultralytics resolves a default-CUDA torch from PyPI.
+& $py -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 
-python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.get_device_capability())"
-# expect: 2.7+ / 12.8 / (12, 0)   <- (12,0) confirms sm_120 is supported
+& $py -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.get_device_capability())"
+# got: 2.11.0+cu128 12.8 (12, 0)   <- (12,0) confirms sm_120
+
+# A capability string is not a kernel launch. Prove one actually runs:
+& $py -c "import torch; a=torch.randn(4096,4096,device='cuda'); print((a@a).sum().item())"
 
 cd my-project
-pip install -e .
+& $py -m pip install -e ".[dev]"
 ```
 
 Then the probe. This is the whole experiment for B4 + B5:
 
 ```python
-# probe.py  -- run from my-project/, needs one populated shard (see Phase 2 fast path)
+# run from my-project/, needs one populated shard (Phase 2)
 from ultralytics import YOLO
+from my_project.task import materialize_data_yaml
 from my_project.get_set_model import get_weights
 
+data = str(materialize_data_yaml(1))   # data.runtime.yaml does not exist until something writes it
 y = YOLO("models/yolov8s.pt")
-before_obj, before_n = y.model, len(get_weights(y.model))
-y.train(data="batch/batch_1/data.runtime.yaml", epochs=1, imgsz=320, batch=4, device=0)
-print("same module object after train:", y.model is before_obj)   # expect False -> B4 real
-print("state tensors before/after:", before_n, len(get_weights(y.model)))
-print("head nc before/after:", 80, y.model.nc)                    # expect 80 -> 13 -> B5 real
+orphan = y.model                        # exactly what client_app.__init__ used to pin
+before = get_weights(orphan)
+# NOTE: DetectionModel has no `.nc` — that is *why* `self.model.nc = 13` was a no-op.
+# Read it off the Detect head; this plan's original `y.model.nc` raises AttributeError.
+print("head nc before:", y.model.model[-1].nc)
+
+y.train(data=data, epochs=1, imgsz=320, batch=4, device=0, workers=0, amp=False)
+
+print("same module object after train:", y.model is orphan)      # False -> B4 real
+print("head nc after :", y.model.model[-1].nc)                   # 13    -> B5 real
+print("ORPHAN UNCHANGED:", all((a == b).all() for a, b in zip(before, get_weights(orphan))))
 ```
 
-- `same module object: False` ⇒ **B4 confirmed.** `client_app.py` keeps
-  `self.model` from `__init__` and reads it back with `get_weights(self.model)`
-  after `self.yolo.train(...)`. Ultralytics reassigns `yolo.model` from the
-  best/last checkpoint at the end of `train()`, so `self.model` is an orphan: the
-  client returns the weights it was *sent*, never the weights it *trained*. Round
-  2 onward it also trains from the orphan's stale state. FedAvg then averages
-  identical inputs — the federation runs, logs metrics, and learns nothing.
-- `head nc 80 -> 13` ⇒ **B5 confirmed.** Fixing B4 alone makes it visible as a
-  `set_weights` count/shape mismatch, because the server still holds an `nc=80`
-  model. Both must land together.
+`workers=0` (Windows dataloader) and `amp=False` (the AMP check downloads
+`yolo26n.pt`, not `yolo11n.pt`) keep the probe from failing for unrelated reasons.
+Tensor *count* is unchanged by B5 — 355 either way — so compare the head `nc` and the
+last tensor's shape, never the count.
+
+- `same module object: False` ⇒ **B4 confirmed.** `client_app.py` kept `self.model`
+  from `__init__` and read it back with `get_weights(self.model)` after
+  `self.yolo.train(...)`. Ultralytics rebinds `yolo.model` twice inside `train()` —
+  once to `trainer.model`, once from the best/last checkpoint — so `self.model` was
+  an orphan: the client returned the weights it was *sent*, never the ones it
+  *trained*. FedAvg then averaged identical inputs; the federation ran, logged
+  metrics, and learned nothing. `ORPHAN UNCHANGED: True` is the direct proof.
+- `head nc 80 -> 13` ⇒ **B5 confirmed.** Fixing B4 alone surfaces it as a
+  `set_weights` shape mismatch, because the server still held an `nc=80` model. Both
+  had to land together — and `fit()` discarded `set_weights`' return value, so the
+  mismatch would have failed silently rather than loudly.
 
 ---
 
@@ -141,8 +164,9 @@ Before paying for a 3-client simulation, prove one YOLO run trains on this card.
 
 ```powershell
 cd my-project
-yolo detect train data=batch/batch_1/data.runtime.yaml model=models/yolov8s.pt `
-  epochs=1 imgsz=640 batch=8 device=0 workers=2 amp=True
+yolo detect train data=batch/batch_1/data.runtime.yaml `
+  model=models/yolov8s-13.yaml pretrained=models/yolov8s.pt `
+  epochs=5 imgsz=640 batch=4 device=0 workers=2 amp=True plots=False
 ```
 
 Watch for: `AMP: checks passed`, GPU utilisation non-zero in `nvidia-smi`,
@@ -151,7 +175,7 @@ box/cls/dfl losses all finite and falling.
 | Symptom | Cause |
 |---------|-------|
 | `no kernel image is available for execution` | B2 — wrong torch build, reinstall cu128 |
-| AMP check hangs | it downloads `yolo11n.pt`; pre-place it or run with `amp=False` |
+| AMP check hangs | it downloads **`yolo26n.pt`** (not `yolo11n.pt`) into the CWD; pre-place it or run with `amp=False` |
 | Dataloader hangs/crashes on Windows | `workers=2` or `workers=0` |
 | `Dataset ... images not found` | Phase 2 incomplete, or a stale `.cache` survived |
 
@@ -168,13 +192,27 @@ schedule clients **one at a time** on the GPU — slower but no OOM. Only drop t
 options.num-supernodes = 2
 options.backend.client-resources.num-cpus = 4
 options.backend.client-resources.num-gpus = 1.0
-options.backend.init_args.num_cpus = 8
-options.backend.init_args.num_gpus = 1
+# `init-args`, with dashes. flwr >= 1.31 ignores the old `init_args` spelling.
+options.backend.init-args.num-cpus = 8
+options.backend.init-args.num-gpus = 1
 ```
 
+**Set this before the first `flwr run`.** That run migrates the block to
+`~/.flwr/config.toml` and comments it out of `pyproject.toml`; edits afterwards go to
+the migrated file (or `--federation-config`), not here.
+
 ```powershell
-flwr run . --run-config "num_server_rounds=2 local_epochs=1 min_clients=2"
+cd my-project    # the detached SuperLink caches this CWD for every later run
+Get-Process flower-superlink -ErrorAction SilentlyContinue | Stop-Process -Force
+$env:PATH = "C:\Users\PRANAS\venvs\fl_yolov8\Scripts;$env:PATH"
+$env:FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION = "1"   # or every client runs on CPU
+
+flwr run . --stream --run-config "num_server_rounds=2 local_epochs=20 min_clients=2 fraction_fit=1.0"
 ```
+
+`--stream` is required; without it the command returns a run id and the work happens
+in the detached SuperLink. `local_epochs=20` is not padding — see the accumulation
+note in §5.
 
 **Pass criteria — all four, not just "it finished":**
 
@@ -217,19 +255,34 @@ exercise — do not mix it into the first GPU bring-up.
 | B3 | `pyproject.toml` | See Phase 4 block. |
 | B6 | shards | Handled by `scripts/populate_images.py`. |
 
-### Worth fixing while you are in there
+### Worth fixing while you are in there — all closed 2026-08-05
 
-| Where | Gap |
-|-------|-----|
-| `client_app.py` `fit()` | `yolo.train()` is called with no `batch=`, so Ultralytics uses 16 regardless of the card. `task.get_optimal_batch_size()` exists for exactly this and **is never called** — wire it in, or pass `batch` from `run_config`. |
-| `client_app.py` `fit()` | No `workers=`/`project=`/`name=`. On Windows 8 dataloader workers per client is a hang risk; unnamed runs pile into `runs/detect/train`, `train2`, … at 22 MB each per client per round. |
-| `task.py:209` `validate_data_structure` | Checks `batch_N/<split>/images`, but the real layout is `batch_N/images/<split>`. Always False. Dead code today — nothing calls it — so delete it or fix it, don't leave it. |
-| `docs/RUNNING.md:31`, `docs/ARCHITECTURE.md:96` | Reference `task.update_data_yaml_paths()`, which no longer exists (now `materialize_data_yaml`). |
-| `docs/ARCHITECTURE.md:92` | Still claims `num_examples` is a hardcoded `10`; that was fixed in PR #22. |
-| `client_app.py:20` | Imports `load_yolo_model`, never uses it. `get_set_model.load_yolo_model` also defaults to `yolo8n.yaml` + `yolov8s.pt` — mismatched scales, so it would fail if anything did call it. |
-| `server_app.py` `_get_unused_batch_id` | `client_to_batch_id` is never cleared, so a client keeps its shard for the whole run (correct for FL data locality) — but `used_batch_ids` is reset each round without re-adding the cached ones, so a late-joining client can be handed a shard another client already holds. |
-| CI | Still no end-to-end simulation smoke test (already §10.1 of the engineering notes). Once Phase 4 passes, the `--limit 200` smoke shard from Phase 2 is exactly the fixture that makes one cheap — or lift the 450-image fixture off `origin/laptop_copy`. |
-| `README.md:88` | Points at a Google Drive folder for the preprocessed dataset that no longer resolves. Replace with the Berkeley/Kaggle instructions from Phase 2 so the next person doesn't chase a dead link. |
+| Where | Gap | Resolution |
+|-------|-----|------------|
+| `client_app.py` `fit()` | `yolo.train()` called with no `batch=` | wired `task.get_optimal_batch_size()` |
+| `client_app.py` `fit()` | no `workers=`/`project=`/`name=` | `workers=0` on Windows (a Ray-actor deadlock, not a slowdown), runs named `runs/fl/batch<N>` |
+| `task.py` `validate_data_structure` | checked the wrong layout, always False, never called | deleted |
+| `docs/RUNNING.md`, `docs/ARCHITECTURE.md` | referenced the long-gone `task.update_data_yaml_paths()` | now `materialize_data_yaml` |
+| `docs/ARCHITECTURE.md` | claimed `num_examples` was a hardcoded `10` | corrected |
+| `client_app.py` | imported `load_yolo_model`, never used; it paired an `n`-scale yaml with `s`-scale weights | function deleted outright |
+| `server_app.py` `_get_unused_batch_id` | `used_batch_ids` reset each round while `client_to_batch_id` was not, so a late joiner could be handed a held shard | the separate set is gone; taken shards are derived from `client_to_batch_id.values()` |
+| CI | no end-to-end simulation smoke test | `simulation-smoke` job: extracts the `laptop_copy` fixture, runs a 2-round federation on CPU, and asserts the four criteria |
+| `README.md` | dead Google Drive link | Berkeley/Kaggle instructions + `populate_images.py`; the install section's `cu118` (i.e. B2) was corrected at the same time |
+
+### One more, found while closing the list
+
+`count_shard_examples` preferred the committed `train.txt` over the images actually
+on disk. On the fixture that reported **6 308** examples for a **10**-image shard —
+and `num_examples` is FedAvg's aggregation weight. Now counts the images present and
+falls back to the split list only when the shard is unpopulated.
+
+That one masked something worse. Ultralytics accumulates gradients to a nominal batch
+of 64, so at `batch=16` it calls `optimizer.step()` only every 4 batches. A 10-image
+shard yields 1 batch per epoch, so a **1-epoch round completes without a single
+optimizer step**: training "succeeds", metrics are logged, and the client returns the
+global weights bit-for-bit. Identical round-over-round checksums — indistinguishable
+from B4 at a glance. `fit()` now warns explicitly when the arithmetic says no step can
+happen, and the CI smoke uses `local_epochs=20` for that reason.
 
 ---
 
