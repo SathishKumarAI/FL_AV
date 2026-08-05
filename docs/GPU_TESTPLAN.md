@@ -109,52 +109,48 @@ last tensor's shape, never the count.
 
 ## Phase 2 — data
 
-The repo has all 10 shards' labels (7 318 files each: 6 308 train / 1 010 val)
-and the split lists. Only the BDD100K JPEGs are missing.
+The repo has all 10 shards' labels (7 318 files each: 6 308 train / 1 010 val) and the
+split lists. Only the BDD100K JPEGs are missing.
 
-### Where the images are *not* (searched 2026-08-04)
+**Everything about obtaining them — including the sources that are dead, so nobody
+repeats the 2026-08-04 search — now lives in [DATASET.md](DATASET.md).** Short version,
+no Kaggle account needed:
 
-Before re-downloading 6.3 GB, this is what was already checked and ruled out.
+```bash
+pip install kagglehub
+python -c "import kagglehub; print(kagglehub.dataset_download('solesensei/solesensei_bdd100k'))"
 
-| Location | Result |
-|----------|--------|
-| Google Drive, `sathishkumar786.ml@gmail.com` | **Nothing.** Full enumeration of every folder and every archive mime-type: zero zip/tar/7z files in the account, no folder named bdd/yolo/dataset/FL_AV. Only doc-type files. |
-| The README's "Download Dataset" Drive link (folder `1R-lelZR3LBgeHfMlRR_OhOIzfUuxPBcZ`) | **Dead** — "requested entity was not found". Either deleted or owned by an account that no longer shares it. The README still advertises it; see the gap table. |
-| `origin/images` branch | 0 images despite the name. |
-| `origin/laptop_copy` branch | 450 JPEGs — exactly 10 per split per shard. A toy fixture (matches the `batch34/` dirs, 20 labels each), **not** the dataset. Useful as a CI fixture, useless for training. |
-
-So the images have to come from an external source. If they exist anywhere it
-would be another Drive account, an external drive, or the old
-`C:\Users\sathish\Downloads\FL_ModelForAV\` machine that the committed
-`data.yaml` and `full_data_run/detect/train2/args.yaml` paths point at.
-
-**Fast path (do this first — ~1 GB, unblocks Phases 1 and 3):** grab only the
-BDD100K **val** set (10 k images) and build a 2-shard smoke federation from it.
-Full-scale can download in the background while you debug.
-
-```powershell
-python scripts/populate_images.py --pool D:\bdd100k\images\100k --batches 1,2 --limit 200
+cd my-project
+python scripts/populate_images.py --pool <printed-path>/bdd100k/images/100k
 ```
 
-**Full path:** BDD100K "100K Images" (~5.3 GB train, ~1 GB val). Sources, in
-order of preference:
+`populate_images.py` hardlinks (pool and repo must share a volume, else `--copy`), is
+idempotent, and deletes the stale `labels/*.cache` (B6). `--batches 1,2 --limit 200`
+keeps it small while debugging; `--self-check` verifies the script itself.
 
-1. Official — <https://bdd-data.berkeley.edu/> (free account, then *100K Images*).
-2. The ETH mirror the BDD100K docs list (`dl.cv.ethz.ch/bdd100k/data/`) —
-   **did not resolve when checked on 2026-08-04**; confirm before relying on it.
-3. Kaggle: `kaggle datasets download -d solesensei/solesensei_bdd100k`.
+**Fixture path, no download at all.** `origin/laptop_copy` carries 10 images plus
+name-matching labels per split per shard. That is what Phases 1–4 were first executed
+against, and what the CI `simulation-smoke` job uses:
 
-You only need `bdd100k/images/100k/{train,val}/`. The `labels/` in those archives
-are the raw JSON — ignore them, this repo's YOLO `.txt` labels are already
-converted and committed.
-
-```powershell
-python scripts/populate_images.py --pool D:\bdd100k\images\100k   # all 10 shards
+```bash
+for b in $(seq 1 10); do
+  for sp in train val; do
+    git archive origin/laptop_copy "my-project/batch/batch_$b/images/$sp" | tar -x
+    git archive origin/laptop_copy "my-project/batch/batch_$b/labels/$sp" | tar -x
+  done
+done
+rm -f my-project/batch/batch_*/labels/*.cache
 ```
 
-The script hardlinks (near-zero disk, pool must be on the same volume as the
-repo), is idempotent, and deletes the stale `labels/*.cache` (B6). `--copy`
-forces a real copy across volumes. Verify with `--self-check`.
+Use `git archive`, not `git checkout <branch> -- <path>` — the latter also stages the
+files. Note the fixture's image names do **not** match the committed labels (1/10
+overlap), so its images and labels must be taken together.
+
+Ten shards, not two: `DEFAULT_BATCH_ID_RANGE` is `(1, 10)` and assignment is random,
+so a client handed shard 7 dies if only 1 and 2 are populated.
+
+At 10 images per shard the metrics are noise — this fixture proves plumbing, nothing
+about accuracy.
 
 ---
 

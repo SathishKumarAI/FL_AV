@@ -16,12 +16,13 @@ Update this when you STOP working, not when you start.
   **last** assigned `batch_id`, so the whole federation trained one shard while the
   server logged two. Guarded by `tests/test_batch_assignment.py`. 23 tests pass.
 
-- **Next action:** real BDD100K, then a full-scale Phase 4. Everything is currently
-  running on the 10-images-per-shard toy fixture from `origin/laptop_copy`, which is
-  enough to prove plumbing and nothing else (mAP50 ≈ 0.05 is noise). Once real images
-  land: `python scripts/populate_images.py --pool <dir>`, then raise
-  `num_server_rounds`/`local_epochs` and drop `client-resources.num-gpus` below 1.0
-  only after checking one client's real VRAM footprint.
+- **Next action:** full-scale Phase 4 on the real BDD100K. Everything measured so far
+  ran on the 10-images-per-shard toy fixture from `origin/laptop_copy`, which proves
+  plumbing and nothing else (mAP50 ≈ 0.05 is noise). With real images populated
+  (see [`docs/DATASET.md`](docs/DATASET.md)): raise `num_server_rounds`/`local_epochs`,
+  and drop `client-resources.num-gpus` below 1.0 only after measuring one client's real
+  VRAM footprint. Expect hours — 6 308 images × N clients × epochs is serialised on a
+  single card by `num-gpus = 1.0`.
 
 - **Environment (this is the part that costs an hour if you forget it):** use the
   **venv at `C:\Users\PRANAS\venvs\fl_yolov8`**, built on python.org 3.12 — *not*
@@ -31,9 +32,8 @@ Update this when you STOP working, not when you start.
   builds its own runtime env, installs the CPU-only torch wheel, and every client
   silently trains on CPU at 5.5× the wall clock with no error anywhere.
 
-- **Blocked on:** BDD100K images. Repo has all labels + split lists, zero real JPEGs.
-  Searched 2026-08-04 and ruled out: the `sathishkumar786.ml@gmail.com` Drive
-  (no archives at all), the README's Drive link (dead), `origin/images` (empty).
-  `origin/laptop_copy` has the 450-image fixture now in use. Must re-download —
-  Berkeley site (account) or Kaggle (`kaggle.json` token); the ETH mirror
-  `dl.cv.ethz.ch` did not resolve. Val set alone (~1 GB) is enough. Test plan, Phase 2.
+- **Not blocked any more:** the BDD100K images have a working source.
+  `kagglehub.dataset_download("solesensei/solesensei_bdd100k")` pulls ~6.5 GB with
+  **no Kaggle account or token**, then `scripts/populate_images.py --pool <path>`
+  hardlinks them into the shards. Full instructions, plus a table of the sources that
+  are dead so nobody searches again, in [`docs/DATASET.md`](docs/DATASET.md).

@@ -14,8 +14,6 @@
   - [2. Create the environment](#2-create-the-environment)  
   - [3. Install dependencies](#3-install-dependencies)  
 - [📂 Dataset Preparation](#-dataset-preparation)  
-  - [1. Get the images](#1-get-the-images)  
-  - [2. Populate the shards](#2-populate-the-shards)  
 - [🚀 Quick Start](#-quick-start)  
   - [1. Install](#1-install)  
   - [2. Run the federation](#2-run-the-federation)  
@@ -86,39 +84,34 @@ cd my-project && pip install -e ".[dev]"
 
 ---
 
-## 📂 Dataset Preparation  
+## 📂 Dataset Preparation
 
-The repo already ships every shard's **labels** and split lists
-(`my-project/batch/batch_1..10/`, 6 308 train + 1 010 val per shard). Only the
-BDD100K JPEGs are missing — they are too large to commit.
+Full detail — including the download links that are **dead**, so you do not go
+looking — is in [`docs/DATASET.md`](docs/DATASET.md).
 
-### 1. Get the images  
+The repo already ships every shard's labels and split lists
+(`my-project/batch/batch_1..10/`, 6 308 train + 1 010 val each). Only the BDD100K
+JPEGs are missing. No Kaggle account or token is required:
 
-The preprocessed copy that used to live on Google Drive is **gone** (the folder no
-longer resolves). Download BDD100K "100K Images" from the source instead:
+```bash
+pip install kagglehub
+python -c "import kagglehub; print(kagglehub.dataset_download('solesensei/solesensei_bdd100k'))"
 
-1. Official — <https://bdd-data.berkeley.edu/> (free account, then *100K Images*).
-2. Kaggle — `kaggle datasets download -d solesensei/solesensei_bdd100k`.
+cd my-project
+python scripts/populate_images.py --pool <printed-path>/bdd100k/images/100k
+```
 
-You only need `bdd100k/images/100k/{train,val}/`. Ignore the `labels/` in those
-archives — they are raw JSON, and this repo's YOLO `.txt` labels are already
-converted and committed. The val set alone (~1 GB) is enough for a smoke run.
+`populate_images.py` hardlinks (no extra disk; pool and repo must share a volume, else
+`--copy`), is idempotent, and clears the stale Ultralytics `labels/*.cache` files.
+Testing? `--batches 1,2 --limit 200` is plenty.
 
-### 2. Populate the shards  
+> The Google Drive link this README used to advertise is **gone** — the folder no
+> longer resolves. Don't restore it. See the dead-ends table in
+> [`docs/DATASET.md`](docs/DATASET.md).
 
-```bash  
-cd my-project  
-python scripts/populate_images.py --pool /path/to/bdd100k/images/100k  
-```  
-
-The script hardlinks (near-zero disk; the pool must be on the same volume, use
-`--copy` otherwise), is idempotent, and deletes stale Ultralytics `labels/*.cache`
-files. Limit the work while testing with `--batches 1,2 --limit 200`. Verify the
-script itself with `--self-check`.
-
-Partitioning is already done — the ten `batch_N/` directories *are* the client
+Partitioning is already done: the ten `batch_N/` directories **are** the client
 shards, and the server hands each client its own via `CustomBatchStrategy`. Each
-shard carries its own `data.yaml` (`nc: 13`); its `path:` is never edited in place,
+shard carries its own `data.yaml` (`nc: 13`); its `path:` is never edited in place —
 `task.materialize_data_yaml` writes a gitignored `data.runtime.yaml` beside it.
 
 ---
