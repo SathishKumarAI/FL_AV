@@ -325,6 +325,31 @@ most direct evidence the GPU is actually in the loop.
 mAP is meaningless at this scale (10 train images per shard). These criteria test
 **plumbing**, not accuracy.
 
+### Real BDD100K — 2026-08-05
+
+All ten shards populated from Kaggle (see [DATASET.md](DATASET.md)): 6 308 train +
+1 010 val each, hardlinked, zero missing. Bounded run, 2 clients x 2 rounds x 1 epoch
+on full shards, `local_epochs=1` (6 308 images / batch 16 = 395 batches per epoch, so
+the accumulation trap below does not apply).
+
+| Round | stage | mAP50 | mAP50-95 |
+|---|---|---|---|
+| 1 | fit | 0.2346 | 0.1180 |
+| 1 | evaluate | 0.2647 | 0.1361 |
+| 2 | fit | 0.2788 | 0.1397 |
+| 2 | evaluate | **0.3110** | 0.1610 |
+
+Aggregate checksums `-1032.5396` → `-2646.9134`; clients trained shards 1 and 9 on
+`cuda:0`; all four pass criteria hold. **mAP50 rises 0.265 → 0.311 between rounds** —
+the first evidence the federation improves the global model on real data rather than
+merely moving bytes around. 919 s (~15 min) for the two rounds.
+
+**Measured VRAM: 15.9 GB of 16.3 GB peak, GPU 92-94%.** One client at `batch=16`,
+`imgsz=640` all but fills the card, so `client-resources.num-gpus` **cannot** drop to
+0.5/0.33 here — two concurrent clients would OOM. Clients stay serialised. Note that
+`get_optimal_batch_size()` returns 16 whenever >10 GB is free, which fills a 16 GB
+card to ~97%; fine on a dedicated box, tight if a display or second process wants VRAM.
+
 ### The one that will bite the next person
 
 flwr 1.33 builds an **isolated runtime env** per run (`~/.flwr/runtime-envs/…`) via
