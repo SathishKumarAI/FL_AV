@@ -1,29 +1,40 @@
 # GPU Test Plan — first real hardware run
 
-Target host: **RTX 5070 Ti, 16 GB, driver 610.47, Windows 11**. Nothing in this
-repo has ever run on a GPU; everything below is written so each phase fails
-cheaply and loudly before the expensive one starts.
+Target host: **RTX 5070 Ti, 16 GB, driver 610.47, Windows 11**.
 
-Related: [ARCHITECTURE.md](ARCHITECTURE.md) · [RUNNING.md](RUNNING.md) ·
-[ENGINEERING_NOTES.md](ENGINEERING_NOTES.md)
+> **STATUS 2026-08-05 — executed. All phases through Phase 4 pass on the GPU.**
+> B1–B6 are fixed, plus three defects this run exposed that the plan below did not
+> predict (B7–B9). Results in §6. The environment is a **venv on python.org 3.12**,
+> not conda — see [ENV_WINDOWS.md](ENV_WINDOWS.md) for why.
+
+Related: [ENV_WINDOWS.md](ENV_WINDOWS.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
+[RUNNING.md](RUNNING.md) · [ENGINEERING_NOTES.md](ENGINEERING_NOTES.md)
 
 ---
 
-## 0. Blockers found while reading the repo
+## 0. Blockers
 
 Ordered by what stops the run first. Details and fixes in §5.
 
+| # | Blocker | Effect | Status |
+|---|---------|--------|--------|
+| B1 | `batch/*/images/` is empty (labels + split lists committed, JPEGs not) | Every client dies: "no images found" | fixed — fixture, §2 |
+| B2 | Docs install torch `cu118` | 5070 Ti is Blackwell `sm_120`; cu118 wheels have no kernel for it — CUDA error or silent CPU fallback | fixed — cu128 |
+| B3 | `pyproject.toml` sets `num-gpus = 0` in both `client-resources` and `init_args` | Ray hides the GPU; the whole "GPU test" runs on CPU and looks fine | fixed — and the key was `init-args`, not `init_args`; the old spelling was ignored outright |
+| B4 | Client extracts post-training weights from the **wrong module object** | Nothing the client learns ever reaches the server | **confirmed and fixed** |
+| B5 | Server model is `nc=80` (COCO `yolov8s.pt`), trainer rebuilds `nc=13` from `data.yaml` | Head shapes disagree between server and client | **confirmed and fixed** |
+| B6 | Stale `labels/*.cache` from the previous machine | Ultralytics trusts the cache and resolves paths that don't exist here | fixed at the root — the caches were **tracked in git**; removed and ignored |
+
+### Found by running it — not predicted by this plan
+
 | # | Blocker | Effect |
 |---|---------|--------|
-| B1 | `batch/*/images/` is empty (labels + split lists committed, JPEGs not) | Every client dies: "no images found" |
-| B2 | Docs install torch `cu118` | 5070 Ti is Blackwell `sm_120`; cu118 wheels have no kernel for it — CUDA error or silent CPU fallback |
-| B3 | `pyproject.toml` sets `num-gpus = 0` in both `client-resources` and `init_args` | Ray hides the GPU; the whole "GPU test" runs on CPU and looks fine |
-| B4 | Client extracts post-training weights from the **wrong module object** | Suspected: nothing the client learns ever reaches the server |
-| B5 | Server model is `nc=80` (COCO `yolov8s.pt`), trainer rebuilds `nc=13` from `data.yaml` | Head shapes disagree between server and client |
-| B6 | Stale `labels/*.cache` from the previous machine | Ultralytics trusts the cache and resolves paths that don't exist here |
+| B7 | `_save_global_model` (`server_app.py`) built a third `nc=80` model | `set_weights` returns False, checkpoint silently skipped, pass criterion 4 unreachable |
+| B8 | Every Ray actor wrote the same `logs/client.log` | `RotatingFileHandler` is not multi-process safe; records interleave and vanish, so the log lied about which shard a client trained |
+| B9 | **`configure_fit` mutated a shared config dict** | `FedAvg` hands ONE `FitIns` to every client. Writing `config["batch_id"]` per client overwrote it for all — last write won. The server logged two distinct assignments while both clients trained the **same shard**. Federated partitioning was a no-op. |
 
-B4 and B5 are the interesting ones and they interact — see §5. **Do not skip
-Phase 1; it is the 3-minute experiment that decides whether B4/B5 are real.**
+B9 is the worst of the three: it is invisible from the server's own logs, which is
+exactly why `tests/test_batch_assignment.py` now guards it.
 
 ---
 
@@ -221,6 +232,64 @@ exercise — do not mix it into the first GPU bring-up.
 | `README.md:88` | Points at a Google Drive folder for the preprocessed dataset that no longer resolves. Replace with the Berkeley/Kaggle instructions from Phase 2 so the next person doesn't chase a dead link. |
 
 ---
+
+## 6. Results — 2026-08-05
+
+Run: `flwr run . --stream --run-config "num_server_rounds=2 local_epochs=20 min_clients=2 fraction_fit=1.0"`
+
+```powershell
+cd my-project
+$env:PATH = "C:\Users\PRANAS\venvs\fl_yolov8\Scripts;$env:PATH"
+$env:FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION = "1"   # see the note below — without this it runs on CPU
+$env:FL_AV_DATA_ROOT = "<repo>\my-project"
+```
+
+### Phase 1 — the probe
+
+```
+head nc before: 80          -> after: 13          B5 REAL
+same module object after train: False             B4 REAL
+ORPHAN UNCHANGED: True                            <- the client returned exactly the weights it was sent
+```
+
+`ORPHAN UNCHANGED: True` is the whole of B4 in one line: the module `__init__`
+pinned never moved during training, so every round shipped the global weights
+straight back and FedAvg averaged its own input.
+
+### Phase 3 — single client
+
+`AMP: checks passed`, 5 epochs, mAP50 **0.354** on the 10-image fixture shard.
+
+### Phase 4 — federation, all four criteria
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | global checksum changes between rounds | `619.8819` → `612.2892` ✅ |
+| 2 | client sent ≠ received | `698.6961` received → `679.3250` sent ✅ |
+| 3 | `metrics.csv` fit + evaluate rows, non-zero mAP50 | 4 rows, mAP50 `0.0479`–`0.0785` ✅ |
+| 4 | checkpoints exist and reload | `global_round_{1,2}.pt` + `global_last.pt`; reload → val mAP50 `0.0309` ✅ |
+
+Clients trained **distinct** shards (`batch_id=4` and `batch_id=10`) on `cuda:0`.
+Wall clock **55 s** vs **308 s** for the same run on CPU — a 5.5× gap, which is the
+most direct evidence the GPU is actually in the loop.
+
+mAP is meaningless at this scale (10 train images per shard). These criteria test
+**plumbing**, not accuracy.
+
+### The one that will bite the next person
+
+flwr 1.33 builds an **isolated runtime env** per run (`~/.flwr/runtime-envs/…`) via
+`uv sync`, installing this project's dependencies fresh. `torch` from PyPI on Windows
+is the **CPU-only** wheel, so the carefully installed cu128 build never reaches the
+Ray actors and every client silently trains on CPU — while `nvidia-smi` sits idle and
+nothing errors. Setting `FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION=1` makes the
+apps run in the launching environment instead.
+
+Two related traps: `flwr run` **rewrites `pyproject.toml`** on first use, commenting
+out the whole `[tool.flwr.federations]` block and migrating it to
+`~/.flwr/config.toml` — edit that file afterwards, not pyproject. And the SuperLink is
+detached and persistent, so it caches the CWD of whichever run started it; always
+launch from `my-project/`, and `Stop-Process` it after changing directory or config.
 
 ## Cost estimate
 

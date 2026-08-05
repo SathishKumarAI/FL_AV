@@ -31,9 +31,16 @@ def configure_logging(logger_name, log_file=None):
 
     if log_file:
         # Ensure the log file's own directory exists (not a hardcoded "logs").
-        Path(os.path.dirname(log_file) or ".").mkdir(parents=True, exist_ok=True)
+        path = Path(log_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # One file per process. In simulation every client runs in its own Ray actor
+        # process, and RotatingFileHandler is not multi-process safe: the writes
+        # interleave and, worse, one process renaming the file mid-rotation silently
+        # drops another's records. That made logs/client.log lie about which shard a
+        # client trained on. Callers read logs/<name>.*.log (a glob), not one file.
+        path = path.with_name(f"{path.stem}.{os.getpid()}{path.suffix}")
         handler = RotatingFileHandler(
-            log_file, maxBytes=_MAX_BYTES, backupCount=_BACKUP_COUNT
+            path, maxBytes=_MAX_BYTES, backupCount=_BACKUP_COUNT
         )
     else:
         handler = logging.StreamHandler()

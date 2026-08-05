@@ -16,7 +16,10 @@ def test_file_handler_is_rotating(tmp_path):
     # The handler created its parent directory.
     assert log_file.parent.is_dir()
     lg.info("hello")
-    assert log_file.exists()
+    # One file per process: RotatingFileHandler is not multi-process safe, so the
+    # pid is folded into the name and callers glob for it.
+    written = list(log_file.parent.glob("test.*.log"))
+    assert written == [log_file.with_name(f"test.{os.getpid()}.log")]
 
 
 def test_no_duplicate_handlers_on_repeat_calls():

@@ -1,14 +1,12 @@
-from typing import List, Optional
+from typing import List
 import warnings
 import torch
 import numpy as np
 import platform
-import os
 from collections import OrderedDict
-# NOTE: ultralytics (YOLO) is imported lazily inside load_yolo_model() so that the
-# core weight-transfer helpers (get_weights/set_weights) depend only on torch +
-# numpy. This keeps FedAvg serialization testable and importable without the heavy
-# ultralytics dependency.
+# NOTE: this module deliberately does not import ultralytics. The weight-transfer
+# helpers (get_weights/set_weights) depend only on torch + numpy, which keeps FedAvg
+# serialization testable and importable without the heavy dependency.
 from utils.logging_setup import configure_logging
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -21,6 +19,12 @@ logger.info(f"[GetSet] Detected operating system: {OS_NAME}")
 
 # Constants
 DEFAULT_NUM_CLASSES = 13  # The default number of classes for our model
+
+# The architecture both server and client must build, so their state_dicts match.
+# Ultralytics infers the scale from the *filename*: "yolov8s-13" parses as scale
+# 's', matching models/yolov8s.pt. The old models/yolo8n.yaml parsed as 'n' and
+# would silently build a nano net to load small weights into.
+NUM_CLASSES_MODEL_YAML = "models/yolov8s-13.yaml"
 
 def get_normalized_path(path):
     """
@@ -137,57 +141,3 @@ def set_weights(model, parameters: List[np.ndarray]) -> bool:
     except Exception as e:
         logger.error(f"[GetSet] Error in set_weights: {e}", exc_info=True)
         return False
-
-
-def load_yolo_model(yaml_path="models/yolo8n.yaml", 
-                weight_path="models/yolov8s.pt") -> Optional[torch.nn.Module]:
-    """
-    Load a YOLOv8 model with specified configuration and weights.
-    
-    Args:
-        yaml_path: Path to the model configuration YAML
-        weight_path: Path to the model weights
-        
-    Returns:
-        The loaded model or None on error
-    """
-    try:
-        from ultralytics import YOLO  # lazy import; see module header note
-
-        # Normalize paths for current OS
-        yaml_path = get_normalized_path(yaml_path)
-        weight_path = get_normalized_path(weight_path)
-        
-        logger.debug(f"[GetSet] Loading YOLOv8 model from {yaml_path} with weights from {weight_path}")
-        logger.debug(f"[GetSet] Current OS: {OS_NAME}, using normalized paths")
-        
-        # Check if files exist
-        if not os.path.exists(yaml_path):
-            logger.error(f"[GetSet] Model config not found: {yaml_path}")
-            return None
-            
-        if weight_path and not os.path.exists(weight_path):
-            logger.warning(f"[GetSet] Model weights not found: {weight_path}, will use default initialization")
-        
-        # Create the base YOLO model from yaml
-        yolo = YOLO(yaml_path)
-        
-        # Load weights if provided
-        if weight_path and os.path.exists(weight_path):
-            yolo.load(weight_path)
-        
-        # Access the actual PyTorch model
-        model = yolo.model
-        
-        # Set number of classes
-        model.nc = DEFAULT_NUM_CLASSES
-        
-        # Adjust the detection layers if needed for the new class count
-        if hasattr(model, 'head'):
-            model.head.nc = DEFAULT_NUM_CLASSES
-        
-        logger.debug(f"[GetSet] Model loaded successfully with nc={DEFAULT_NUM_CLASSES}")
-        return model
-    except Exception as e:
-        logger.error(f"[GetSet] Failed to load YOLOv8 model: {e}", exc_info=True)
-        return None

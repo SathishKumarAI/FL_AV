@@ -17,7 +17,7 @@ from flwr.server.client_manager import ClientManager
 os.environ["ULTRALYTICS_HUB"] = "0"
 from ultralytics import YOLO
 from my_project.task import download_model, should_checkpoint, IS_WINDOWS, OS_NAME
-from my_project.get_set_model import get_weights, set_weights
+from my_project.get_set_model import NUM_CLASSES_MODEL_YAML, get_weights, set_weights
 
 from utils.logging_setup import configure_logging
 from utils.metrics_logger import MetricsLogger, aggregate_client_metrics
@@ -149,7 +149,7 @@ class CustomBatchStrategy(FedAvg):
         """
         try:
             if self._save_model is None:
-                self._save_model = YOLO(MODEL_PATH)
+                self._save_model = YOLO(NUM_CLASSES_MODEL_YAML).load(MODEL_PATH)
             if not set_weights(self._save_model.model, weights):
                 logger.error(f"[Server] Round {server_round}: set_weights failed; skipping checkpoint.")
                 return
@@ -192,7 +192,11 @@ class CustomBatchStrategy(FedAvg):
 
         updated_instructions = []
         for (client_proxy, fit_ins) in instructions:
-            fit_config = fit_ins.config
+            # COPY, do not mutate. FedAvg.configure_fit builds ONE FitIns and hands
+            # the same object to every client, so writing batch_id into fit_ins.config
+            # in this loop overwrote it for all of them — last client won and the whole
+            # federation trained a single shard while the log claimed otherwise.
+            fit_config = dict(fit_ins.config)
             try:
                 # Assign a unique batch_id for this client
                 batch_id = self._get_unused_batch_id(client_proxy.cid)
@@ -252,7 +256,7 @@ class CustomBatchStrategy(FedAvg):
 
         updated_instructions = []
         for (client_proxy, eval_ins) in instructions:
-            eval_config = eval_ins.config
+            eval_config = dict(eval_ins.config)  # shared EvaluateIns — copy, see configure_fit
             try:
                 # Use the same batch_id assignment logic
                 batch_id = self._get_unused_batch_id(client_proxy.cid)
@@ -434,8 +438,13 @@ def server_fn(context: Context):
 
     # Load YOLO's initial model
     try:
-        model = YOLO(MODEL_PATH)
-        initial_weights = get_weights(model)
+        # Same 13-class arch the clients build (client_app.py). Building from the
+        # .pt alone gives an 80-class COCO head, which stops matching the moment a
+        # client's train() rebuilds its head from data.yaml (nc=13). Pass the inner
+        # DetectionModel, not the YOLO wrapper, so both sides key the state_dict
+        # identically.
+        model = YOLO(NUM_CLASSES_MODEL_YAML).load(MODEL_PATH)
+        initial_weights = get_weights(model.model)
         
         # Calculate initial checksum for tracking
         initial_checksum = sum(w.sum() for w in initial_weights if w.size > 0)

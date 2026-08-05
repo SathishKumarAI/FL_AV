@@ -168,3 +168,16 @@ cython_debug/
 batch/
 batch_*/
 batch_archive/
+
+# Ultralytics label scan caches: machine-specific absolute paths, rebuilt on demand.
+# Committing them made Ultralytics resolve the previous machine's paths (testplan B6).
+**/labels/*.cache
+
+# Per-process log files (utils/logging_setup folds the pid into the name so
+# concurrent Ray actors stop clobbering one another's records) and the CSV the
+# MetricsLogger rewrites each run.
+logs/*.*.log
+logs/metrics.csv
+
+# Ultralytics downloads this into the CWD for its one-time AMP check.
+yolo26n.pt
