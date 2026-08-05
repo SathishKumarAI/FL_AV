@@ -20,7 +20,23 @@ from pathlib import Path
 SPLITS = ("train", "val")
 
 
-def link_split(batch_dir: Path, pool: Path, split: str, limit: int, copy: bool):
+def index_pool(pool: Path, split: str) -> dict:
+    """Map basename -> path for every JPEG under <pool>/<split>/, recursively.
+
+    Mirrors disagree on layout: the Kaggle copy of BDD100K nests its train split
+    into `train/trainA/`, `train/trainB/`, ... while the official archive is flat.
+    A flat-only lookup silently finds ~2% of the train set, so index by basename
+    and let the directory shape be whatever it is.
+    """
+    base = pool / split
+    if not base.is_dir():
+        return {}
+    exts = {".jpg", ".jpeg", ".png", ".bmp"}
+    return {p.name: p for p in base.rglob("*") if p.suffix.lower() in exts}
+
+
+def link_split(batch_dir: Path, pool: Path, split: str, limit: int, copy: bool,
+               index: dict = None):
     """Link the images named in <batch>/<split>.txt into <batch>/images/<split>/."""
     listing = batch_dir / f"{split}.txt"
     if not listing.exists():
@@ -30,17 +46,20 @@ def link_split(batch_dir: Path, pool: Path, split: str, limit: int, copy: bool):
     if limit:
         names = names[:limit]
 
+    if index is None:
+        index = index_pool(pool, split)
+
     dest = batch_dir / "images" / split
     dest.mkdir(parents=True, exist_ok=True)
 
     linked = skipped = 0
     missing = []
     for name in names:
-        target, src = dest / name, pool / split / name
+        target, src = dest / name, index.get(name)
         if target.exists():
             skipped += 1
             continue
-        if not src.exists():
+        if src is None or not src.exists():
             missing.append(name)
             continue
         # ponytail: hardlink, copy fallback. Symlinks need admin/dev-mode on Windows.
@@ -74,6 +93,12 @@ def main(argv=None):
     if not pool.is_dir():
         sys.exit(f"pool not found: {pool}")
 
+    # Index each split once; rglob over 70 k files per shard would be 10x the work.
+    indexes = {}
+    for split in SPLITS:
+        indexes[split] = index_pool(pool, split)
+        print(f"pool/{split}: {len(indexes[split])} images")
+
     total_missing = 0
     for bid in [b.strip() for b in args.batches.split(",") if b.strip()]:
         batch_dir = root / f"batch_{bid}"
@@ -81,7 +106,8 @@ def main(argv=None):
             print(f"batch_{bid}: SKIP (no {batch_dir})")
             continue
         for split in SPLITS:
-            linked, skipped, missing = link_split(batch_dir, pool, split, args.limit, args.copy)
+            linked, skipped, missing = link_split(batch_dir, pool, split, args.limit,
+                                                  args.copy, indexes[split])
             total_missing += len(missing)
             note = f" MISSING={len(missing)} (e.g. {missing[0]})" if missing else ""
             print(f"batch_{bid}/{split}: linked={linked} present={skipped}{note}")
@@ -100,19 +126,26 @@ def _self_check():
         pool = tmp / "pool" / "train"
         pool.mkdir(parents=True)
         (pool / "a.jpg").write_bytes(b"x")
+        # Nested exactly like the Kaggle mirror's train/trainA, train/trainB, ...
+        (pool / "trainA").mkdir()
+        (pool / "trainA" / "nested.jpg").write_bytes(b"y")
         batch = tmp / "batch_1"
         (batch / "labels").mkdir(parents=True)
-        (batch / "train.txt").write_text("a.jpg\ngone.jpg\n")
+        (batch / "train.txt").write_text("a.jpg\nnested.jpg\ngone.jpg\n")
         (batch / "labels" / "train.cache").write_bytes(b"stale")
 
+        assert set(index_pool(tmp / "pool", "train")) == {"a.jpg", "nested.jpg"}
+
         linked, skipped, missing = link_split(batch, tmp / "pool", "train", 0, False)
-        assert (linked, skipped, missing) == (1, 0, ["gone.jpg"]), (linked, skipped, missing)
+        assert (linked, skipped, missing) == (2, 0, ["gone.jpg"]), (linked, skipped, missing)
         assert (batch / "images" / "train" / "a.jpg").exists()
+        # A subdirectory in the pool must not become a subdirectory in the shard.
+        assert (batch / "images" / "train" / "nested.jpg").exists(), "nested pool image not linked flat"
         assert not (batch / "labels" / "train.cache").exists(), "stale cache not removed"
 
         # rerun is idempotent
         linked, skipped, _ = link_split(batch, tmp / "pool", "train", 0, False)
-        assert (linked, skipped) == (0, 1), (linked, skipped)
+        assert (linked, skipped) == (0, 2), (linked, skipped)
     print("self-check OK")
 
 

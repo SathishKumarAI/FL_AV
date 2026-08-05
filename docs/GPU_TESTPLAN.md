@@ -121,7 +121,7 @@ pip install kagglehub
 python -c "import kagglehub; print(kagglehub.dataset_download('solesensei/solesensei_bdd100k'))"
 
 cd my-project
-python scripts/populate_images.py --pool <printed-path>/bdd100k/images/100k
+python scripts/populate_images.py --pool <printed-path>/bdd100k/bdd100k/images/100k
 ```
 
 `populate_images.py` hardlinks (pool and repo must share a volume, else `--copy`), is

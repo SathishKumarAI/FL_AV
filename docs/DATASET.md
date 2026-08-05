@@ -20,14 +20,15 @@ python -c "import kagglehub; print(kagglehub.dataset_download('solesensei/solese
 
 **No Kaggle account or API token is needed** — the dataset is public and `kagglehub`
 downloads it anonymously. It prints the extracted path and caches under
-`~/.cache/kagglehub/` (`%USERPROFILE%\.cache\kagglehub` on Windows). ~6.5 GB, and it
-resumes if interrupted.
+`~/.cache/kagglehub/` (`%USERPROFILE%\.cache\kagglehub` on Windows). The archive is
+**7.6 GB** and extracts to roughly the same again, so budget ~16 GB free.
 
-Then point the populator at the directory holding `train/` and `val/`:
+Then point the populator at the directory holding `train/` and `val/`. Note the
+**doubled `bdd100k/bdd100k`** — that is how this archive is laid out, not a typo:
 
 ```bash
 cd my-project
-python scripts/populate_images.py --pool <printed-path>/bdd100k/images/100k
+python scripts/populate_images.py --pool <printed-path>/bdd100k/bdd100k/images/100k
 ```
 
 The script **hardlinks** by default, so the images cost no extra disk — but the pool
