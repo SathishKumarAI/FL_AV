@@ -54,6 +54,11 @@ def summarise(data: dict) -> dict:
                  if r.get("stage") == "evaluate" and r.get("mAP50") is not None]
     gpu = data.get("gpu") or {}
     stages = data.get("stages") or []
+    fleet = data.get("fleet") or []
+    # A fleet fingerprint makes "the same data" provable. Without it, two runs with
+    # identical configs can still have trained on different images -- a rebuilt
+    # fleet, a changed holdout, a different pool -- and the comparison is void.
+    prints = [v.get("fingerprint") for v in fleet if v.get("fingerprint")]
     return {
         "config": {k: cfg.get(k) for k in KEYS},
         "holdout_mAP50": max((r["mAP50"] for r in holdout_rounds), default=None),
@@ -64,6 +69,7 @@ def summarise(data: dict) -> dict:
         "energy_wh": gpu.get("energy_wh"),
         "seconds": round(sum(s.get("seconds", 0) or 0 for s in stages), 1),
         "baseline_mAP50": (data.get("baseline") or {}).get("centralised_mAP50"),
+        "fleet": "-".join(prints[:2])[:12] if prints else None,
     }
 
 
@@ -89,13 +95,15 @@ def table(runs: list[dict], markdown: bool = False) -> str:
     if not runs:
         return "No run reports found. Every run writes one to pipeline/reports/."
     varying = differences(runs)
-    head = ["run", "holdout mAP50", "self mAP50", "rounds", "learned", "Wh", "sec"]
+    head = ["run", "holdout mAP50", "holdout 50-95", "self mAP50", "rounds", "learned",
+            "Wh", "sec", "fleet"]
     head += list(varying)
     rows = []
     for i, r in enumerate(runs):
-        row = [r["run"], _fmt(r["holdout_mAP50"]), _fmt(r["self_mAP50"]),
-               str(r["rounds_done"]), "yes" if r["learned"] else "NO",
-               _fmt(r["energy_wh"], 1), _fmt(r["seconds"], 0)]
+        row = [r["run"], _fmt(r["holdout_mAP50"]), _fmt(r["holdout_mAP50_95"]),
+               _fmt(r["self_mAP50"]), str(r["rounds_done"]),
+               "yes" if r["learned"] else "NO",
+               _fmt(r["energy_wh"], 1), _fmt(r["seconds"], 0), r["fleet"] or "-"]
         row += [str(varying[k][i]) for k in varying]
         rows.append(row)
 
@@ -120,6 +128,10 @@ def table(runs: list[dict], markdown: bool = False) -> str:
     if missing:
         note.append(f"{missing} run(s) have no holdout number and are not comparable "
                     f"between fleets; run `python -m pipeline.holdout --evaluate`.")
+    fleets = {r["fleet"] for r in runs if r["fleet"]}
+    if len(fleets) > 1:
+        note.append("NOTE: these runs used different fleets (see the fleet column). "
+                    "Same config does not mean same images.")
     if len(varying) > 1:
         note.append("WARNING: these runs differ in " + ", ".join(varying) +
                     ". More than one changed setting means the difference in the "

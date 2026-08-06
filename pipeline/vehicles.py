@@ -11,6 +11,7 @@ inside ``my-project`` and no source there changes.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import random
@@ -48,9 +49,21 @@ class Vehicle:
     def n_train(self) -> int:
         return len(self.train)
 
+    def fingerprint(self) -> str:
+        """Content hash of exactly which images this vehicle holds.
+
+        Names, not bytes: the images are hardlinks onto a read-only cache, and what
+        distinguishes one fleet from another is the assignment, not the pixels. 12
+        hex characters is enough to tell two fleets apart in a table without making
+        every row unreadable.
+        """
+        payload = "\n".join(["train", *self.train, "val", *self.val])
+        return hashlib.sha256(payload.encode()).hexdigest()[:12]
+
     def to_summary(self) -> dict:
         return {"vid": self.vid, "condition": self.condition,
-                "n_train": len(self.train), "n_val": len(self.val)}
+                "n_train": len(self.train), "n_val": len(self.val),
+                "fingerprint": self.fingerprint()}
 
 
 # --------------------------------------------------------------------------
@@ -386,7 +399,13 @@ def materialise(vehicles: list[Vehicle], class_names: list[str], nc: int = 13,
     (root.parent / "fleet.json").write_text(
         json.dumps([v.to_summary() for v in vehicles], indent=1)
     )
-    (root.parent / "fleet.meta.json").write_text(json.dumps(meta or {}, indent=1))
+    # One digest over every vehicle's assignment: two runs carrying the same fleet
+    # fingerprint trained on exactly the same images, which is what makes a seed
+    # repeat a repeat and a strategy comparison a comparison.
+    digest = hashlib.sha256(
+        "|".join(f"{v.vid}:{v.fingerprint()}" for v in vehicles).encode()).hexdigest()[:12]
+    (root.parent / "fleet.meta.json").write_text(
+        json.dumps({**(meta or {}), "fingerprint": digest}, indent=1))
     return paths.VEHICLE_ROOT
 
 

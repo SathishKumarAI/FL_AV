@@ -15,6 +15,19 @@ function seriesByVehicle() {
   return out;
 }
 
+/** Latest mAP50-95 per vehicle. Reported beside mAP50 everywhere, because mAP50
+ *  alone hides localisation quality and this project parsed it without showing it. */
+function strictByVehicle() {
+  const L = state.learning, out = {};
+  if (L && L.trained) {
+    for (const vid of L.trained) {
+      const vals = (L.rounds[vid] || []).map(r => r.mAP50_95).filter(v => v != null);
+      out[vid] = vals.length ? vals[vals.length - 1] : null;
+    }
+  }
+  return out;
+}
+
 export function renderFleet() {
   const fleet = state.fleet, L = state.learning, host = $("fleet");
   if (!host) return;
@@ -26,6 +39,7 @@ export function renderFleet() {
   }
 
   const series = seriesByVehicle();
+  const strict = strictByVehicle();
   const all = Object.values(series).flat();
   const lo = all.length ? Math.min.apply(null, all) : 0;
   const hi = all.length ? Math.max.apply(null, all) : 1;
@@ -53,7 +67,8 @@ export function renderFleet() {
       (vals.length ? sparkline(vals, lo, hi, colour)
         : '<div class="spark" style="height:40px;display:flex;align-items:center;' +
           'font-size:var(--t-xs);color:var(--dim)">not trained yet</div>') +
-      `<div class="foot"><span>mAP <b>${vals.length ? vals[vals.length - 1].toFixed(4) : "—"}</b></span>` +
+      `<div class="foot"><span>mAP <b>${vals.length ? vals[vals.length - 1].toFixed(4) : "—"}</b>` +
+      `<span title="mAP50-95"> / ${strict[vid] != null ? strict[vid].toFixed(3) : "—"}</span></span>` +
       `${chip}<span>${v.n_train ?? "—"} img · ${share.toFixed(0)}%</span></div></button>`;
   }).join("");
 

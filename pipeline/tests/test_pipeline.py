@@ -462,7 +462,23 @@ def test_weight_movement_pairs_received_with_sent(tmp_path, monkeypatch):
 def test_fleet_json_records_val_counts(tmp_path):
     """It recorded n_train only, so every report printed 'val | ?'."""
     v = vehicles.Vehicle(1, "night", ["a.jpg"] * 5, ["b.jpg"] * 2)
-    assert v.to_summary() == {"vid": 1, "condition": "night", "n_train": 5, "n_val": 2}
+    summary = v.to_summary()
+    assert {k: summary[k] for k in ("vid", "condition", "n_train", "n_val")} == {
+        "vid": 1, "condition": "night", "n_train": 5, "n_val": 2}
+    assert len(summary["fingerprint"]) == 12
+
+
+def test_a_fleet_fingerprint_proves_two_runs_saw_the_same_images():
+    """Same config does not mean same data: a rebuilt fleet, a changed holdout or a
+    different pool all produce different images under an identical config."""
+    a = vehicles.Vehicle(1, "night", ["a.jpg", "b.jpg"], ["v.jpg"])
+    same = vehicles.Vehicle(1, "night", ["a.jpg", "b.jpg"], ["v.jpg"])
+    other_train = vehicles.Vehicle(1, "night", ["a.jpg", "c.jpg"], ["v.jpg"])
+    other_val = vehicles.Vehicle(1, "night", ["a.jpg", "b.jpg"], ["w.jpg"])
+
+    assert a.fingerprint() == same.fingerprint()
+    assert a.fingerprint() != other_train.fingerprint()
+    assert a.fingerprint() != other_val.fingerprint(), "the val split is part of the data too"
 
 
 # ------------------------------------------------------- partition strategies

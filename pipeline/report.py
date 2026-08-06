@@ -139,18 +139,25 @@ def to_markdown(d: dict) -> str:
               "Each vehicle trains a condition-biased, disjoint slice, so divergence "
               "between them is the expected result rather than a defect — it is what "
               "makes this federated rather than merely distributed.", "",
-              "| vehicle | condition | mAP50 by round | final | vs fleet mean | weight moved | share |",
-              "|---|---|---|---|---|---|---|"]
+              "| vehicle | condition | mAP50 by round | final | final mAP50-95 | "
+              "vs fleet mean | weight moved | share |",
+              "|---|---|---|---|---|---|---|---|"]
         for vid in lrn["trained"]:
-            curve = [r.get("mAP50") for r in lrn["rounds"].get(vid, []) if r.get("mAP50") is not None]
+            rounds = lrn["rounds"].get(vid, [])
+            curve = [r.get("mAP50") for r in rounds if r.get("mAP50") is not None]
+            # mAP50-95 is the metric a detection paper reports; mAP50 alone hides
+            # localisation quality, and this project had it parsed but never shown.
+            strict = [r.get("mAP50_95") for r in rounds if r.get("mAP50_95") is not None]
             div = lrn["divergence"].get(vid, [])
             mov = lrn["movement"].get(vid, [])
             L.append(
                 f"| {vid} | {lrn['conditions'].get(vid, '?')} | "
                 f"{' → '.join(f'{c:.4f}' for c in curve) or '—'} | "
-                f"{curve[-1]:.4f} | {div[-1]:+.4f} | "
+                f"{curve[-1]:.4f} | {f'{strict[-1]:.4f}' if strict else '—'} | "
+                f"{div[-1]:+.4f} | "
                 f"{(sum(mov)/len(mov)):.1f} | {lrn['contribution'].get(vid, 0)*100:.1f}% |"
-                if curve else f"| {vid} | {lrn['conditions'].get(vid, '?')} | — | — | — | — | — |")
+                if curve else
+                f"| {vid} | {lrn['conditions'].get(vid, '?')} | — | — | — | — | — | — |")
         L.append("")
         best = max(lrn["divergence"].items(), key=lambda kv: kv[1][-1] if kv[1] else -9)
         worst = min(lrn["divergence"].items(), key=lambda kv: kv[1][-1] if kv[1] else 9)
