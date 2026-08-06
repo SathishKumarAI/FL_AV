@@ -992,4 +992,16 @@ def test_the_sanity_stage_does_not_shell_out_to_a_moving_target():
     body = cmd[2]
     assert "ultralytics.cfg" not in body
     assert "from ultralytics import YOLO" in body
-    assert "batch/batch_1/data.runtime.yaml" in body and "imgsz=320" in body
+    assert "imgsz=320" in body
+    # And it trains on a shard that exists, not on the data.runtime.yaml a client
+    # writes at runtime -- which made the stage pass only where it was not needed.
+    assert "data.runtime.yaml" not in body
+    # repr, because the snippet embeds the path as a Python literal -- on Windows a
+    # raw path would turn every backslash into an escape.
+    assert repr(str(paths.VEHICLE_BATCHES / "batch_1" / "data.yaml")) in body
+
+
+def test_the_sanity_stage_refuses_to_run_without_a_shard(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "VEHICLE_BATCHES", tmp_path / "nothing")
+    with pytest.raises(RuntimeError, match="fleet stage"):
+        stages._cmd_sanity(Config())

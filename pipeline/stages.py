@@ -263,9 +263,16 @@ YOLO({model!r}).load({pretrained!r}).train(
 
 
 def _cmd_sanity(cfg: Config) -> list[str]:
+    # The fleet's own shard, by absolute path. The previous target,
+    # my-project/batch/batch_1/data.runtime.yaml, is written by a *client* at
+    # runtime and does not exist until one has run -- so the stage could only pass
+    # on a machine that had already done the thing the stage exists to check.
+    data = paths.VEHICLE_BATCHES / "batch_1" / "data.yaml"
+    if not data.exists():
+        raise RuntimeError(f"no shard to sanity-check at {data}; run the fleet stage first")
     return [PY, "-c", _SANITY.format(
         model="models/yolov8s-13.yaml", pretrained="models/yolov8s.pt",
-        data="batch/batch_1/data.runtime.yaml", imgsz=cfg.imgsz, device="0")]
+        data=str(data), imgsz=cfg.imgsz, device="0")]
 
 
 def _cmd_federate(cfg: Config) -> list[str]:
