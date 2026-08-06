@@ -249,12 +249,23 @@ def _cmd_fleet(cfg: Config) -> list[str]:
             "--alpha", str(cfg.alpha)]
 
 
+#: One epoch on one shard, through the Python API rather than a console script.
+#: `python -m ultralytics.cfg` worked until ultralytics 8.4 made cfg a package with
+#: no __main__, and the `yolo` console script is not guaranteed to be on PATH for the
+#: interpreter running the pipeline. Calling the same API the clients call cannot
+#: drift from what a client does, which is the point of a sanity stage.
+_SANITY = """
+from ultralytics import YOLO
+YOLO({model!r}).load({pretrained!r}).train(
+    data={data!r}, epochs=1, imgsz={imgsz}, batch=4, device={device!r}, workers=2,
+    plots=False, project="runs/pipeline", name="sanity", exist_ok=True)
+"""
+
+
 def _cmd_sanity(cfg: Config) -> list[str]:
-    return [PY, "-m", "ultralytics.cfg", "detect", "train",
-            "data=batch/batch_1/data.runtime.yaml",
-            "model=models/yolov8s-13.yaml", "pretrained=models/yolov8s.pt",
-            "epochs=1", f"imgsz={cfg.imgsz}", "batch=4", "device=0", "workers=2",
-            "plots=False", "project=runs/pipeline", "name=sanity", "exist_ok=True"]
+    return [PY, "-c", _SANITY.format(
+        model="models/yolov8s-13.yaml", pretrained="models/yolov8s.pt",
+        data="batch/batch_1/data.runtime.yaml", imgsz=cfg.imgsz, device="0")]
 
 
 def _cmd_federate(cfg: Config) -> list[str]:

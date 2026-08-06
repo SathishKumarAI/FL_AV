@@ -266,12 +266,14 @@ def test_supernodes_track_the_vehicle_count():
 
 
 @pytest.fixture(autouse=True)
-def _no_holdout_on_disk(monkeypatch):
-    """The fleet check consults the holdout. A test must assert its own logic, not
-    whether this machine happens to have carved one; the holdout's own effect on the
-    check has its own test."""
-    from pipeline import holdout as _h
+def _no_fleet_state_on_disk(monkeypatch):
+    """The fleet check consults the holdout and the fleet manifest. A test must
+    assert its own logic, not whatever the last real run left in the working tree --
+    a demo run rewriting the manifest should not turn other tests red. The manifest's
+    and the holdout's own effects each have a dedicated test that patches them back."""
+    from pipeline import holdout as _h, vehicles as _v
     monkeypatch.setattr(_h, "names", lambda: set())
+    monkeypatch.setattr(_v, "load_fleet_meta", lambda: {})
 
 
 def test_fleet_check_demands_a_shard_for_every_assignable_id():
@@ -979,3 +981,15 @@ def test_the_report_calls_an_over_provisioned_ceiling_what_it_is(monkeypatch):
         "retained": 0.908, "matched": False, "budget_ratio": 1.667})
     md = report.to_markdown(report.collect(config={}))
     assert "lower bound" in md and "1.667" in md
+
+
+def test_the_sanity_stage_does_not_shell_out_to_a_moving_target():
+    """`python -m ultralytics.cfg` ran until ultralytics 8.4 made cfg a package with
+    no __main__, and the whole chain then halted at the first GPU stage. The sanity
+    stage calls the same API a client calls, which cannot drift from it."""
+    cmd = stages._cmd_sanity(Config(profile="demo"))
+    assert cmd[1] == "-c", "invoke the API, not a console script that may not exist"
+    body = cmd[2]
+    assert "ultralytics.cfg" not in body
+    assert "from ultralytics import YOLO" in body
+    assert "batch/batch_1/data.runtime.yaml" in body and "imgsz=320" in body
