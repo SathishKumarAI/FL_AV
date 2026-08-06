@@ -160,6 +160,12 @@ research-grade), **89** (the GPU stops idling between serialised clients).
 Dirichlet α), 65 in part (`fleet.meta.json` records partition, α, seed, per-vehicle
 count and holdout size; the exact image list and hashes are still to do).
 
+**Found 2026-08-06, not previously in this list:** my-project's loggers use
+CWD-relative paths configured at import, so importing `server_app` writes an empty
+`logs/server.<pid>.log` wherever the process happens to be standing — and an empty
+one looked newer than a real run's, which made `verify` report zero rounds after a
+successful six-round federation. ⚠ own branch. See STATUS.md, next-session item 1.
+
 **Next ten, in order:** 42 (seeds — one run is an anecdote), 31 (rounds × epochs at
 constant product), 27 and 30 (⚠ backbone freeze, LR schedule), 28 (mAP50-95
 everywhere), 32 (per-class), 33 (per-condition matrix), 80 (MLflow actually called),

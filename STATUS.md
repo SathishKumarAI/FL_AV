@@ -99,6 +99,20 @@ three runs.
   it demonstrates the machinery: one setting varied, identical data proven by the
   fingerprint, both scored on the same held-out images.
 
+## Next session — carry these forward
+
+Ordered by what they unblock, not by size.
+
+| # | Task | Why it matters | Size |
+|---|---|---|---|
+| 1 | ⚠ **Give `my-project`'s loggers absolute paths.** `utils/logging_setup.py` configures `logs/server.log` **relative to the CWD**, at import time. So merely importing `my_project.server_app` — which `pytest my-project/tests` does at collection, from the repo root — creates an empty `logs/server.<pid>.log`. That file then looked newer than the real federation's log and made `verify` report `need >=2 rounds to tell, saw 0` right after a six-round run had succeeded. The pipeline is now robust to it (`logparse.latest_run_log` only trusts a log that aggregated a round), but the cause is still there, and it also means any import scatters log files wherever you happen to be standing. Gated: own branch, own prompt. | small |
+| 2 | **Backlog 30 — LR schedule for short rounds.** The Metrics tab now shows box, cls **and** dfl all *rising* across the four epochs of every round: each client ends the round worse than the aggregate it started from. Warmup is three epochs of a four-epoch round, so the schedule never leaves warmup. This is the most likely reason 24 effective epochs only reached 0.4173. ⚠ touches `client_app.py`. | medium |
+| 3 | **Backlog 42 — repeats across seeds.** `python -m pipeline.experiment --preset seeds --seeds 0,1,2 --yes`. Until the spread across repeats is known, no difference between two approaches means anything. The Metrics tab already groups repeats and shows the spread; it just needs runs to group. | 3 × one run |
+| 4 | **Backlog 31 — rounds × epochs at constant product.** 12×2, 6×4, 3×8 at the same image-visits. Directly measures client drift, and item 2 predicts the answer: fewer local epochs should win. | 3 runs |
+| 5 | **Backlog 80 — MLflow.** It is wired and it refused this run: *"the filesystem tracking backend is in maintenance mode"*. It needs a SQLite backend (`mlflow-tracking-uri sqlite:///…`), so this is more than calling the sink. | small |
+| 6 | **Backlog 36 — class imbalance.** `car` is 55.4% of all objects and `train` has 29 instances fleet-wide. Averaged mAP flatters a car detector; per-class numbers are the honest report. | medium |
+| 7 | **Re-run the pre-holdout comparison.** Reports written before today mix runs in their stored `learning` block (the four provenance bugs). They are marked in the Metrics tab but cannot be repaired retroactively — only superseded by fresh runs. | free, with 3 |
+
 ## What exists now that did not before
 
 | | Command |
