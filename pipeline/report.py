@@ -118,9 +118,13 @@ def to_markdown(d: dict) -> str:
         L.append("")
         gap = d.get("baseline") or {}
         if gap:
+            qualifier = ("" if gap.get("matched", True) else
+                         f" That ceiling was trained at {gap.get('budget_ratio')}x the "
+                         f"federation's image-visits, so it is over-provisioned and the "
+                         f"retention figure is a **lower bound** rather than the number.")
             L += [f"Centralised ceiling on the same images: **{gap['centralised_mAP50']:.4f}**. "
                   f"The federation reaches **{gap['federated_mAP50']:.4f}**, retaining "
-                  f"**{100 * gap['retained']:.1f}%** of it (gap {gap['gap']:+.4f}).", ""]
+                  f"**{100 * gap['retained']:.1f}%** of it (gap {gap['gap']:+.4f}).{qualifier}", ""]
         else:
             L += ["No centralised baseline for this budget yet, so this number still has "
                   "no scale — run `python -m pipeline.baseline`.", ""]

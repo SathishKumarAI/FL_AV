@@ -109,7 +109,11 @@ function renderHoldout(holdout, baseline) {
     (baseline && baseline.centralised_mAP50
       ? `. Centralised ceiling on the same images: <b>${baseline.centralised_mAP50.toFixed(4)}</b>, ` +
         `so the federation retains <b>${(100 * baseline.retained).toFixed(1)}%</b> of it ` +
-        `(gap ${baseline.gap.toFixed(4)}).`
+        `(gap ${baseline.gap.toFixed(4)}).` +
+        (baseline.matched === false
+          ? ` <span class="warn">That ceiling had ${baseline.budget_ratio}x the ` +
+            `image-visits, so the retention is a lower bound.</span>`
+          : "")
       : ". No centralised baseline yet, so this number still has no scale — run the " +
         "<code>baseline</code> stage.");
 }

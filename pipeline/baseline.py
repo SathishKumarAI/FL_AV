@@ -25,10 +25,39 @@ POOLED_ROOT = paths.VEHICLE_ROOT / "pooled"          # gitignored with the rest
 RESULT_FILE = paths.STATE / "baseline.json"
 
 
-def pooled_names() -> list[str]:
-    """Every image the fleet trains on, deduplicated. The centralised model's data."""
+def trained_shards() -> list[int]:
+    """Shard ids that actually trained in the last federation, from the client logs.
+
+    The fleet materialises a shard for every id the server can assign (1..10), but a
+    6-vehicle run trains 6 of them. Pooling all ten hands the centralised model data
+    the federation never saw.
+    """
+    from . import vehicle_metrics
+
+    ids = []
+    for vid in vehicle_metrics.per_vehicle_rounds():
+        try:
+            ids.append(int(vid))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(ids))
+
+
+def pooled_names(shards: list[int] | None = None) -> list[str]:
+    """Every image the fleet trains on, deduplicated. The centralised model's data.
+
+    ``shards`` defaults to the ids that actually trained. Passing None *and* having
+    no client logs falls back to every shard on disk, which is only correct when the
+    vehicle count equals the shard count -- so the caller is told when that happens.
+    """
+    if shards is None:
+        shards = trained_shards()
+    listings = ([paths.VEHICLE_BATCHES / f"batch_{i}" / "train.txt" for i in shards]
+                if shards else sorted(paths.VEHICLE_BATCHES.glob("batch_*/train.txt")))
     seen: dict[str, None] = {}
-    for listing in sorted(paths.VEHICLE_BATCHES.glob("batch_*/train.txt")):
+    for listing in listings:
+        if not listing.exists():
+            continue
         for line in listing.read_text().splitlines():
             name = line.strip()
             if name:
@@ -36,11 +65,23 @@ def pooled_names() -> list[str]:
     return list(seen)
 
 
-def build(class_names: list[str] | None = None, nc: int = 13) -> Path:
+def parity(images: int, epochs: int, shards: int, per_vehicle: int,
+           rounds: int, local_epochs: int) -> dict:
+    """Image-visits on each side. A comparison at different budgets measures the
+    budget."""
+    centralised = images * epochs
+    federated = shards * per_vehicle * rounds * local_epochs
+    ratio = centralised / federated if federated else 0
+    return {"centralised_visits": centralised, "federated_visits": federated,
+            "ratio": round(ratio, 3), "matched": 0.95 <= ratio <= 1.05}
+
+
+def build(class_names: list[str] | None = None, nc: int = 13,
+          shards: list[int] | None = None) -> Path:
     """Materialise the pooled training set, validated against the shared holdout."""
     from .build_fleet import class_names as read_class_names
 
-    names = pooled_names()
+    names = pooled_names(shards)
     if not names:
         raise SystemExit("no fleet on disk to pool; run the fleet stage first")
     if not holdout.data_yaml().exists():
@@ -71,7 +112,8 @@ def build(class_names: list[str] | None = None, nc: int = 13) -> Path:
 
 
 def train(epochs: int, imgsz: int = 640, batch: int = 16, device: str = "0",
-          model: str = "models/yolov8s-13.yaml", pretrained: str = "models/yolov8s.pt") -> dict:
+          model: str = "models/yolov8s-13.yaml", pretrained: str = "models/yolov8s.pt",
+          shards: list[int] | None = None) -> dict:
     """Train one model on the pooled data and score it on the holdout.
 
     Same architecture and same pretrained weights the clients use, so the only
@@ -90,7 +132,8 @@ def train(epochs: int, imgsz: int = 640, batch: int = 16, device: str = "0",
                       project=str(paths.STATE / "baseline_runs"), name="centralised_val",
                       exist_ok=True)
     box = result.box
-    return {"epochs": epochs, "images": len(pooled_names()), "imgsz": imgsz,
+    return {"epochs": epochs, "images": len(pooled_names(shards)), "imgsz": imgsz,
+            "shards": shards or trained_shards(),
             "mAP50": float(box.map50), "mAP50-95": float(box.map),
             "precision": float(box.mp), "recall": float(box.mr)}
 
@@ -109,9 +152,15 @@ def gap() -> dict:
     if not central or not rounds:
         return {}
     best = max(r["mAP50"] for r in rounds)
+    par = central.get("parity") or {}
     return {"federated_mAP50": best, "centralised_mAP50": central["mAP50"],
             "gap": central["mAP50"] - best,
-            "retained": best / central["mAP50"] if central["mAP50"] else None}
+            "retained": best / central["mAP50"] if central["mAP50"] else None,
+            # Carried through so every consumer can say whether the two sides were
+            # given the same budget. A retention figure against an over-provisioned
+            # ceiling is a lower bound, not the number.
+            "matched": bool(par.get("matched", True)),
+            "budget_ratio": par.get("ratio")}
 
 
 def main(argv=None) -> int:
@@ -124,15 +173,37 @@ def main(argv=None) -> int:
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--device", default="0")
+    ap.add_argument("--shards", default="",
+                    help="comma-separated shard ids to pool; default is the ids that "
+                         "actually trained in the last federation")
     args = ap.parse_args(argv)
 
+    if args.shards:
+        shards = [int(s) for s in args.shards.split(",") if s.strip()] or None
+    else:
+        shards = trained_shards()
+    if not shards:
+        print("WARNING: no client logs found, so which shards trained is unknown. "
+              "Pooling every shard on disk, which over-provisions the ceiling unless "
+              "the vehicle count equals the shard count.")
     epochs = args.epochs or args.rounds * args.local_epochs
-    root = build()
-    n = len(pooled_names())
-    print(f"pooled: {n} images at {root}, {epochs} epochs "
-          f"(matching {args.rounds} rounds x {args.local_epochs} local epochs)")
+    root = build(shards=shards)
+    names = pooled_names(shards)
+    n = len(names)
+    per_vehicle = n // max(1, len(shards or [1]))
+    print(f"pooled: {n} images from shards {shards or 'ALL'} at {root}, {epochs} epochs")
 
-    row = train(epochs, imgsz=args.imgsz, batch=args.batch, device=args.device)
+    p = parity(n, epochs, len(shards or []), per_vehicle, args.rounds, args.local_epochs)
+    print(f"budget: centralised {p['centralised_visits']:,} image-visits vs federated "
+          f"{p['federated_visits']:,} (ratio {p['ratio']})")
+    if not p["matched"] and p["federated_visits"]:
+        print("WARNING: the budgets do not match. A model given more data or more "
+              "epochs than the federation will beat it for that reason, and the gap "
+              "will measure the budget rather than the method.")
+
+    row = train(epochs, imgsz=args.imgsz, batch=args.batch, device=args.device,
+                shards=shards)
+    row["parity"] = p
     RESULT_FILE.parent.mkdir(parents=True, exist_ok=True)
     RESULT_FILE.write_text(json.dumps(row, indent=1))
 

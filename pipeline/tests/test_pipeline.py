@@ -933,3 +933,49 @@ def test_the_runbook_only_promises_commands_that_exist():
         assert (REPO / "pipeline" / f"{mod.split('.')[1]}.py").is_file(), f"{mod} missing"
     for script in ("scripts/run_pipeline.ps1", "scripts/run_pipeline.sh"):
         assert (REPO / script).is_file(), f"{script} is referenced but absent"
+
+
+def test_the_baseline_pools_only_the_shards_that_trained(monkeypatch, tmp_path):
+    """A 6-vehicle run trains 6 of the 10 materialised shards. Pooling all ten hands
+    the centralised model data the federation never saw, and the gap then measures
+    the extra data."""
+    from pipeline import baseline as _b, vehicle_metrics as _vm
+
+    batches = tmp_path / "batch"
+    for i in range(1, 11):
+        (batches / f"batch_{i}").mkdir(parents=True)
+        (batches / f"batch_{i}" / "train.txt").write_text(f"img{i}a.jpg\nimg{i}b.jpg\n")
+    monkeypatch.setattr(paths, "VEHICLE_BATCHES", batches)
+    monkeypatch.setattr(_vm, "per_vehicle_rounds", lambda: {"1": [], "2": [], "5": []})
+
+    assert _b.trained_shards() == [1, 2, 5]
+    assert len(_b.pooled_names()) == 6, "only the three shards that trained"
+    assert len(_b.pooled_names(shards=list(range(1, 11)))) == 20
+
+
+def test_parity_flags_a_ceiling_that_was_given_more_compute():
+    """The run of 2026-08-06 pooled 14 000 images for 24 epochs against a federation
+    that made 201 600 image-visits: 1.667x, and its retention figure is a bound."""
+    from pipeline import baseline as _b
+
+    over = _b.parity(images=14000, epochs=24, shards=6, per_vehicle=1400,
+                     rounds=6, local_epochs=4)
+    assert over["ratio"] == 1.667 and over["matched"] is False
+
+    fair = _b.parity(images=8400, epochs=24, shards=6, per_vehicle=1400,
+                     rounds=6, local_epochs=4)
+    assert fair["ratio"] == 1.0 and fair["matched"] is True
+
+
+def test_the_report_calls_an_over_provisioned_ceiling_what_it_is(monkeypatch):
+    from pipeline import baseline as _b, holdout as _h
+
+    monkeypatch.setattr(_h, "curve", lambda: {
+        "holdout": {"size": 1000},
+        "rounds": [{"round": 1, "mAP50": 0.43, "mAP50-95": 0.24,
+                    "precision": 0.6, "recall": 0.4}]})
+    monkeypatch.setattr(_b, "gap", lambda: {
+        "federated_mAP50": 0.4334, "centralised_mAP50": 0.4771, "gap": 0.0437,
+        "retained": 0.908, "matched": False, "budget_ratio": 1.667})
+    md = report.to_markdown(report.collect(config={}))
+    assert "lower bound" in md and "1.667" in md
