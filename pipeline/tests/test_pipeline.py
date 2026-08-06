@@ -1055,3 +1055,16 @@ def test_every_subprocess_is_told_to_write_utf8():
     assert env["PYTHONIOENCODING"] == "utf-8"
     assert env["PYTHONUTF8"] == "1"
     assert env["FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION"] == "1"
+
+
+def test_the_interpreters_scripts_directory_leads_the_path():
+    """flwr resolves `flower-superlink` from PATH, not from its own location, so a
+    non-interactive shell without the venv activated failed with
+    'Unable to launch flower-superlink ... [WinError 2]'. Our children spawn children."""
+    import os
+    import sys
+
+    env = paths.subprocess_env()
+    first = env["PATH"].split(os.pathsep)[0]
+    assert first == str(Path(sys.executable).parent)
+    assert env["PATH"].count(first) >= 1

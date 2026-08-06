@@ -6,6 +6,7 @@ hardcodes a path or an env var that has already bitten someone.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -81,6 +82,16 @@ def subprocess_env(ray_address: str | None = None, data_root: Path | None = None
     # script rather than a terminal.
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
+    # The interpreter's own Scripts/bin directory goes first on PATH. An interactive
+    # shell has it because the venv is activated; a shell started by a script does
+    # not, and flwr then fails to launch `flower-superlink`, which it resolves from
+    # PATH rather than from its own location:
+    #   Unable to launch `flower-superlink` for local simulation: [WinError 2]
+    # Resolving our own entry points is not enough -- the children we spawn spawn
+    # children of their own.
+    scripts = str(Path(sys.executable).parent)
+    if scripts not in env.get("PATH", "").split(os.pathsep):
+        env["PATH"] = scripts + os.pathsep + env.get("PATH", "")
     env["FL_AV_DATA_ROOT"] = str(data_root or PROJECT)
     env.setdefault("MLFLOW_TRACKING_URI", MLFLOW_STORE.as_uri())
     if ray_address:
