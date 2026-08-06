@@ -42,24 +42,33 @@ city 0.4513, v8 parking/tunnel 0.4324, v10 night 0.4243, v2 night 0.4163, v5
 dawn/dusk 0.4069. Spread is the point — those are different distributions, which is
 exactly why the holdout had to exist.
 
-## The centralised ceiling, and why the retention figure is a lower bound
+## The result: federation against a budget-matched ceiling
 
-`pipeline/.state/baseline-14000img-24ep.json`: **0.4771 mAP50 / 0.2659 mAP50-95** on
-the same holdout. Against the federation's 0.4334 that is a gap of 0.0437, and the
-federation retains **90.8%** of it.
+Both sides made **201 600 image-visits** — 6 vehicles × 1 400 images × 6 rounds × 4
+local epochs, against 8 400 pooled images × 24 epochs. Parity is asserted in the
+artifact (`ratio 1.0, matched: true`), not claimed in prose.
 
-Read that as a **lower bound**, not the result. The run pooled all ten materialised
-shards, not the six that trained, so it saw 14 000 images for 24 epochs -- 336 000
-image-visits against the federation's 201 600, a 1.667x advantage in data *and*
-compute. `pooled_names()` now defaults to the shards that actually trained and the
-CLI prints the parity ratio, so the next one is matched by construction.
+| on 1 000 held-out images | federated | centralised | gap | retained |
+|---|---|---|---|---|
+| mAP50 | 0.4173 | **0.4936** | +0.0763 | **84.5 %** |
+| mAP50-95 | 0.2313 | **0.2770** | +0.0457 | 83.5 % |
 
-**To get the matched number** (about 90 min, and it needs a fresh federation because
-the fleet has since been rebuilt):
+Federated learning on this fleet costs about **15 % of the achievable accuracy** at an
+identical training budget, in exchange for never pooling the data. That is the result
+this project existed to produce, and until today it could not have been stated: the
+metric was a client scoring itself on its own conditions, and the first ceiling ran
+with 1.667× the federation's budget.
 
-```powershell
-.\scripts\run_pipeline.ps1 -Profile full -Vehicles 6 -PerVehicle 1400 -Rounds 6 -Epochs 4 -Baseline
-```
+The federated curve is monotonic across all six rounds — 0.3329, 0.3763, 0.3974,
+0.4066, 0.4120, 0.4173 — and the aggregate checksum moved every round.
+
+**One number that needs a caveat.** An earlier ceiling, trained on 14 000 images for
+the same 24 epochs (336 000 visits, 1.667× the budget), scored **lower**: 0.4771
+against this one's 0.4936. More data and more compute produced a worse model, which
+means run-to-run variance here is at least ±0.016 — larger than several of the
+differences this project might want to call results. Backlog 42 (seed repeats) is
+therefore not optional; it is the prerequisite for believing any comparison, and the
+Metrics tab already groups repeats and shows their spread.
 
 ## Running it standalone found seven defects that never showed interactively
 

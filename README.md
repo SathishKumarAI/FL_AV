@@ -54,11 +54,17 @@ python -m pipeline.compare --last 10              # runs you already have
 **Full instructions, costs, troubleshooting and how to read the numbers:
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md).**
 
-Latest measured result — 6 vehicles × 1 400 images, condition-partitioned, 6 rounds ×
-4 local epochs, on an RTX 5070 Ti: **holdout mAP50 0.3543 → 0.4334** over the rounds,
-mAP50-95 0.2454, 3 296 s, 82.2 Wh. Measured on 1 000 images no vehicle trained on —
-the per-client self-evaluated figure is 0.4642, and that 0.031 difference is why the
-holdout exists.
+**Latest measured result.** 6 vehicles × 1 400 images, condition-partitioned, 6 rounds
+× 4 local epochs on an RTX 5070 Ti, scored on 1 000 images no vehicle trained on:
+
+| | federated | centralised, same budget | retained |
+|---|---|---|---|
+| mAP50 | 0.4173 | 0.4936 | **84.5 %** |
+| mAP50-95 | 0.2313 | 0.2770 | 83.5 % |
+
+Both sides made exactly 201 600 image-visits, so the gap measures the method rather
+than the budget. Federation costs about 15 % of the achievable accuracy here, in
+exchange for never pooling the data. 3 296 s, 82.2 Wh.
 
 ---
 

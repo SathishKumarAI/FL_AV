@@ -119,12 +119,18 @@ Reference numbers on an RTX 5070 Ti, 6 vehicles × 1 400 images, condition-parti
 
 | | value |
 |---|---|
-| holdout mAP50 (round 1 → 6) | 0.3543 → **0.4334** |
-| holdout mAP50-95 | 0.2454 |
-| per-client self-evaluated | 0.4642 (0.031 higher — that is the flattery) |
-| wall clock | 3 296 s |
+| holdout mAP50 (round 1 → 6) | 0.3329 → **0.4173** |
+| holdout mAP50-95 | 0.2313 |
+| centralised ceiling, same 201 600 image-visits | 0.4936 mAP50 / 0.2770 mAP50-95 |
+| retained | **84.5 %** of the ceiling (gap 0.0763) |
+| per-client self-evaluated | 0.4481 — higher, because each client scores itself on its own conditions |
+| wall clock | 3 296 s federated, plus about as much again for the ceiling |
 | GPU energy | 82.2 Wh |
 | peak VRAM | 5 087 MiB of 16 303 |
+
+Run-to-run variance is at least ±0.016 mAP50 (an earlier ceiling with 1.667× the data
+scored *lower*), so treat any difference smaller than that as noise until
+`--preset seeds` says otherwise.
 
 ## 6. When something goes wrong
 
