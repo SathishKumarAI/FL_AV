@@ -2,7 +2,7 @@
 import { $, esc } from "./util.js";
 import { lineChart } from "./chart.js";
 import { state } from "./state.js";
-import { renderStages } from "./control.js";
+import { renderStages, renderOptions } from "./control.js";
 import { renderFleet } from "./fleet.js";
 
 const POLL_MS = 2000;
@@ -15,6 +15,7 @@ export async function poll() {
     state.fleet = s.fleet || [];
     state.learning = s.live && s.live.learning;
     renderStages(s.stages);
+    renderOptions(s.options);
     renderGpu(s.gpu);
     renderLive(s.live, s.config);
     renderReports(s.reports);

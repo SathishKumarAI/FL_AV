@@ -19,6 +19,14 @@ from . import baseline, holdout, paths, vehicles
 
 PY = sys.executable
 
+#: Aggregation strategies this pipeline offers, mirroring server_app.STRATEGIES.
+#: Mirrored rather than imported: reaching into my-project would drag flwr and
+#: ultralytics into a package that is meant to stay stdlib-light. The two lists are
+#: asserted equal by my-project/tests/test_strategy_registry.py, so they cannot drift.
+STRATEGIES = ("fedavg", "fedprox", "fedadam", "fedyogi", "fedadagrad", "fedavgm",
+              "fedmedian", "fedtrimmedavg", "krum", "bulyan", "qfedavg",
+              "faulttolerantfedavg")
+
 
 @dataclass
 class Config:
@@ -30,6 +38,8 @@ class Config:
     local_epochs: int = 1
     seed: int = 0
     partition: str = "condition"     # any key of vehicles.PARTITIONERS
+    strategy: str = "fedavg"         # any key of server_app.STRATEGIES
+    proximal_mu: float = 0.0         # FedProx only; >0 turns the proximal term on
     holdout_size: int = 1000         # images no vehicle may train or self-evaluate on
     alpha: float = 0.5               # dirichlet only: smaller = more skewed
     per_vehicle_override: int = 0    # 0 = use the profile default
@@ -260,8 +270,11 @@ def _cmd_federate(cfg: Config) -> list[str]:
         fed += " init-args-num-gpus=1 init-args-num-cpus=8"
     return ["flwr", "run", ".", "--stream", "--federation-config", fed,
             "--run-config",
-            f"num_server_rounds={cfg.rounds} local_epochs={cfg.local_epochs} "
-            f"min_clients={cfg.n_vehicles} fraction_fit=1.0"]
+            f'num_server_rounds={cfg.rounds} local_epochs={cfg.local_epochs} '
+            f'min_clients={cfg.n_vehicles} fraction_fit=1.0 '
+            # Quoted because flwr parses run-config values as TOML: an unquoted
+            # fedadam is a bare word, not a string, and the run dies on parse.
+            f'strategy="{cfg.strategy}" proximal_mu={cfg.proximal_mu}']
 
 
 def _cmd_verify(_: Config) -> list[str]:

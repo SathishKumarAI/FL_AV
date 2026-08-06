@@ -260,6 +260,15 @@ def test_supernodes_track_the_vehicle_count():
     assert "num-supernodes=6" in cmd and "min_clients=6" in cmd
 
 
+@pytest.fixture(autouse=True)
+def _no_holdout_on_disk(monkeypatch):
+    """The fleet check consults the holdout. A test must assert its own logic, not
+    whether this machine happens to have carved one; the holdout's own effect on the
+    check has its own test."""
+    from pipeline import holdout as _h
+    monkeypatch.setattr(_h, "names", lambda: set())
+
+
 def test_fleet_check_demands_a_shard_for_every_assignable_id():
     """The server picks batch ids from DEFAULT_BATCH_ID_RANGE (1..10) at random and
     cannot be told to stay within the vehicle count, so every id must resolve."""

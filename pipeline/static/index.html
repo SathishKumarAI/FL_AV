@@ -60,6 +60,10 @@
         </select></div>
       <div id="alphaWrap" hidden><label for="alpha">Dirichlet α</label>
         <input id="alpha" type="number" min="0.01" step="0.05" value="0.5"></div>
+      <div><label for="strategy">Strategy</label>
+        <select id="strategy"><option value="fedavg">fedavg</option></select></div>
+      <div id="muWrap" hidden><label for="mu">FedProx μ</label>
+        <input id="mu" type="number" min="0" step="0.01" value="0.1"></div>
     </div>
     <p class="hint" id="alphaNote" hidden>α → 0 gives each vehicle a single condition;
       α → ∞ gives them all the same mixture, which is IID.</p>

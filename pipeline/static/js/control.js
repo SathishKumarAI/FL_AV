@@ -10,6 +10,8 @@ export function config() {
     seed: +$("seed").value,
     partition: $("partition").value,
     alpha: +$("alpha").value,
+    strategy: $("strategy").value,
+    proximal_mu: +$("mu").value,
     confirm: $("confirm").checked,
   };
 }
@@ -26,6 +28,23 @@ export function estimate() {
   const dirichlet = c.partition === "dirichlet";
   $("alphaWrap").hidden = !dirichlet;
   $("alphaNote").hidden = !dirichlet;
+  $("muWrap").hidden = c.strategy !== "fedprox";
+}
+
+/** Fill the strategy and partition menus from what the server actually registered,
+ *  so a name the backend does not know cannot be picked here. */
+export function renderOptions(options) {
+  if (!options) return;
+  const fill = (id, values) => {
+    const el = $(id);
+    if (!el || el.dataset.filled === String(values.length)) return;
+    const keep = el.value;
+    el.innerHTML = values.map(v => `<option value="${v}">${v}</option>`).join("");
+    el.value = values.includes(keep) ? keep : values[0];
+    el.dataset.filled = String(values.length);
+  };
+  fill("strategy", options.strategies || []);
+  estimate();
 }
 
 export function renderStages(rows) {
@@ -43,7 +62,7 @@ export function renderStages(rows) {
 }
 
 export function wireControl(onLaunched) {
-  ["profile", "vehicles", "rounds", "epochs", "partition"].forEach(id => {
+  ["profile", "vehicles", "rounds", "epochs", "partition", "strategy"].forEach(id => {
     $(id).oninput = estimate;
     $(id).onchange = estimate;
   });

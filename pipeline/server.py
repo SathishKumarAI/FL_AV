@@ -183,6 +183,8 @@ class State:
                 **live.summary(),
             },
             "links": {"mlflow": "http://127.0.0.1:5000", "ray": "http://127.0.0.1:8265"},
+            "options": {"partitions": list(vehicles.PARTITIONS),
+                        "strategies": list(stages.STRATEGIES)},
             "results": [r.__dict__ for r in (self.run.results if self.run else [])],
             "live": self.live(),
             "reports": self.reports(),
@@ -320,8 +322,13 @@ class Handler(BaseHTTPRequestHandler):
                 seed=int(body.get("seed", 0)),
                 partition=body.get("partition", "condition"),
                 alpha=float(body.get("alpha", 0.5) or 0.5),
+                strategy=body.get("strategy", "fedavg"),
+                proximal_mu=float(body.get("proximal_mu", 0.0) or 0.0),
                 ray_address=body.get("ray_address") or None,
             )
+            if CONFIG.strategy not in stages.STRATEGIES:
+                return self._json({"error": f"unknown strategy {CONFIG.strategy!r}; "
+                                            f"known: {', '.join(stages.STRATEGIES)}"}, 400)
             if CONFIG.partition not in vehicles.PARTITIONS:
                 # Rejected here rather than three subprocesses later, where it would
                 # surface as a stage failure with the real cause buried in a log.

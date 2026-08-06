@@ -226,6 +226,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--alpha", type=float, default=0.5,
                     help="dirichlet concentration: 0.05 concentrates each vehicle on one "
                          "condition, 100 is effectively IID")
+    ap.add_argument("--strategy", default="fedavg", choices=stages.STRATEGIES,
+                    help="aggregation strategy: fedavg, fedprox, fedadam, fedyogi, "
+                         "fedadagrad, fedavgm, fedmedian, krum, ... (see server_app.STRATEGIES)")
+    ap.add_argument("--proximal-mu", type=float, default=0.0,
+                    help="FedProx proximal strength; >0 enables the proximal term")
     ap.add_argument("--yes", action="store_true", help="confirm the gated stages up front")
     ap.add_argument("--ray-address", help="attach to an existing Ray head (enables its dashboard)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
@@ -237,6 +242,7 @@ def main(argv=None) -> int:
     cfg = Config(profile=args.profile, n_vehicles=args.vehicles,
                  rounds=args.rounds, local_epochs=args.epochs, seed=args.seed,
                  partition=args.partition, alpha=args.alpha,
+                 strategy=args.strategy, proximal_mu=args.proximal_mu,
                  per_vehicle_override=args.per_vehicle,
                  ray_address=args.ray_address)
 
