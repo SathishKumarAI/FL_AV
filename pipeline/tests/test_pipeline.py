@@ -878,3 +878,58 @@ def test_a_corrupt_report_does_not_stop_the_comparison(tmp_path):
     bad.mkdir()
     (bad / "report.json").write_text("{not json")
     assert len(_compare.load(5, reports_dir=tmp_path)) == 1
+
+
+# ------------------------------------------------------------------ experiments
+from pipeline import experiment as _exp  # noqa: E402
+
+
+def test_every_arm_of_a_preset_changes_exactly_one_setting():
+    """Two changed variables in one comparison explain neither."""
+    base = {"profile": "demo", "vehicles": 6, "rounds": 2, "epochs": 1, "per_vehicle": 0}
+    for preset, expect in (("seeds", "seed"), ("strategies", "strategy"),
+                           ("partitions", "partition")):
+        arms = _exp.arms_for(preset, base, [0, 1], ["fedavg", "fedadam"],
+                             ["condition", "random"], [0.5])
+        assert len(arms) == 2
+        differing = {k for k in arms[0] if k != "label" and arms[0][k] != arms[1][k]}
+        assert differing == {expect}, f"{preset} varies {differing}"
+
+
+def test_the_alpha_preset_also_selects_the_partition_it_belongs_to():
+    """alpha means nothing under condition partitioning; asking for it must switch."""
+    arms = _exp.arms_for("alpha", {"profile": "demo"}, [], [], [], [0.05, 100.0])
+    assert {a["partition"] for a in arms} == {"dirichlet"}
+    assert [a["alpha"] for a in arms] == [0.05, 100.0]
+
+
+def test_an_unknown_preset_is_refused():
+    with pytest.raises(SystemExit):
+        _exp.arms_for("vibes", {}, [], [], [], [])
+
+
+def test_an_arm_becomes_a_real_runner_invocation():
+    """Arms are driven through pipeline.runner, not a second code path that can
+    drift from the one people actually use."""
+    cmd = _exp.command({"profile": "full", "rounds": 6, "epochs": 4, "seed": 2,
+                        "strategy": "fedadam", "partition": "dirichlet", "alpha": 0.3,
+                        "per_vehicle": 1400}, confirm=True)
+    assert cmd[1:4] == ["-m", "pipeline.runner", "--all"]
+    for flag, value in (("--profile", "full"), ("--rounds", "6"), ("--epochs", "4"),
+                        ("--seed", "2"), ("--strategy", "fedadam"),
+                        ("--partition", "dirichlet"), ("--alpha", "0.3"),
+                        ("--per-vehicle", "1400")):
+        assert cmd[cmd.index(flag) + 1] == value
+    assert "--yes" in cmd
+
+
+def test_the_runbook_only_promises_commands_that_exist():
+    """A runbook that names a module nobody wrote is worse than no runbook."""
+    import re
+    text = (REPO / "docs" / "RUNBOOK.md").read_text(encoding="utf-8")
+    modules = set(re.findall(r"python -m (pipeline\.[a-z_]+)", text))
+    assert modules, "the runbook should name the entry points"
+    for mod in modules:
+        assert (REPO / "pipeline" / f"{mod.split('.')[1]}.py").is_file(), f"{mod} missing"
+    for script in ("scripts/run_pipeline.ps1", "scripts/run_pipeline.sh"):
+        assert (REPO / script).is_file(), f"{script} is referenced but absent"
