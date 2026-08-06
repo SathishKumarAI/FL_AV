@@ -797,3 +797,63 @@ def test_validate_runs_before_the_gpu_stages():
     assert names.index("validate") > names.index("fleet")
     assert names.index("validate") < names.index("sanity") < names.index("federate")
     assert not stages.BY_NAME["validate"].gated, "seconds of scanning; never worth skipping"
+
+
+# --------------------------------------------------------------- run comparison
+from pipeline import compare as _compare  # noqa: E402
+
+
+def _report(dir_, name, config, holdout_map=None, self_map=None, checksums=2):
+    d = dir_ / name
+    d.mkdir(parents=True)
+    data = {"config": config, "checksums": list(range(checksums)), "learned": checksums > 1,
+            "gpu": {"energy_wh": 10.0}, "stages": [{"seconds": 100}],
+            "metrics": ([{"stage": "evaluate", "mAP50": self_map}] if self_map else [])}
+    if holdout_map:
+        data["holdout"] = {"rounds": [{"round": 1, "mAP50": holdout_map, "mAP50-95": 0.2}]}
+    (d / "report.json").write_text(json.dumps(data))
+    return d
+
+
+def test_comparison_leads_with_the_holdout_number(tmp_path):
+    _report(tmp_path, "20260101-000000", {"seed": 0, "rounds": 2}, holdout_map=0.40, self_map=0.46)
+    _report(tmp_path, "20260102-000000", {"seed": 1, "rounds": 2}, holdout_map=0.42, self_map=0.44)
+    runs = _compare.load(5, reports_dir=tmp_path)
+
+    assert [r["holdout_mAP50"] for r in runs] == [0.40, 0.42]
+    out = _compare.table(runs)
+    assert "holdout mAP50" in out and out.index("holdout mAP50") < out.index("self mAP50")
+    assert "+0.0200" in out
+
+
+def test_comparison_says_when_more_than_one_setting_changed(tmp_path):
+    """Two changed variables mean the difference cannot be attributed to either."""
+    _report(tmp_path, "20260101-000000", {"seed": 0, "rounds": 2, "strategy": "fedavg"},
+            holdout_map=0.40)
+    _report(tmp_path, "20260102-000000", {"seed": 0, "rounds": 6, "strategy": "fedadam"},
+            holdout_map=0.45)
+    out = _compare.table(_compare.load(5, reports_dir=tmp_path))
+    assert "WARNING" in out and "rounds" in out and "strategy" in out
+
+
+def test_a_single_changed_setting_is_not_warned_about(tmp_path):
+    _report(tmp_path, "20260101-000000", {"seed": 0, "rounds": 2}, holdout_map=0.40)
+    _report(tmp_path, "20260102-000000", {"seed": 1, "rounds": 2}, holdout_map=0.41)
+    out = _compare.table(_compare.load(5, reports_dir=tmp_path))
+    assert "WARNING" not in out
+    assert "seed" in out, "the varying setting should still be shown as a column"
+
+
+def test_runs_without_a_holdout_number_are_called_out(tmp_path):
+    """They predate the holdout, so they cannot be compared between fleets."""
+    _report(tmp_path, "20260101-000000", {"seed": 0}, self_map=0.46)
+    out = _compare.table(_compare.load(5, reports_dir=tmp_path))
+    assert "no holdout number" in out
+
+
+def test_a_corrupt_report_does_not_stop_the_comparison(tmp_path):
+    _report(tmp_path, "20260101-000000", {"seed": 0}, holdout_map=0.40)
+    bad = tmp_path / "20260102-000000"
+    bad.mkdir()
+    (bad / "report.json").write_text("{not json")
+    assert len(_compare.load(5, reports_dir=tmp_path)) == 1
