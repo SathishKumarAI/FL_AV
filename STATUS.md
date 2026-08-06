@@ -58,7 +58,7 @@ CLI prints the parity ratio, so the next one is matched by construction.
 the fleet has since been rebuilt):
 
 ```powershell
-.\scriptsun_pipeline.ps1 -Profile full -Vehicles 6 -PerVehicle 1400 -Rounds 6 -Epochs 4 -Baseline
+.\scripts\run_pipeline.ps1 -Profile full -Vehicles 6 -PerVehicle 1400 -Rounds 6 -Epochs 4 -Baseline
 ```
 
 ## Running it standalone found seven defects that never showed interactively

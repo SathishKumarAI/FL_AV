@@ -1122,3 +1122,13 @@ def test_the_checksum_criterion_judges_one_run_not_a_pile_of_them(tmp_path):
     # And the verdict follows this run, not the pile: the old run's stall must not
     # condemn a federation that is learning.
     assert logparse.federation_learned(tmp_path)[0] is True
+
+
+def test_no_document_promises_a_command_with_a_mangled_path():
+    """Twice now a backslash escape turned .\scripts\run_pipeline.ps1 into a
+    carriage return mid-path, leaving a headline command that cannot be run."""
+    broken = b".\scripts\rrun_pipeline.ps1".replace(b"\rrun", b"\run")
+    for doc in REPO.glob("*.md"):
+        assert broken not in doc.read_bytes(), doc.name
+    for doc in (REPO / "docs").glob("*.md"):
+        assert broken not in doc.read_bytes(), doc.name
