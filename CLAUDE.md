@@ -19,6 +19,37 @@ whole flow and visualises a simulated vehicle fleet while it runs.
 | How do I run any of it? | [`pipeline/README.md`](pipeline/README.md) |
 | Where did the last session stop? | [`STATUS.md`](STATUS.md) and `docs/prompts/` |
 
+## Where to change it
+
+Open the one file that owns the thing. Do not read the package to find it.
+
+| Change | File |
+|---|---|
+| A dashboard panel's look, or any colour, spacing, type | `pipeline/static/app.css` |
+| Dashboard markup, a new panel, an element id | `pipeline/static/index.html` |
+| Chart axes, ticks, tooltips, sparkline | `pipeline/static/js/chart.js` |
+| The fleet grid / vehicle drawer / live polling / run form | `pipeline/static/js/{fleet,drawer,live,control}.js` |
+| An HTTP route or what `/api/state` returns | `pipeline/server.py` |
+| Which stages exist, what "already done" means, gating | `pipeline/stages.py` |
+| How a stage subprocess is run, env, SuperLink handling | `pipeline/runner.py` |
+| A path, or an env var a subprocess needs | `pipeline/paths.py` — nowhere else |
+| Shard assignment, conditions, partitioning | `pipeline/vehicles.py` |
+| What a log line means | `pipeline/logparse.py` |
+| The four pass criteria | `pipeline/verify.py` |
+| Per-vehicle learning maths (divergence, contribution) | `pipeline/vehicle_metrics.py` |
+| The run report | `pipeline/report.py` |
+| ⚠ Strategy, client, or model — a **different branch and prompt** | `my-project/*_app.py` |
+
+Full dashboard map, including the rules that keep it split:
+[`pipeline/static/README.md`](pipeline/static/README.md).
+
+Two features span files. Change both halves in the same commit:
+
+- a condition profile → `PROFILES` in `pipeline/vehicles.py` **and** `GLYPHS` in
+  `pipeline/static/js/util.js`
+- a new artifact kind → the code that writes it **and** `.gitignore` **and**
+  `test_generated_paths_are_all_gitignored`
+
 ## How work gets done here
 
 **plan → prompt → code → verify.** Not optional, and in that order.
