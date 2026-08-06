@@ -1285,3 +1285,47 @@ def test_the_documented_tabs_are_the_tabs_the_page_has():
     in_html = set(re.findall(r'data-view="([a-z]+)"', html))
     documented = {t["name"].lower() for t in _docs.index()["tabs"]}
     assert in_html == documented, (in_html ^ documented)
+
+
+def test_client_logs_are_scoped_to_the_run_that_is_being_measured(tmp_path):
+    """`client.<pid>.log` accumulates across runs. Reading all of them made a
+    six-vehicle run look like a nine-vehicle one, and the centralised ceiling was
+    then trained on 12 600 images against a federation that saw 8 400 -- a ceiling
+    with 1.5x the budget, reported as matched."""
+    import os
+    import time
+
+    old = time.time() - 7200
+    for name in ("client.111.log", "client.222.log"):
+        f = tmp_path / name
+        f.write_text("Starting local training with batch_id=7, local_epochs=1\n")
+        os.utime(f, (old, old))
+
+    server = tmp_path / "server.333.log"
+    server.write_text("Aggregated parameters with checksum: 1.0\n")
+    for name in ("client.444.log", "client.555.log"):
+        (tmp_path / name).write_text("Starting local training with batch_id=3, local_epochs=1\n")
+
+    current = {f.name for f in logparse.current_run_logs("client*.log", tmp_path)}
+    assert current == {"client.444.log", "client.555.log"}
+    assert len(list(logparse.iter_logs("client*.log", tmp_path))) == 4, "the old ones are still there"
+
+
+def test_per_vehicle_metrics_follow_the_current_run(tmp_path, monkeypatch):
+    """The dashboard's fleet panel and the baseline's shard list both come from here."""
+    import os
+    import time
+
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    old = time.time() - 7200
+    stale = logs / "client.1.log"
+    stale.write_text("[Client] 9 Training done. metrics={'mAP50': 0.9}\n")
+    os.utime(stale, (old, old))
+
+    (logs / "server.2.log").write_text("Aggregated parameters with checksum: 1.0\n")
+    (logs / "client.3.log").write_text("[Client] 4 Training done. metrics={'mAP50': 0.2}\n")
+
+    monkeypatch.setattr(paths, "log_dirs", lambda: [logs])
+    rounds = vm.per_vehicle_rounds()
+    assert set(rounds) == {"4"}, "vehicle 9 belongs to a run that is over"

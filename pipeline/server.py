@@ -112,7 +112,7 @@ class State:
         per_vehicle: dict[str, dict] = {}
         current = None
         noop = 0
-        for f in logparse.iter_logs("client*.log"):
+        for f in logparse.current_run_logs("client*.log"):
             try:
                 text = f.read_text(errors="replace")
             except OSError:

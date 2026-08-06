@@ -27,7 +27,7 @@ def collect(config: dict | None = None, telemetry: dict | None = None,
     learned, detail = logparse.federation_learned()
 
     per_vehicle: dict[int, dict] = {}
-    for f in logparse.iter_logs("client*.log"):
+    for f in logparse.current_run_logs("client*.log"):
         current = None
         for ev in logparse.parse_text(f.read_text(errors="replace")):
             if ev.kind == "training_start":

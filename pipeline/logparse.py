@@ -104,6 +104,27 @@ def latest_log(pattern: str, log_dir: Path | None = None) -> Path | None:
     return max(files, key=lambda f: f.stat().st_mtime) if files else None
 
 
+def current_run_logs(pattern: str, log_dir: Path | None = None) -> list[Path]:
+    """Matching logs written during the most recent run.
+
+    Logs are named per process and accumulate: `client.<pid>.log` from every run this
+    machine has ever done sits in the same directory. Reading all of them made a
+    six-vehicle run look like a nine-vehicle one, and the centralised ceiling was then
+    trained on three shards the federation never saw.
+
+    The newest server log bounds the run: it is created when the federation starts, so
+    anything written after that belongs to this run. A minute of slack absorbs clock
+    granularity between processes.
+    """
+    server = latest_log("server*.log", log_dir)
+    files = [f for f in iter_logs(pattern, log_dir) if f.is_file()]
+    if server is None:
+        return files
+    stat = server.stat()
+    start = min(stat.st_ctime, stat.st_mtime)       # creation on Windows, close enough elsewhere
+    return [f for f in files if f.stat().st_mtime >= start - 60]
+
+
 def aggregate_checksums(log_dir: Path | None = None, all_runs: bool = False) -> list[float]:
     """This run's per-round global checksums, in order.
 

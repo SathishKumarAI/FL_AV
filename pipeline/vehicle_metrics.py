@@ -39,7 +39,7 @@ _CSV_MAP = {
 def per_vehicle_rounds() -> dict[str, list[dict]]:
     """{vid: [metrics per round]}, in the order the rounds happened."""
     out: dict[str, list[dict]] = {}
-    for f in logparse.iter_logs("client*.log"):
+    for f in logparse.current_run_logs("client*.log"):
         try:
             text = f.read_text(errors="replace")
         except OSError:
@@ -129,7 +129,7 @@ def weight_movement() -> dict[str, list[float]]:
     metrics say.
     """
     out: dict[str, list[float]] = {}
-    for f in logparse.iter_logs("client*.log"):
+    for f in logparse.current_run_logs("client*.log"):
         try:
             events = logparse.parse_text(f.read_text(errors="replace"))
         except OSError:
