@@ -29,6 +29,7 @@ class Config:
     rounds: int = 2
     local_epochs: int = 1
     seed: int = 0
+    ray_address: str | None = None   # set => attach to an existing head node
 
     @property
     def per_vehicle(self) -> int:
@@ -36,6 +37,13 @@ class Config:
 
     @property
     def imgsz(self) -> int:
+        """Image size for the *sanity* stage only.
+
+        The federation's size is my-project's DEFAULT_IMAGE_SIZE (640) and is not
+        reachable from here -- changing it would mean editing client_app.py, which
+        this component is not allowed to do. So `demo` speeds things up through
+        fewer images per vehicle, not smaller ones.
+        """
         return 320 if self.profile == "demo" else 640
 
     def to_dict(self) -> dict:
@@ -50,6 +58,18 @@ class Check:
     detail: str
 
 
+# flwr can exit 0 having crashed: it prints "Simulation Runtime crashed" and
+# "Exit Code: 700" and still returns success. Trusting the exit code alone marked a
+# dead run "ok" -- exactly the silent-failure pattern this project keeps producing --
+# so the output is scanned too.
+CRASH_MARKERS = (
+    "Simulation Runtime crashed",
+    "An error was encountered. Ending simulation",
+    "Simulation raised an exception",
+    "Traceback (most recent call last)",
+)
+
+
 @dataclass
 class Stage:
     name: str
@@ -60,6 +80,16 @@ class Stage:
     cwd: Path = paths.PROJECT
     data_root: Path | None = None    # overrides FL_AV_DATA_ROOT for this stage
     est: str = ""
+    crash_markers: tuple[str, ...] = ()   # output that means failure despite exit 0
+
+
+def scan_for_crash(lines: list[str], markers: tuple[str, ...]) -> str | None:
+    """Return the first crash marker present in the output, or None."""
+    for marker in markers:
+        for line in lines:
+            if marker in line:
+                return marker
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -102,9 +132,14 @@ def _check_populate(_: Config) -> Check:
 
 
 def _check_fleet(cfg: Config) -> Check:
+    # A shard must exist for every id the server can pick, not just for the clients
+    # that will run -- DEFAULT_BATCH_ID_RANGE is (1, 10) and is not configurable.
+    want = max(cfg.n_vehicles, len(list(paths.BATCH_IDS)))
     fleet = vehicles.load_fleet()
-    if len(fleet) != cfg.n_vehicles:
-        return Check(False, f"fleet has {len(fleet)} vehicles, want {cfg.n_vehicles}")
+    if len(fleet) < want:
+        return Check(False, f"fleet has {len(fleet)} shards, need {want} "
+                            f"(the server can assign any id in {tuple(paths.BATCH_IDS)[0]}.."
+                            f"{tuple(paths.BATCH_IDS)[-1]})")
     short = [v for v in fleet if v.get("n_train", 0) < cfg.per_vehicle]
     if short:
         return Check(False, f"{len(short)} vehicle(s) below {cfg.per_vehicle} images")
@@ -169,7 +204,18 @@ def _cmd_sanity(cfg: Config) -> list[str]:
 
 
 def _cmd_federate(cfg: Config) -> list[str]:
-    return ["flwr", "run", ".", "--stream", "--run-config",
+    # num-supernodes MUST track the vehicle count. It lives in the federation config,
+    # which flwr migrates out of pyproject.toml into ~/.flwr/config.toml on first run
+    # -- so editing pyproject would be silently ignored and the run would hang
+    # forever waiting for clients that never arrive. Override it on the CLI instead.
+    fed = f"num-supernodes={cfg.n_vehicles} client-resources-num-gpus=1.0 client-resources-num-cpus=2"
+    if not cfg.ray_address:
+        # Ray refuses num_cpus/num_gpus when attaching to a cluster that already
+        # exists ("When connecting to an existing cluster, num_cpus and num_gpus must
+        # not be provided"), so these are only valid when flwr starts Ray itself.
+        fed += " init-args-num-gpus=1 init-args-num-cpus=8"
+    return ["flwr", "run", ".", "--stream", "--federation-config", fed,
+            "--run-config",
             f"num_server_rounds={cfg.rounds} local_epochs={cfg.local_epochs} "
             f"min_clients={cfg.n_vehicles} fraction_fit=1.0"]
 
@@ -186,7 +232,8 @@ STAGES: list[Stage] = [
           cwd=paths.REPO, est="~30 s"),
     Stage("sanity", "Single-client GPU sanity", True, _check_sanity, _cmd_sanity, est="~2 min"),
     Stage("federate", "Federated run", True, _check_federate, _cmd_federate,
-          data_root=paths.VEHICLE_ROOT, est="minutes to hours"),
+          data_root=paths.VEHICLE_ROOT, est="minutes to hours",
+          crash_markers=CRASH_MARKERS),
     Stage("verify", "Verify pass criteria", False, _check_verify, _cmd_verify,
           cwd=paths.REPO, est="~5 s"),
 ]

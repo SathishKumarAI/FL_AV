@@ -48,6 +48,18 @@ def find_label_jsons() -> list[Path]:
     return sorted(_CACHE.glob(f"versions/*/{LABELS_DIR_NAME}/**/bdd100k_labels_images_*.json"))
 
 
+def log_dirs() -> list[Path]:
+    """Every directory a run's logs can land in.
+
+    my-project's loggers use CWD-relative paths and are configured at import time.
+    Depending on whether a component runs as a direct subprocess (cwd=my-project) or
+    inside a Ray worker (which inherits the head node's cwd), one run can scatter its
+    logs across both. Looking in only one place made a working federation report as a
+    failure.
+    """
+    return [d for d in (PROJECT / "logs", REPO / "logs") if d.is_dir()]
+
+
 def subprocess_env(ray_address: str | None = None, data_root: Path | None = None) -> dict:
     """Environment for every stage subprocess.
 

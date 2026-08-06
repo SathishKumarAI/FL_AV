@@ -142,6 +142,31 @@
     </div>
 
     <div class="panel">
+      <h2>Round progress</h2>
+      <div class="metrics">
+        <div class="metric"><div class="n" id="rRound">&mdash;</div><div class="l">round</div></div>
+        <div class="metric"><div class="n" id="rVehicles">&mdash;</div><div class="l">vehicles seen</div></div>
+        <div class="metric"><div class="n" id="rMap">&mdash;</div><div class="l">latest mAP50</div></div>
+        <div class="metric"><div class="n" id="rLoss">&mdash;</div><div class="l">latest loss</div></div>
+        <div class="metric"><div class="n" id="rCkpt">&mdash;</div><div class="l">checkpoints</div></div>
+      </div>
+      <div class="bar"><i id="rBar" style="width:0"></i></div>
+    </div>
+
+    <div class="panel">
+      <h2>Pass criteria &mdash; live</h2>
+      <ul id="criteria" style="list-style:none;padding:0;margin:0;font-size:13px"></ul>
+      <p class="hint">The same four checks <code>pipeline.verify</code> runs. They read the logs
+        on disk, so they update whether the run was launched here or from the CLI.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Evaluated mAP50 per round</h2>
+      <svg id="mapChart" viewBox="0 0 900 200" preserveAspectRatio="none"></svg>
+      <p class="hint" id="mapNote">Waiting for the first evaluation.</p>
+    </div>
+
+    <div class="panel">
       <h2>Fleet</h2>
       <div class="cards" id="fleetCards"></div>
       <p class="hint">Each vehicle trains a condition-biased slice, so the curves are
@@ -162,7 +187,21 @@
     </div>
 
     <div class="panel">
-      <h2>Log</h2>
+      <h2>GPU history</h2>
+      <svg id="gpuChart" viewBox="0 0 900 160" preserveAspectRatio="none"></svg>
+      <p class="hint">Solid: utilisation %. Dashed: power draw, scaled to the peak seen.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Reports</h2>
+      <ul id="reports" style="list-style:none;padding:0;margin:0;font-size:13px"></ul>
+      <p class="hint">Every run writes HTML + Markdown + JSON. Newest first.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Log <span style="float:right;font-weight:400;text-transform:none;letter-spacing:0">
+        <label style="display:inline;color:var(--dim)"><input type="checkbox" id="onlySignals"
+          style="width:auto"> signals only</label></span></h2>
       <pre id="log"></pre>
     </div>
   </section>
@@ -219,6 +258,8 @@ async function poll() {
     renderStages(s.stages);
     renderFleet(s.fleet);
     renderGpu(s.gpu);
+    renderLive(s.live, s.config);
+    renderReports(s.reports);
     $("runState").textContent = s.busy ? (s.current || "running") : "idle";
     $("runState").className = "pill " + (s.busy ? "s-running" : "s-pending");
     $("launch").disabled = s.busy;
@@ -256,10 +297,94 @@ function renderFleet(fleet) {
       <div class="kv"><span>sent back</span><b>${fmt(live.sent)}</b></div>
       <div class="kv"><span>delta</span><b>${live.received != null && live.sent != null
           ? fmt(live.sent - live.received) : "—"}</b></div>
+      <div class="kv"><span>rounds trained</span><b>${live.rounds ?? 0}</b></div>
+      <div class="kv"><span>device</span><b>${esc(live.device ?? "—")}</b></div>
     </div>`;
   }).join("");
 }
 const fmt = (x) => x == null ? "—" : (Math.abs(x) > 1e4 ? x.toExponential(3) : x.toFixed(3));
+
+function renderLive(L, cfg) {
+  if (!L) return;
+  const evald = (L.map50 || []).filter(v => v != null);
+  const losses = (L.loss || []).filter(v => v != null);
+  $("rRound").textContent    = L.rounds_done + "/" + (cfg.rounds != null ? cfg.rounds : "?");
+  $("rVehicles").textContent = Object.keys(L.per_vehicle || {}).length || "—";
+  $("rMap").textContent      = evald.length ? evald[evald.length - 1].toFixed(4) : "—";
+  $("rLoss").textContent     = losses.length ? losses[losses.length - 1].toFixed(4) : "—";
+  $("rCkpt").textContent     = (L.checkpoints || []).length;
+  $("rBar").style.width = cfg.rounds ? Math.min(100, 100 * L.rounds_done / cfg.rounds) + "%" : "0";
+
+  // Checksums come from disk, so a CLI-launched run still draws this chart.
+  if ((L.checksums || []).length > state.checksums.length) {
+    state.checksums = L.checksums.slice();
+    drawChecksums();
+  }
+  Object.entries(L.per_vehicle || {}).forEach(function (entry) {
+    const vid = entry[0], v = entry[1];
+    state.vehicles[vid] = Object.assign({}, state.vehicles[vid] || {}, v,
+      { training: String(L.training_now) === String(vid) });
+  });
+
+  $("criteria").innerHTML = (L.criteria || []).map(function (c) {
+    const cls = c.indexOf("[PASS]") === 0 ? "s-ok"
+              : c.indexOf("[WARN]") === 0 ? "s-needs_confirm" : "s-failed";
+    const word = c.slice(1, c.indexOf("]"));
+    return '<li style="padding:4px 0"><span class="pill ' + cls + '">' + word + '</span> ' +
+           '<span style="color:var(--dim)">' + esc(c.slice(c.indexOf("]") + 2)) + '</span></li>';
+  }).join("");
+
+  drawSeries("mapChart", evald, "var(--accent)");
+  $("mapNote").textContent = evald.length
+    ? "mAP50 by round: " + evald.map(function (v) { return v.toFixed(4); }).join("  →  ")
+    : "Waiting for the first evaluation.";
+  if (L.no_optimizer_steps) {
+    $("mapNote").innerHTML += ' <span class="warn">' + L.no_optimizer_steps +
+      ' round(s) took no optimizer step — the weights could not change.</span>';
+  }
+}
+
+function renderReports(list) {
+  $("reports").innerHTML = (list && list.length)
+    ? list.map(function (r) {
+        return '<li style="padding:3px 0"><a class="ext" href="' + r.url +
+               '" target="_blank" rel="noopener">' + esc(r.name) + ' ↗</a></li>';
+      }).join("")
+    : '<li class="hint">No reports yet.</li>';
+}
+
+function drawSeries(id, values, colour, height) {
+  height = height || 200;
+  const svg = $(id);
+  if (!svg) return;
+  if (!values.length) { svg.innerHTML = ""; return; }
+  const W = 900, pad = 28;
+  const lo = Math.min.apply(null, values), hi = Math.max.apply(null, values);
+  const span = (hi - lo) || 1;
+  const x = function (i) { return pad + (values.length === 1 ? (W - 2*pad)/2 : i*(W - 2*pad)/(values.length - 1)); };
+  const y = function (v) { return height - pad - ((v - lo)/span)*(height - 2*pad); };
+  const pts = values.map(function (v, i) { return x(i) + "," + y(v); }).join(" ");
+  const dots = values.map(function (v, i) {
+    return '<circle cx="' + x(i) + '" cy="' + y(v) + '" r="3.5" fill="' + colour + '"/>';
+  }).join("");
+  svg.innerHTML = '<polyline points="' + pts + '" fill="none" stroke="' + colour +
+                  '" stroke-width="2"/>' + dots;
+}
+
+function drawGpuHistory(hist) {
+  const svg = $("gpuChart");
+  if (!svg || !hist || !hist.length) return;
+  const W = 900, H = 160, pad = 16;
+  const maxPower = Math.max.apply(null, [1].concat(hist.map(function (h) { return h.power || 0; })));
+  const x = function (i) { return pad + i*(W - 2*pad)/Math.max(1, hist.length - 1); };
+  const yU = function (v) { return H - pad - (v/100)*(H - 2*pad); };
+  const yP = function (v) { return H - pad - (v/maxPower)*(H - 2*pad); };
+  const u = hist.map(function (h, i) { return x(i) + "," + yU(h.util || 0); }).join(" ");
+  const p = hist.map(function (h, i) { return x(i) + "," + yP(h.power || 0); }).join(" ");
+  svg.innerHTML =
+    '<polyline points="' + u + '" fill="none" stroke="var(--accent)" stroke-width="1.8"/>' +
+    '<polyline points="' + p + '" fill="none" stroke="var(--warn)" stroke-width="1.4" stroke-dasharray="3 2"/>';
+}
 
 function renderGpu(g) {
   if (!g) return;
@@ -271,6 +396,7 @@ function renderGpu(g) {
   const pct = g.mem_used_mib ? 100 * g.mem_used_mib / (g.mem_ceiling_mib || 16303) : 0;
   $("gMemBar").style.width = Math.min(100, pct) + "%";
   $("gMemBar").style.background = pct > 92 ? "var(--bad)" : pct > 75 ? "var(--warn)" : "var(--accent)";
+  drawGpuHistory(g.history);
 }
 
 // ---- checksum chart: the B4 guard, drawn ----------------------------------
@@ -299,6 +425,7 @@ const es = new EventSource("/api/events");
 es.onmessage = (m) => {
   const ev = JSON.parse(m.data);
   if (ev.kind === "log") {
+    if ($("onlySignals").checked && !looksStructured(ev.line)) return;
     const pre = $("log");
     pre.insertAdjacentHTML("beforeend", `<b>${esc(ev.stage)}</b> ${esc(ev.line)}\n`);
     while (pre.childNodes.length > 600) pre.removeChild(pre.firstChild);
@@ -335,6 +462,8 @@ function addTimeline(ev) {
      <td>${ev.seconds ?? ""}</td><td>${ev.gpu?.energy_wh ?? ""}</td>
      <td style="color:var(--dim);font-size:12px">${esc(ev.detail || "")}</td></tr>`);
 }
+const SIGNAL_HINTS = ["checksum", "batch_id", "Run finished", "optimizer step", "cuda", "mAP"];
+const looksStructured = (line) => SIGNAL_HINTS.some(h => line.includes(h));
 const esc = (s) => String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 
 poll();

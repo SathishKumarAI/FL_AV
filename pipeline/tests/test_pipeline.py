@@ -221,3 +221,90 @@ def test_generated_paths_are_all_gitignored():
         out = subprocess.run(["git", "check-ignore", rel], cwd=REPO,
                              capture_output=True, text=True)
         assert out.returncode == 0, f"{rel} is NOT gitignored"
+
+
+# ------------------------------------------- exit codes that lie
+def test_crash_in_output_is_detected_despite_exit_zero():
+    """flwr exits 0 having printed 'Simulation Runtime crashed'. Believe the output."""
+    lines = ["INFO: starting", "ERROR: Simulation Runtime crashed.", "ERROR: Exit Code: 700"]
+    assert stages.scan_for_crash(lines, stages.CRASH_MARKERS) == "Simulation Runtime crashed"
+
+
+def test_clean_output_is_not_flagged_as_a_crash():
+    lines = ["INFO: Run finished 2 round(s) in 55.6s", "aggregate checksum: 1.0"]
+    assert stages.scan_for_crash(lines, stages.CRASH_MARKERS) is None
+
+
+def test_federate_stage_scans_for_crashes():
+    assert stages.BY_NAME["federate"].crash_markers, "federate must not trust its exit code"
+
+
+def test_init_args_are_omitted_when_attaching_to_an_existing_ray_cluster():
+    """Ray: 'When connecting to an existing cluster, num_cpus and num_gpus must not
+    be provided.' Passing them anyway crashes the simulation at startup."""
+    attached = " ".join(stages._cmd_federate(Config(ray_address="127.0.0.1:6379")))
+    standalone = " ".join(stages._cmd_federate(Config()))
+    assert "init-args" not in attached
+    assert "init-args-num-gpus=1" in standalone
+
+
+def test_supernodes_track_the_vehicle_count():
+    """Otherwise the run hangs forever waiting for clients that never arrive."""
+    cmd = " ".join(stages._cmd_federate(Config(n_vehicles=6)))
+    assert "num-supernodes=6" in cmd and "min_clients=6" in cmd
+
+
+def test_fleet_check_demands_a_shard_for_every_assignable_id():
+    """The server picks batch ids from DEFAULT_BATCH_ID_RANGE (1..10) at random and
+    cannot be told to stay within the vehicle count, so every id must resolve."""
+    import json as _json
+    from pipeline import vehicles as _v
+    original = _v.load_fleet
+    try:
+        _v.load_fleet = lambda: [{"vid": i, "condition": "x", "n_train": 300, "n_val": 60}
+                                 for i in range(1, 7)]
+        assert stages._check_fleet(Config(n_vehicles=6)).satisfied is False
+        _v.load_fleet = lambda: [{"vid": i, "condition": "x", "n_train": 300, "n_val": 60}
+                                 for i in range(1, 11)]
+        assert stages._check_fleet(Config(n_vehicles=6)).satisfied is True
+    finally:
+        _v.load_fleet = original
+
+
+# ------------------------------------------------------------------- server
+def test_report_route_refuses_paths_outside_the_reports_dir():
+    """`/reports/../../secret` must not escape. The check is `REPORTS in parents`."""
+    from pipeline import server  # noqa: F401  (import guard: server must load cleanly)
+    escaped = (paths.REPORTS / ".." / ".." / "CLAUDE.md").resolve()
+    assert paths.REPORTS.resolve() not in escaped.parents
+
+    inside = (paths.REPORTS / "20260101" / "report.html").resolve()
+    assert paths.REPORTS.resolve() in inside.parents
+
+
+def test_live_state_is_derived_from_disk_not_from_the_event_bus(monkeypatch, tmp_path):
+    """A run launched from the CLI must still light up the dashboard."""
+    from pipeline import server, verify as _verify
+
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "server.1.log").write_text(
+        "Aggregated parameters with checksum: 1.0\n"
+        "Aggregated parameters with checksum: 2.0\n")
+    (logs / "client.1.log").write_text(
+        "Starting local training with batch_id=3, local_epochs=1\n"
+        "Received weights with checksum: 10.0\n"
+        "Sending back weights with checksum: 11.0\n")
+    (logs / "metrics.csv").write_text(
+        "round,stage,num_clients,loss,precision,recall,mAP50,mAP50-95,fitness\n"
+        "1,evaluate,6,0.5,0.4,0.3,0.25,0.1,0.1\n")
+
+    monkeypatch.setattr(paths, "log_dirs", lambda: [logs])
+    monkeypatch.setattr(_verify, "_metrics_csv", lambda: logs / "metrics.csv")
+
+    live = server.State().live()
+    assert live["rounds_done"] == 2
+    assert live["checksums"] == [1.0, 2.0]
+    assert live["map50"] == [0.25]
+    assert live["per_vehicle"]["3"]["received"] == 10.0
+    assert live["per_vehicle"]["3"]["sent"] == 11.0

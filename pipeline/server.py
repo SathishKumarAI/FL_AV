@@ -18,7 +18,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import gpu, paths, stages, vehicles
+from . import gpu, logparse, paths, stages, vehicles, verify
 from .runner import Run
 from .stages import Config
 
@@ -84,6 +84,67 @@ class State:
         self.thread.start()
         return True
 
+    def live(self) -> dict:
+        """Run state read from disk.
+
+        Derived from logs and metrics rather than from this server's event bus, so a
+        run launched from the CLI -- or one that started before this server did --
+        still shows up. The event bus stays for the low-latency log stream.
+        """
+        checksums = logparse.aggregate_checksums()
+        metrics_path = verify._metrics_csv()
+        rows = logparse.read_metrics_csv(metrics_path)
+
+        per_vehicle: dict[str, dict] = {}
+        current = None
+        noop = 0
+        for f in logparse.iter_logs("client*.log"):
+            try:
+                text = f.read_text(errors="replace")
+            except OSError:
+                continue
+            for ev in logparse.parse_text(text):
+                if ev.kind == "training_start":
+                    current = str(ev.value)
+                    v = per_vehicle.setdefault(current, {"rounds": 0, "received": None,
+                                                         "sent": None, "device": None})
+                    v["rounds"] += 1
+                elif ev.kind == "no_optimizer_step":
+                    noop += 1
+                elif current:
+                    v = per_vehicle.setdefault(current, {"rounds": 0, "received": None,
+                                                         "sent": None, "device": None})
+                    if ev.kind == "client_received_checksum":
+                        v["received"] = ev.value
+                    elif ev.kind == "client_sent_checksum":
+                        v["sent"] = ev.value
+                    elif ev.kind == "device":
+                        v["device"] = ev.value
+
+        ok, criteria = verify.check()
+        evaluated = [r for r in rows if r.get("stage") == "evaluate"]
+        return {
+            "checksums": checksums,
+            "rounds_done": len(checksums),
+            "metrics": rows,
+            "map50": [r.get("mAP50") for r in evaluated],
+            "loss": [r.get("loss") for r in evaluated],
+            "per_vehicle": per_vehicle,
+            "training_now": current if self.busy else None,
+            "no_optimizer_steps": noop,
+            "criteria": criteria,
+            "criteria_ok": ok,
+            "checkpoints": sorted(p.name for p in (paths.PROJECT / "checkpoints").glob("global_*.pt")),
+        }
+
+    def reports(self) -> list[dict]:
+        out = []
+        if paths.REPORTS.is_dir():
+            for d in sorted(paths.REPORTS.iterdir(), reverse=True)[:12]:
+                if (d / "report.html").exists():
+                    out.append({"name": d.name, "url": f"/reports/{d.name}/report.html"})
+        return out
+
     def snapshot(self, cfg: Config) -> dict:
         live = self.run.sampler.telemetry if self.busy and self.run else self.idle_sampler.telemetry
         latest = live.latest
@@ -99,10 +160,14 @@ class State:
                 "mem_ceiling_mib": gpu.VRAM_CEILING_MIB,
                 "power_w": latest.power_w if latest else None,
                 "temp_c": latest.temp_c if latest else None,
+                "history": [{"util": s.util_pct, "power": s.power_w, "mem": s.mem_used_mib}
+                            for s in live.samples[-120:]],
                 **live.summary(),
             },
             "links": {"mlflow": "http://127.0.0.1:5000", "ray": "http://127.0.0.1:8265"},
             "results": [r.__dict__ for r in (self.run.results if self.run else [])],
+            "live": self.live(),
+            "reports": self.reports(),
         }
 
 
@@ -135,7 +200,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(STATE.snapshot(CONFIG))
         if self.path == "/api/events":
             return self._sse()
+        if self.path.startswith("/reports/"):
+            return self._report_file()
         self._json({"error": "not found"}, 404)
+
+    def _report_file(self) -> None:
+        """Serve a generated report, refusing anything outside the reports dir."""
+        rel = self.path[len("/reports/"):].split("?")[0]
+        target = (paths.REPORTS / rel).resolve()
+        if not target.is_file() or paths.REPORTS.resolve() not in target.parents:
+            return self._json({"error": "not found"}, 404)
+        ctype = "text/html; charset=utf-8" if target.suffix == ".html" else "text/plain; charset=utf-8"
+        self._send(200, target.read_bytes(), ctype)
 
     def _sse(self) -> None:
         self.send_response(200)
@@ -177,6 +253,7 @@ class Handler(BaseHTTPRequestHandler):
                 rounds=int(body.get("rounds", 2)),
                 local_epochs=int(body.get("epochs", 1)),
                 seed=int(body.get("seed", 0)),
+                ray_address=body.get("ray_address") or None,
             )
             try:
                 chain = stages.resolve(body.get("stages"))

@@ -84,16 +84,25 @@ def read_metrics_csv(path: Path) -> list[dict]:
     return rows
 
 
-def aggregate_checksums(log_dir: Path) -> list[float]:
+def iter_logs(pattern: str, log_dir: Path | None = None):
+    """Matching log files across every directory a run can write to."""
+    from . import paths
+    dirs = [log_dir] if log_dir is not None else paths.log_dirs()
+    for d in dirs:
+        if d and d.is_dir():
+            yield from sorted(d.glob(pattern))
+
+
+def aggregate_checksums(log_dir: Path | None = None) -> list[float]:
     """Per-round global checksums, in order. Equal consecutive values == no learning."""
     out: list[float] = []
-    for f in sorted(log_dir.glob("server*.log")):
+    for f in iter_logs("server*.log", log_dir):
         out += [e.value for e in parse_text(f.read_text(errors="replace"))
                 if e.kind == "aggregate_checksum"]
     return out
 
 
-def federation_learned(log_dir: Path) -> tuple[bool, str]:
+def federation_learned(log_dir: Path | None = None) -> tuple[bool, str]:
     """The B4 guard, as a reusable check."""
     cs = aggregate_checksums(log_dir)
     if len(cs) < 2:

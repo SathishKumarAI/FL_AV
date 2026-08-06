@@ -31,12 +31,19 @@ def main(argv=None) -> int:
     index = vehicles.build_attribute_index()
     print(f"attribute index: {len(index)} images")
 
-    fleet = vehicles.assign(args.vehicles, args.per_vehicle,
+    # Build a shard for EVERY id in my-project's DEFAULT_BATCH_ID_RANGE, not just
+    # --vehicles of them. The server picks ids at random from that whole range and
+    # cannot be told otherwise without editing server_app.py, so a 6-vehicle run was
+    # handed batch_id=7 and died on a directory that did not exist. --vehicles now
+    # controls how many clients run; the addressable fleet is always the full range.
+    n_shards = max(args.vehicles, len(list(paths.BATCH_IDS)))
+    fleet = vehicles.assign(n_shards, args.per_vehicle,
                             val_per_vehicle=args.val_per_vehicle, seed=args.seed, index=index)
     root = vehicles.materialise(fleet, names, nc)
 
     for v in fleet:
-        print(f"  vehicle {v.vid}: {v.condition:<22} train={v.n_train:<6} val={len(v.val)}")
+        used = " (in this run)" if v.vid <= args.vehicles else ""
+        print(f"  vehicle {v.vid}: {v.condition:<22} train={v.n_train:<6} val={len(v.val)}{used}")
     print(f"fleet root: {root}  (point FL_AV_DATA_ROOT here)")
     print(json.dumps([v.to_summary() for v in fleet]))
     return 0

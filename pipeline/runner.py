@@ -109,10 +109,18 @@ class Run:
         secs = time.time() - t0
         gpu_used = {"energy_wh": round(self.sampler.telemetry.energy_wh - before_wh, 4),
                     "peak_mem_mib": self.sampler.telemetry.peak_mem_mib}
-        status = "ok" if code == 0 else "failed"
-        self.emit("stage", stage=stage.name, status=status, detail=f"exit {code}",
+
+        # Exit code is necessary but not sufficient: flwr returns 0 having printed
+        # "Simulation Runtime crashed". Believe the output over the status code.
+        crash = stages.scan_for_crash(tail, stage.crash_markers)
+        if code == 0 and crash:
+            status, detail = "failed", f"exit 0 but output says: {crash}"
+        else:
+            status, detail = ("ok" if code == 0 else "failed"), f"exit {code}"
+
+        self.emit("stage", stage=stage.name, status=status, detail=detail,
                   seconds=round(secs, 1), gpu=gpu_used)
-        return StageResult(stage.name, status, secs, f"exit {code}", tail, gpu_used)
+        return StageResult(stage.name, status, secs, detail, tail, gpu_used)
 
     def execute(self, chain: list[Stage]) -> bool:
         self.sampler.start()
@@ -187,7 +195,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     cfg = Config(profile=args.profile, n_vehicles=args.vehicles,
-                 rounds=args.rounds, local_epochs=args.epochs, seed=args.seed)
+                 rounds=args.rounds, local_epochs=args.epochs, seed=args.seed,
+                 ray_address=args.ray_address)
 
     if args.list or not (args.stages or args.all):
         rows = stages.snapshot(cfg)

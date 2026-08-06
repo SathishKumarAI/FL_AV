@@ -21,13 +21,13 @@ from . import gpu, logparse, paths, vehicles
 def collect(config: dict | None = None, telemetry: dict | None = None,
             results: list[dict] | None = None) -> dict:
     """Gather everything the report shows, from files on disk."""
-    logs = paths.PROJECT / "logs"
-    checksums = logparse.aggregate_checksums(logs)
-    rows = logparse.read_metrics_csv(logs / "metrics.csv")
-    learned, detail = logparse.federation_learned(logs)
+    from .verify import _metrics_csv
+    checksums = logparse.aggregate_checksums()
+    rows = logparse.read_metrics_csv(_metrics_csv())
+    learned, detail = logparse.federation_learned()
 
     per_vehicle: dict[int, dict] = {}
-    for f in sorted(logs.glob("client*.log")):
+    for f in logparse.iter_logs("client*.log"):
         current = None
         for ev in logparse.parse_text(f.read_text(errors="replace")):
             if ev.kind == "training_start":

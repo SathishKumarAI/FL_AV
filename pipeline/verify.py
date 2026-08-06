@@ -12,16 +12,24 @@ from pathlib import Path
 from . import logparse, paths
 
 
+def _metrics_csv() -> Path:
+    """logs/metrics.csv from whichever log dir actually has one."""
+    for d in paths.log_dirs():
+        if (d / "metrics.csv").exists():
+            return d / "metrics.csv"
+    return paths.PROJECT / "logs" / "metrics.csv"
+
+
 def check(project: Path = paths.PROJECT) -> tuple[bool, list[str]]:
-    logs, results = project / "logs", []
+    results = []
     ok = True
 
-    learned, detail = logparse.federation_learned(logs)
+    learned, detail = logparse.federation_learned()
     results.append(f"[{'PASS' if learned else 'FAIL'}] global weights change between rounds: {detail}")
     ok &= learned
 
     sent, recv = [], []
-    for f in sorted(logs.glob("client*.log")):
+    for f in logparse.iter_logs("client*.log"):
         evs = logparse.parse_text(f.read_text(errors="replace"))
         sent += [e.value for e in evs if e.kind == "client_sent_checksum"]
         recv += [e.value for e in evs if e.kind == "client_received_checksum"]
@@ -30,7 +38,7 @@ def check(project: Path = paths.PROJECT) -> tuple[bool, list[str]]:
                    f"({len(recv)} received, {len(sent)} sent)")
     ok &= c2
 
-    rows = logparse.read_metrics_csv(logs / "metrics.csv")
+    rows = logparse.read_metrics_csv(_metrics_csv())
     maps = [r.get("mAP50") for r in rows if r.get("mAP50") is not None]
     c3 = len(rows) >= 2 and any(m and m > 0 for m in maps)
     results.append(f"[{'PASS' if c3 else 'FAIL'}] metrics.csv has rows with non-zero mAP50 "
@@ -44,7 +52,7 @@ def check(project: Path = paths.PROJECT) -> tuple[bool, list[str]]:
     ok &= c4
 
     # Not a pass criterion, but a silent-failure warning worth surfacing.
-    noop = [e for f in logs.glob("client*.log")
+    noop = [e for f in logparse.iter_logs("client*.log")
             for e in logparse.parse_text(f.read_text(errors="replace"))
             if e.kind == "no_optimizer_step"]
     if noop:
