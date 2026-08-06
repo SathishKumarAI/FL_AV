@@ -31,7 +31,7 @@
 ## ▶️ Run it — one command
 
 ```powershell
-.\scriptsun_pipeline.ps1                 # Windows, demo profile, ~10 min on a 5070 Ti
+.\scripts\run_pipeline.ps1                 # Windows, demo profile, ~10 min on a 5070 Ti
 ```
 ```bash
 ./scripts/run_pipeline.sh                   # Linux/macOS
