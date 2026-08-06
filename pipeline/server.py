@@ -1,0 +1,214 @@
+"""The two dashboards: a control view to launch runs, a live view to watch them.
+
+Scope is deliberately narrow. MLflow owns metrics storage, history and run
+comparison; the Ray Dashboard owns actor and GPU internals. This server only does
+what neither can: start a run from a form, and narrate a fleet of vehicles while it
+trains. It stores nothing — every number here is read from a running subprocess,
+from my-project's logs, or from nvidia-smi.
+
+Stdlib only, loopback only, no build step.
+
+    python -m pipeline.server           # then open http://127.0.0.1:8800
+"""
+from __future__ import annotations
+
+import json
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from . import gpu, paths, stages, vehicles
+from .runner import Run
+from .stages import Config
+
+STATIC = Path(__file__).resolve().parent / "static"
+HISTORY_LIMIT = 500
+
+
+class Broadcaster:
+    """Fan one Run's event queue out to every connected browser."""
+
+    def __init__(self):
+        self.subscribers: list["list"] = []
+        self.history: list[dict] = []
+        self.lock = threading.Lock()
+
+    def publish(self, ev: dict) -> None:
+        with self.lock:
+            self.history.append(ev)
+            del self.history[:-HISTORY_LIMIT]
+            for q in self.subscribers:
+                q.append(ev)
+
+    def subscribe(self) -> list:
+        q: list = []
+        with self.lock:
+            self.subscribers.append(q)
+        return q
+
+    def unsubscribe(self, q: list) -> None:
+        with self.lock:
+            if q in self.subscribers:
+                self.subscribers.remove(q)
+
+
+class State:
+    """Everything the dashboards need, and the one run allowed at a time."""
+
+    def __init__(self):
+        self.bus = Broadcaster()
+        self.run: Run | None = None
+        self.thread: threading.Thread | None = None
+        self.idle_sampler = gpu.Sampler(interval=3.0).start()
+
+    @property
+    def busy(self) -> bool:
+        return self.thread is not None and self.thread.is_alive()
+
+    def start(self, cfg: Config, chain, confirm: bool, ray_address: str | None) -> bool:
+        if self.busy:
+            return False
+        run = Run(cfg, confirm_all=confirm, ray_address=ray_address)
+        self.run = run
+
+        def pump():
+            while True:
+                ev = run.events.get()
+                self.bus.publish(ev)
+                if ev.get("kind") == "run_end":
+                    return
+
+        threading.Thread(target=pump, daemon=True).start()
+        self.thread = threading.Thread(target=run.execute, args=(chain,), daemon=True)
+        self.thread.start()
+        return True
+
+    def snapshot(self, cfg: Config) -> dict:
+        live = self.run.sampler.telemetry if self.busy and self.run else self.idle_sampler.telemetry
+        latest = live.latest
+        return {
+            "busy": self.busy,
+            "current": self.run.current if self.run else None,
+            "config": cfg.to_dict(),
+            "stages": stages.snapshot(cfg),
+            "fleet": vehicles.load_fleet(),
+            "gpu": {
+                "util_pct": latest.util_pct if latest else None,
+                "mem_used_mib": latest.mem_used_mib if latest else None,
+                "mem_ceiling_mib": gpu.VRAM_CEILING_MIB,
+                "power_w": latest.power_w if latest else None,
+                "temp_c": latest.temp_c if latest else None,
+                **live.summary(),
+            },
+            "links": {"mlflow": "http://127.0.0.1:5000", "ray": "http://127.0.0.1:8265"},
+            "results": [r.__dict__ for r in (self.run.results if self.run else [])],
+        }
+
+
+STATE = State()
+CONFIG = Config()
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *_):        # the browser polls; the console stays readable
+        pass
+
+    # -- helpers -----------------------------------------------------------
+    def _send(self, code: int, body: bytes, ctype: str) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, obj, code: int = 200) -> None:
+        self._send(code, json.dumps(obj).encode(), "application/json")
+
+    # -- routes ------------------------------------------------------------
+    def do_GET(self):
+        if self.path in ("/", "/index.html"):
+            return self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
+        if self.path == "/api/state":
+            return self._json(STATE.snapshot(CONFIG))
+        if self.path == "/api/events":
+            return self._sse()
+        self._json({"error": "not found"}, 404)
+
+    def _sse(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        q = STATE.bus.subscribe()
+        try:
+            for ev in list(STATE.bus.history):     # replay so a late tab is not blank
+                self._event(ev)
+            while True:
+                if q:
+                    self._event(q.pop(0))
+                else:
+                    # Comment frame doubles as a keep-alive and as the signal that
+                    # tells us the browser has gone away (raises on write).
+                    self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+                    time.sleep(1.0)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            STATE.bus.unsubscribe(q)
+
+    def _event(self, ev: dict) -> None:
+        self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode())
+        self.wfile.flush()
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        body = json.loads(self.rfile.read(length) or b"{}")
+
+        if self.path == "/api/run":
+            global CONFIG
+            CONFIG = Config(
+                profile=body.get("profile", "demo"),
+                n_vehicles=int(body.get("vehicles", 6)),
+                rounds=int(body.get("rounds", 2)),
+                local_epochs=int(body.get("epochs", 1)),
+                seed=int(body.get("seed", 0)),
+            )
+            try:
+                chain = stages.resolve(body.get("stages"))
+            except SystemExit as e:
+                return self._json({"error": str(e)}, 400)
+            started = STATE.start(CONFIG, chain, bool(body.get("confirm")),
+                                  body.get("ray_address") or None)
+            return self._json({"started": started, "busy": STATE.busy},
+                              200 if started else 409)
+
+        if self.path == "/api/stop":
+            if STATE.run:
+                STATE.run.stop()
+            return self._json({"stopping": True})
+
+        self._json({"error": "not found"}, 404)
+
+
+def serve(port: int = 8800) -> None:
+    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)   # loopback only, never 0.0.0.0
+    print(f"control + live dashboards : http://127.0.0.1:{port}")
+    print(f"MLflow (metrics, history) : http://127.0.0.1:5000   [mlflow ui --port 5000]")
+    print(f"Ray (actors, GPU internals): http://127.0.0.1:8265  [ray start --head]")
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        srv.shutdown()
+
+
+if __name__ == "__main__":
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--port", type=int, default=8800)
+    serve(ap.parse_args().port)

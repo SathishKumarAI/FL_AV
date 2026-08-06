@@ -188,3 +188,32 @@ checkpoints/
 
 # TLS certificates (secrets)
 certs/
+
+# --- pipeline component -------------------------------------------------
+# Generated data and run artifacts. None of this belongs in the repo: the fleet
+# shards are hardlinks to a 7.6 GB dataset, the MLflow store holds model
+# artifacts, and reports are per-run output.
+pipeline/vehicles/
+pipeline/mlruns/
+pipeline/reports/
+pipeline/.state/
+pipeline/**/__pycache__/
+
+# Credentials, belt and braces. The pipeline reads none of these -- kagglehub
+# downloads anonymously -- but a stray copy must never become committable.
+kaggle.json
+**/kaggle.json
+.env
+*.pem
+*.key
+!my-project/certs/.gitkeep
+
+# my-project's loggers use CWD-relative paths, so running pytest from the repo
+# root (rather than from my-project/) drops stray per-process log files here.
+# Narrow on purpose: logs/installation.log is tracked and must stay.
+/logs/*.*.log
+/logs/server.log
+/logs/client.log
+/logs/task.log
+/logs/get_set.log
+/logs/metrics.log

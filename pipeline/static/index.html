@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Federated YOLOv8 — fleet control</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#151b23; --line:#242c37; --ink:#e6edf3; --dim:#8b949e;
+    --accent:#4493f8; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --idle:#484f58;
+    --mono:ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:light){
+    :root{--bg:#f6f8fa;--panel:#fff;--line:#d1d9e0;--ink:#1f2328;--dim:#59636e;--idle:#afb8c1}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+  header{display:flex;align-items:center;gap:16px;padding:12px 20px;
+         border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+  h1{font-size:15px;margin:0;font-weight:600;letter-spacing:-.01em}
+  h1 span{color:var(--dim);font-weight:400}
+  .spacer{flex:1}
+  .tabs{display:flex;gap:4px}
+  .tab{padding:6px 14px;border-radius:6px;border:1px solid transparent;cursor:pointer;
+       background:none;color:var(--dim);font:inherit}
+  .tab[aria-selected=true]{background:var(--bg);border-color:var(--line);color:var(--ink)}
+  a.ext{color:var(--accent);text-decoration:none;font-size:13px}
+  a.ext:hover{text-decoration:underline}
+  main{padding:20px;max-width:1400px;margin:0 auto}
+  .grid{display:grid;gap:16px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);
+            margin:0 0 12px;font-weight:600}
+  label{display:block;font-size:12px;color:var(--dim);margin-bottom:4px}
+  input,select{width:100%;padding:7px 9px;background:var(--bg);color:var(--ink);
+               border:1px solid var(--line);border-radius:6px;font:inherit}
+  .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px}
+  button{padding:8px 16px;border-radius:6px;border:1px solid var(--line);background:var(--bg);
+         color:var(--ink);font:inherit;cursor:pointer}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;
+        font-family:var(--mono);border:1px solid}
+  .s-ok{color:var(--ok);border-color:var(--ok)}
+  .s-running{color:var(--accent);border-color:var(--accent)}
+  .s-failed,.s-aborted{color:var(--bad);border-color:var(--bad)}
+  .s-skipped{color:var(--dim);border-color:var(--idle)}
+  .s-pending{color:var(--idle);border-color:var(--idle)}
+  .s-needs_confirm{color:var(--warn);border-color:var(--warn)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+  .veh{border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--bg)}
+  .veh.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .veh .name{font-weight:600;font-size:13px;display:flex;justify-content:space-between}
+  .veh .cond{color:var(--dim);font-size:12px;margin:2px 0 8px}
+  .kv{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;
+      color:var(--dim);padding:1px 0}
+  .kv b{color:var(--ink);font-weight:500}
+  .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:8px}
+  .bar>i{display:block;height:100%;background:var(--accent)}
+  pre{margin:0;max-height:340px;overflow:auto;font-family:var(--mono);font-size:11.5px;
+      line-height:1.55;color:var(--dim);white-space:pre-wrap;word-break:break-word}
+  pre b{color:var(--ink);font-weight:400}
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px}
+  .metric{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .metric .n{font-size:19px;font-family:var(--mono);font-weight:600;letter-spacing:-.02em}
+  .metric .l{font-size:11px;color:var(--dim)}
+  .hint{font-size:12px;color:var(--dim);margin-top:8px}
+  .warn{color:var(--warn)}
+  svg{display:block;width:100%;height:auto}
+  [hidden]{display:none !important}
+</style>
+</head>
+<body>
+<header>
+  <h1>Federated YOLOv8 <span id="sub">— fleet control</span></h1>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true"  data-view="control">Control</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="live">Live</button>
+  </div>
+  <div class="spacer"></div>
+  <span class="pill s-pending" id="runState">idle</span>
+  <a class="ext" id="mlflowLink" href="http://127.0.0.1:5000" target="_blank" rel="noopener">MLflow ↗</a>
+  <a class="ext" id="rayLink" href="http://127.0.0.1:8265" target="_blank" rel="noopener">Ray ↗</a>
+</header>
+
+<main>
+  <!-- ------------------------------------------------ CONTROL -->
+  <section id="view-control" class="grid" style="grid-template-columns:minmax(300px,380px) 1fr">
+    <div class="panel">
+      <h2>Run configuration</h2>
+      <div class="row">
+        <div><label for="profile">Profile</label>
+          <select id="profile">
+            <option value="demo">demo — 300 img, 320px</option>
+            <option value="full">full — 6308 img, 640px</option>
+          </select></div>
+        <div><label for="vehicles">Vehicles</label><input id="vehicles" type="number" min="2" max="8" value="6"></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div><label for="rounds">Rounds</label><input id="rounds" type="number" min="1" value="2"></div>
+        <div><label for="epochs">Local epochs</label><input id="epochs" type="number" min="1" value="1"></div>
+        <div><label for="seed">Seed</label><input id="seed" type="number" value="0"></div>
+      </div>
+      <div style="margin-top:14px">
+        <label><input type="checkbox" id="confirm" style="width:auto"> Confirm the gated stages
+          (download, GPU sanity, federated run)</label>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px">
+        <button class="primary" id="launch">Launch</button>
+        <button id="stop" disabled>Stop</button>
+      </div>
+      <p class="hint" id="estimate"></p>
+      <p class="hint warn">Vehicles train <b>serialised</b> — one client peaks at 15.9 GB of
+        16.3 GB, so concurrency would OOM. Wall clock scales with vehicle count.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Stages</h2>
+      <table><thead><tr><th>Stage</th><th>State</th><th>Cost</th><th>Detail</th></tr></thead>
+        <tbody id="stageTable"></tbody></table>
+      <p class="hint">“skip” means the stage detected its work is already done. Gated stages
+        need the confirm box above.</p>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ LIVE -->
+  <section id="view-live" class="grid" hidden>
+    <div class="panel">
+      <h2>GPU</h2>
+      <div class="metrics">
+        <div class="metric"><div class="n" id="gUtil">—</div><div class="l">utilisation %</div></div>
+        <div class="metric"><div class="n" id="gMem">—</div><div class="l">VRAM MiB / 16303</div></div>
+        <div class="metric"><div class="n" id="gPower">—</div><div class="l">power W</div></div>
+        <div class="metric"><div class="n" id="gEnergy">—</div><div class="l">energy Wh</div></div>
+        <div class="metric"><div class="n" id="gTemp">—</div><div class="l">temp °C</div></div>
+      </div>
+      <div class="bar" title="VRAM against the measured ceiling"><i id="gMemBar" style="width:0"></i></div>
+    </div>
+
+    <div class="panel">
+      <h2>Fleet</h2>
+      <div class="cards" id="fleetCards"></div>
+      <p class="hint">Each vehicle trains a condition-biased slice, so the curves are
+        expected to diverge — that divergence is what makes this federated rather than
+        merely distributed.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Weight flow — does the global model actually move?</h2>
+      <svg id="chkChart" viewBox="0 0 900 200" preserveAspectRatio="none"></svg>
+      <p class="hint" id="chkNote">Waiting for the first aggregate.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Stage timeline</h2>
+      <table><thead><tr><th>Stage</th><th>Status</th><th>Seconds</th><th>Energy Wh</th><th>Detail</th></tr></thead>
+        <tbody id="timeline"></tbody></table>
+    </div>
+
+    <div class="panel">
+      <h2>Log</h2>
+      <pre id="log"></pre>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { checksums: [], vehicles: {}, current: null, stages: [] };
+
+// ---- tabs -----------------------------------------------------------------
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
+  document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x === t));
+  $("view-control").hidden = t.dataset.view !== "control";
+  $("view-live").hidden = t.dataset.view !== "live";
+});
+
+// ---- control --------------------------------------------------------------
+function config() {
+  return {
+    profile: $("profile").value,
+    vehicles: +$("vehicles").value,
+    rounds: +$("rounds").value,
+    epochs: +$("epochs").value,
+    seed: +$("seed").value,
+    confirm: $("confirm").checked,
+  };
+}
+function estimate() {
+  const c = config();
+  const per = c.profile === "demo" ? 300 : 6308;
+  // ~919 s measured for 2 clients x 2 rounds x 1 epoch on 6308 images, serialised.
+  const secs = (per / 6308) * 230 * c.vehicles * c.rounds * c.epochs;
+  const m = Math.max(1, Math.round(secs / 60));
+  $("estimate").textContent =
+    `${c.vehicles} vehicles x ${per} images x ${c.rounds} rounds — very roughly ${m} min of GPU time.`;
+}
+["profile","vehicles","rounds","epochs"].forEach(id => $(id).oninput = estimate);
+estimate();
+
+$("launch").onclick = async () => {
+  $("launch").disabled = true;
+  const r = await fetch("/api/run", {method:"POST", headers:{"Content-Type":"application/json"},
+                                     body: JSON.stringify(config())});
+  if (!r.ok) { alert((await r.json()).error || "a run is already in flight"); $("launch").disabled = false; return; }
+  document.querySelector('.tab[data-view=live]').click();
+};
+$("stop").onclick = () => fetch("/api/stop", {method:"POST"});
+
+// ---- state polling --------------------------------------------------------
+async function poll() {
+  try {
+    const s = await (await fetch("/api/state")).json();
+    state.stages = s.stages;
+    renderStages(s.stages);
+    renderFleet(s.fleet);
+    renderGpu(s.gpu);
+    $("runState").textContent = s.busy ? (s.current || "running") : "idle";
+    $("runState").className = "pill " + (s.busy ? "s-running" : "s-pending");
+    $("launch").disabled = s.busy;
+    $("stop").disabled = !s.busy;
+    $("mlflowLink").href = s.links.mlflow;
+    $("rayLink").href = s.links.ray;
+  } catch (e) { /* server restarting; the next tick will catch up */ }
+  setTimeout(poll, 2000);
+}
+
+function renderStages(rows) {
+  $("stageTable").innerHTML = rows.map(r => {
+    const cls = r.satisfied ? "s-skipped" : (r.gated ? "s-needs_confirm" : "s-pending");
+    const word = r.satisfied ? "skip" : (r.gated ? "gated" : "will run");
+    return `<tr><td><b>${r.name}</b><br><span style="color:var(--dim);font-size:12px">${r.title}</span></td>
+      <td><span class="pill ${cls}">${word}</span></td><td>${r.est}</td>
+      <td style="color:var(--dim);font-size:12px">${r.detail}</td></tr>`;
+  }).join("");
+}
+
+function renderFleet(fleet) {
+  if (!fleet || !fleet.length) {
+    $("fleetCards").innerHTML = `<p class="hint">No fleet built yet — run the <b>fleet</b> stage.</p>`;
+    return;
+  }
+  $("fleetCards").innerHTML = fleet.map(v => {
+    const live = state.vehicles[v.vid] || {};
+    const active = state.current === "federate" && live.training;
+    return `<div class="veh ${active ? "active" : ""}">
+      <div class="name">Vehicle ${v.vid}<span class="pill ${active ? "s-running" : "s-pending"}">${active ? "training" : "idle"}</span></div>
+      <div class="cond">${v.condition}</div>
+      <div class="kv"><span>train images</span><b>${v.n_train ?? "—"}</b></div>
+      <div class="kv"><span>val images</span><b>${v.n_val ?? "—"}</b></div>
+      <div class="kv"><span>received</span><b>${fmt(live.received)}</b></div>
+      <div class="kv"><span>sent back</span><b>${fmt(live.sent)}</b></div>
+      <div class="kv"><span>delta</span><b>${live.received != null && live.sent != null
+          ? fmt(live.sent - live.received) : "—"}</b></div>
+    </div>`;
+  }).join("");
+}
+const fmt = (x) => x == null ? "—" : (Math.abs(x) > 1e4 ? x.toExponential(3) : x.toFixed(3));
+
+function renderGpu(g) {
+  if (!g) return;
+  $("gUtil").textContent   = g.util_pct   ?? "—";
+  $("gMem").textContent    = g.mem_used_mib ? Math.round(g.mem_used_mib) : "—";
+  $("gPower").textContent  = g.power_w    ?? "—";
+  $("gEnergy").textContent = (g.energy_wh ?? 0).toFixed(3);
+  $("gTemp").textContent   = g.temp_c     ?? "—";
+  const pct = g.mem_used_mib ? 100 * g.mem_used_mib / (g.mem_ceiling_mib || 16303) : 0;
+  $("gMemBar").style.width = Math.min(100, pct) + "%";
+  $("gMemBar").style.background = pct > 92 ? "var(--bad)" : pct > 75 ? "var(--warn)" : "var(--accent)";
+}
+
+// ---- checksum chart: the B4 guard, drawn ----------------------------------
+function drawChecksums() {
+  const v = state.checksums, svg = $("chkChart");
+  if (v.length < 1) return;
+  const W = 900, H = 200, pad = 30;
+  const min = Math.min(...v), max = Math.max(...v), span = (max - min) || 1;
+  const x = i => pad + (v.length === 1 ? (W - 2*pad)/2 : i * (W - 2*pad) / (v.length - 1));
+  const y = k => H - pad - ((k - min) / span) * (H - 2*pad);
+  const pts = v.map((k, i) => `${x(i)},${y(k)}`).join(" ");
+  const dots = v.map((k, i) =>
+    `<circle cx="${x(i)}" cy="${y(k)}" r="4" fill="var(--accent)"></circle>
+     <text x="${x(i)}" y="${y(k) - 12}" fill="var(--dim)" font-size="11" text-anchor="middle">r${i+1}</text>`).join("");
+  svg.innerHTML =
+    `<polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2"></polyline>${dots}`;
+  const stuck = new Set(v.map(n => n.toFixed(6))).size !== v.length;
+  $("chkNote").innerHTML = stuck
+    ? `<span class="warn"><b>Identical checksums across rounds.</b> Either the clients returned the
+       weights they were sent, or no optimizer step happened — raise local epochs.</span>`
+    : `Global weight checksum moves every round: ${v.map(n => n.toFixed(3)).join(" → ")}`;
+}
+
+// ---- event stream ---------------------------------------------------------
+const es = new EventSource("/api/events");
+es.onmessage = (m) => {
+  const ev = JSON.parse(m.data);
+  if (ev.kind === "log") {
+    const pre = $("log");
+    pre.insertAdjacentHTML("beforeend", `<b>${esc(ev.stage)}</b> ${esc(ev.line)}\n`);
+    while (pre.childNodes.length > 600) pre.removeChild(pre.firstChild);
+    pre.scrollTop = pre.scrollHeight;
+  } else if (ev.kind === "signal") {
+    onSignal(ev);
+  } else if (ev.kind === "stage") {
+    state.current = ev.status === "running" ? ev.stage : null;
+    addTimeline(ev);
+  } else if (ev.kind === "run_end") {
+    addTimeline({stage: "run", status: ev.ok ? "ok" : "failed",
+                 seconds: ev.seconds, detail: `energy ${ev.gpu?.energy_wh ?? 0} Wh`});
+  }
+};
+function onSignal(ev) {
+  if (ev.signal === "aggregate_checksum") { state.checksums.push(ev.value); drawChecksums(); }
+  if (ev.signal === "training_start") {
+    Object.values(state.vehicles).forEach(v => v.training = false);
+    state.vehicles[ev.value] = {...(state.vehicles[ev.value] || {}), training: true};
+  }
+  if (ev.signal === "client_received_checksum" || ev.signal === "client_sent_checksum") {
+    const vid = Object.keys(state.vehicles).find(k => state.vehicles[k].training) || "?";
+    const key = ev.signal === "client_received_checksum" ? "received" : "sent";
+    state.vehicles[vid] = {...(state.vehicles[vid] || {}), [key]: ev.value};
+  }
+  if (ev.signal === "no_optimizer_step") {
+    $("chkNote").innerHTML = `<span class="warn"><b>No optimizer step possible this round.</b>
+      The shard is too small for the batch size — the weights cannot change.</span>`;
+  }
+}
+function addTimeline(ev) {
+  $("timeline").insertAdjacentHTML("beforeend",
+    `<tr><td>${esc(ev.stage)}</td><td><span class="pill s-${ev.status}">${ev.status}</span></td>
+     <td>${ev.seconds ?? ""}</td><td>${ev.gpu?.energy_wh ?? ""}</td>
+     <td style="color:var(--dim);font-size:12px">${esc(ev.detail || "")}</td></tr>`);
+}
+const esc = (s) => String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+poll();
+</script>
+</body>
+</html>

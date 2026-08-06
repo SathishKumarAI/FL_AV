@@ -1,0 +1,7 @@
+# Observability + pipeline extras. Deliberately NOT in my-project/pyproject.toml:
+# flwr builds a runtime env from those dependencies, and none of this belongs in
+# the federation processes.
+mlflow>=3.15.1
+ray[default]>=2.55.1
+ijson>=3.5.1
+PyYAML>=6.0
