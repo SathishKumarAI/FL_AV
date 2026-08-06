@@ -308,3 +308,74 @@ def test_live_state_is_derived_from_disk_not_from_the_event_bus(monkeypatch, tmp
     assert live["map50"] == [0.25]
     assert live["per_vehicle"]["3"]["received"] == 10.0
     assert live["per_vehicle"]["3"]["sent"] == 11.0
+
+
+# ------------------------------------------------ per-vehicle learning
+from pipeline import vehicle_metrics as vm  # noqa: E402
+
+
+def _client_log(tmp_path, body):
+    logs = tmp_path / "logs"
+    logs.mkdir(exist_ok=True)
+    (logs / "client.1.log").write_text(body)
+    return logs
+
+
+def test_per_vehicle_metrics_are_parsed_without_eval(tmp_path, monkeypatch):
+    """The dict comes from a log file. literal_eval, never eval."""
+    body = ("[Client] 3 Training done. metrics={'precision': 0.30, 'recall': 0.27, "
+            "'mAP50': 0.23, 'mAP50-95': 0.11, 'fitness': 0.11, 'os': 'Windows'}\n")
+    logs = _client_log(tmp_path, body)
+    monkeypatch.setattr(paths, "log_dirs", lambda: [logs])
+    rounds = vm.per_vehicle_rounds()
+    assert rounds["3"][0]["mAP50"] == 0.23
+    assert rounds["3"][0]["mAP50_95"] == 0.11
+    assert rounds["3"][0]["round"] == 1
+
+
+def test_a_malicious_metrics_blob_cannot_execute(tmp_path, monkeypatch):
+    logs = _client_log(tmp_path, "[Client] 1 Training done. metrics={'x': __import__('os')}\n")
+    monkeypatch.setattr(paths, "log_dirs", lambda: [logs])
+    assert vm.per_vehicle_rounds() == {}      # rejected, not executed
+
+
+def test_divergence_sums_to_about_zero(tmp_path, monkeypatch):
+    rounds = {"1": [{"round": 1, "mAP50": 0.20}],
+              "2": [{"round": 1, "mAP50": 0.30}],
+              "3": [{"round": 1, "mAP50": 0.40}]}
+    div = vm.divergence(rounds)
+    assert abs(sum(v[0] for v in div.values())) < 1e-9
+    assert div["1"][0] < 0 < div["3"][0]
+
+
+def test_a_vehicle_that_never_trained_does_not_break_aggregation(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "log_dirs", lambda: [tmp_path])
+    assert vm.per_vehicle_rounds() == {}
+    assert vm.divergence({}) == {}
+    assert vm.weight_movement() == {}
+
+
+def test_missing_results_csv_degrades_rather_than_raising(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "PROJECT", tmp_path)
+    assert vm.per_vehicle_epochs() == {}
+
+
+def test_contribution_is_the_fedavg_weight():
+    fleet = [{"vid": 1, "n_train": 300}, {"vid": 2, "n_train": 100}]
+    c = vm.contribution(fleet)
+    assert c["1"] == 0.75 and c["2"] == 0.25
+
+
+def test_weight_movement_pairs_received_with_sent(tmp_path, monkeypatch):
+    logs = _client_log(tmp_path,
+        "Starting local training with batch_id=4, local_epochs=1\n"
+        "Received weights with checksum: 100.0\n"
+        "Sending back weights with checksum: 90.0\n")
+    monkeypatch.setattr(paths, "log_dirs", lambda: [logs])
+    assert vm.weight_movement()["4"] == [10.0]
+
+
+def test_fleet_json_records_val_counts(tmp_path):
+    """It recorded n_train only, so every report printed 'val | ?'."""
+    v = vehicles.Vehicle(1, "night", ["a.jpg"] * 5, ["b.jpg"] * 2)
+    assert v.to_summary() == {"vid": 1, "condition": "night", "n_train": 5, "n_val": 2}

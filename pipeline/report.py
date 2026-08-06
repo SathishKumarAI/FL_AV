@@ -15,7 +15,7 @@ import platform
 import time
 from pathlib import Path
 
-from . import gpu, logparse, paths, vehicles
+from . import gpu, logparse, paths, vehicle_metrics, vehicles
 
 
 def collect(config: dict | None = None, telemetry: dict | None = None,
@@ -52,6 +52,7 @@ def collect(config: dict | None = None, telemetry: dict | None = None,
         "gpu": telemetry or {},
         "stages": results or [],
         "checkpoints": sorted(p.name for p in (paths.PROJECT / "checkpoints").glob("global_*.pt")),
+        "learning": vehicle_metrics.summary(),
     }
 
 
@@ -70,6 +71,11 @@ def _svg_line(values: list[float], width: int = 720, height: int = 180,
                    for i, v in enumerate(values))
     return (f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{html.escape(label)}">'
             f'<polyline points="{pts}" fill="none" stroke="#4493f8" stroke-width="2"/>{dots}</svg>')
+
+
+def _num(v, suffix: str = "") -> str:
+    """Missing telemetry should read as '—', never as the literal None."""
+    return "—" if v is None else f"{v}{suffix}"
 
 
 def to_markdown(d: dict) -> str:
@@ -102,14 +108,39 @@ def to_markdown(d: dict) -> str:
             L.append("| " + " | ".join(str(r.get(k, "")) for k in keys) + " |")
         L.append("")
 
+    lrn = d.get("learning") or {}
+    if lrn.get("trained"):
+        L += ["## How each vehicle learned", "",
+              "Each vehicle trains a condition-biased, disjoint slice, so divergence "
+              "between them is the expected result rather than a defect — it is what "
+              "makes this federated rather than merely distributed.", "",
+              "| vehicle | condition | mAP50 by round | final | vs fleet mean | weight moved | share |",
+              "|---|---|---|---|---|---|---|"]
+        for vid in lrn["trained"]:
+            curve = [r.get("mAP50") for r in lrn["rounds"].get(vid, []) if r.get("mAP50") is not None]
+            div = lrn["divergence"].get(vid, [])
+            mov = lrn["movement"].get(vid, [])
+            L.append(
+                f"| {vid} | {lrn['conditions'].get(vid, '?')} | "
+                f"{' → '.join(f'{c:.4f}' for c in curve) or '—'} | "
+                f"{curve[-1]:.4f} | {div[-1]:+.4f} | "
+                f"{(sum(mov)/len(mov)):.1f} | {lrn['contribution'].get(vid, 0)*100:.1f}% |"
+                if curve else f"| {vid} | {lrn['conditions'].get(vid, '?')} | — | — | — | — | — |")
+        L.append("")
+        best = max(lrn["divergence"].items(), key=lambda kv: kv[1][-1] if kv[1] else -9)
+        worst = min(lrn["divergence"].items(), key=lambda kv: kv[1][-1] if kv[1] else 9)
+        L += [f"Strongest: **vehicle {best[0]} ({lrn['conditions'].get(best[0],'?')})** at "
+              f"{best[1][-1]:+.4f} vs the fleet mean. Weakest: **vehicle {worst[0]} "
+              f"({lrn['conditions'].get(worst[0],'?')})** at {worst[1][-1]:+.4f}.", ""]
+
     g = d.get("gpu") or {}
     if g:
         L += ["## Cost", "", "| metric | value |", "|---|---|",
-              f"| GPU energy | {g.get('energy_wh', 0)} Wh |",
-              f"| peak power | {g.get('peak_power_w', 0)} W |",
-              f"| peak VRAM | {g.get('peak_mem_mib', 0)} MiB of {gpu.VRAM_CEILING_MIB} "
-              f"({g.get('peak_mem_pct', 0)}%) |",
-              f"| mean utilisation | {g.get('mean_util_pct', 0)} % |", ""]
+              f"| GPU energy | {_num(g.get('energy_wh'), ' Wh')} |",
+              f"| peak power | {_num(g.get('peak_power_w'), ' W')} |",
+              f"| peak VRAM | {_num(g.get('peak_mem_mib'), ' MiB')} of {gpu.VRAM_CEILING_MIB} "
+              f"({_num(g.get('peak_mem_pct'), '%')}) |",
+              f"| mean utilisation | {_num(g.get('mean_util_pct'), ' %')} |", ""]
 
     if d["stages"]:
         L += ["## Stages", "", "| stage | status | seconds |", "|---|---|---|"]
@@ -136,6 +167,19 @@ def to_html(d: dict) -> str:
         f"<td>{round(s.get('seconds',0),1)}</td></tr>" for s in d["stages"])
     cfg_rows = "".join(f"<tr><td>{html.escape(str(k))}</td><td>{html.escape(str(v))}</td></tr>"
                        for k, v in (d.get("config") or {}).items())
+    lrn = d.get("learning") or {}
+    learn_rows = ""
+    for vid in lrn.get("trained", []):
+        curve = [r.get("mAP50") for r in lrn["rounds"].get(vid, []) if r.get("mAP50") is not None]
+        div = lrn["divergence"].get(vid, [])
+        mov = lrn["movement"].get(vid, [])
+        learn_rows += (
+            f"<tr><td>{vid}</td><td>{html.escape(str(lrn['conditions'].get(vid, '?')))}</td>"
+            f"<td>{' → '.join(f'{c:.4f}' for c in curve) or '—'}</td>"
+            f"<td>{div[-1]:+.4f}</td>" if div else f"<tr><td>{vid}</td><td>?</td><td>—</td><td>—</td>")
+        learn_rows += (f"<td>{(sum(mov)/len(mov)):.1f}</td>" if mov else "<td>—</td>")
+        learn_rows += f"<td>{lrn.get('contribution', {}).get(vid, 0)*100:.1f}%</td></tr>"
+
     verdict_cls = "ok" if d["learned"] else "bad"
     verdict = "The federation learned" if d["learned"] else "The federation did NOT learn"
 
@@ -179,6 +223,14 @@ code{{font-family:ui-monospace,monospace;font-size:12px}}
 
 <h2>Evaluated mAP50 per round</h2><div class="panel">
 {_svg_line(maps, label='mAP50 per round')}</div>
+
+<h2>How each vehicle learned</h2><div class="panel">
+<p style="color:var(--dim);font-size:13px;margin-top:0">Each vehicle trains a
+condition-biased, disjoint slice, so divergence between them is the expected result
+rather than a defect.</p>
+<table><thead><tr><th>vehicle</th><th>condition</th><th>mAP50 by round</th>
+<th>vs fleet mean</th><th>weight moved</th><th>share</th></tr></thead>
+<tbody>{learn_rows}</tbody></table></div>
 
 <h2>Metrics</h2><div class="panel"><table>
 <thead><tr><th>round</th><th>stage</th><th>loss</th><th>precision</th><th>recall</th>

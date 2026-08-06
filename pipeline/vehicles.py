@@ -203,8 +203,11 @@ def materialise(vehicles: list[Vehicle], class_names: list[str], nc: int = 13) -
             f"path: {bd}\ntrain: images/train\nval: images/val\ntest: images/test\n"
             f"nc: {nc}\nnames:\n" + "".join(f"- {n}\n" for n in class_names)
         )
+    # Summary only: the full name lists live in each shard's train.txt/val.txt, and
+    # embedding them here made fleet.json megabytes wide while still omitting n_val,
+    # which is why the report printed "val | ?" for every vehicle.
     (root.parent / "fleet.json").write_text(
-        json.dumps([asdict(v) | {"n_train": v.n_train} for v in vehicles], indent=1)
+        json.dumps([v.to_summary() for v in vehicles], indent=1)
     )
     return paths.VEHICLE_ROOT
 

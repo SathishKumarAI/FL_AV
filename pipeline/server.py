@@ -18,7 +18,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import gpu, logparse, paths, stages, vehicles, verify
+from . import gpu, logparse, paths, stages, vehicle_metrics, vehicles, verify
 from .runner import Run
 from .stages import Config
 
@@ -135,6 +135,7 @@ class State:
             "criteria": criteria,
             "criteria_ok": ok,
             "checkpoints": sorted(p.name for p in (paths.PROJECT / "checkpoints").glob("global_*.pt")),
+            "learning": vehicle_metrics.summary(),
         }
 
     def reports(self) -> list[dict]:

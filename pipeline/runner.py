@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import queue
 import shutil
 import subprocess
@@ -156,8 +157,16 @@ class Run:
             data = report.collect(config=self.cfg.to_dict(), telemetry=telemetry,
                                   results=[r.__dict__ for r in self.results])
             return list(report.write(data))
-        except Exception as e:                      # never let reporting fail a run
-            self.emit("log", stage="report", line=f"report generation failed: {e}")
+        except Exception as e:
+            # Reporting must not fail the run -- but it must not be silent either.
+            # It failed once and the only trace was a log line that a filtered console
+            # dropped, so the run looked clean and produced nothing.
+            import traceback
+            detail = f"report generation FAILED: {type(e).__name__}: {e}"
+            print(f"\n!! {detail}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+            self.results.append(StageResult("report", "failed", detail=detail))
+            self.emit("stage", stage="report", status="failed", detail=detail)
             return []
 
     @staticmethod
