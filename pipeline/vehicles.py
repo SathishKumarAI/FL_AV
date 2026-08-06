@@ -98,10 +98,21 @@ def _available(split_dir: Path) -> set[str]:
 # --------------------------------------------------------------------------
 # Assignment
 # --------------------------------------------------------------------------
+PARTITIONS = ("condition", "random", "mixed")
+
+
 def assign(n_vehicles: int, per_vehicle: int, val_per_vehicle: int = 0,
            seed: int = 0, index: dict | None = None,
-           train_pool: set[str] | None = None, val_pool: set[str] | None = None) -> list[Vehicle]:
-    """Give each vehicle a condition-biased, disjoint slice.
+           train_pool: set[str] | None = None, val_pool: set[str] | None = None,
+           partition: str = "condition") -> list[Vehicle]:
+    """Give each vehicle a disjoint slice, partitioned one of three ways.
+
+    * ``condition`` -- each vehicle biased toward one driving condition. Non-IID, and
+      the interesting case: divergence between vehicles is the expected result.
+    * ``random`` -- each vehicle gets a uniform random slice. IID, and the control
+      case: the curves *should* converge, and if they do not, something else is
+      going on. Worth running precisely because it is the boring baseline.
+    * ``mixed`` -- alternating, so a single run shows both behaviours side by side.
 
     Disjoint matters: overlapping shards would let the same image train two vehicles
     in one round, which is not what a fleet does and would quietly flatter the
@@ -117,10 +128,17 @@ def assign(n_vehicles: int, per_vehicle: int, val_per_vehicle: int = 0,
     val_pool = _available(Path("val")) if val_pool is None else val_pool
     val_per_vehicle = val_per_vehicle or max(20, per_vehicle // 5)
 
+    if partition not in PARTITIONS:
+        raise ValueError(f"partition must be one of {PARTITIONS}, got {partition!r}")
+
     used: set[str] = set()
     vehicles: list[Vehicle] = []
     for i in range(n_vehicles):
-        label, matches = PROFILES[i % len(PROFILES)]
+        if partition == "random" or (partition == "mixed" and i % 2):
+            # No filter at all: a uniform draw from whatever is left.
+            label, matches = "random mix", (lambda a: True)
+        else:
+            label, matches = PROFILES[i % len(PROFILES)]
 
         def pick(pool: set[str], want: int) -> list[str]:
             on = [n for n in pool if n not in used and matches(index.get(n, {}))]

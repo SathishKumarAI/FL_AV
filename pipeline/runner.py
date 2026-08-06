@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import queue
 import shutil
@@ -80,6 +81,8 @@ class Run:
             self.emit("stage", stage=stage.name, status="failed", detail=str(e))
             return StageResult(stage.name, "failed", detail=str(e))
 
+        if stage.name == "federate":
+            self._stop_stale_superlink()
         env = paths.subprocess_env(self.ray_address, data_root=stage.data_root)
         self.current = stage.name
         self.emit("stage", stage=stage.name, status="running", detail=" ".join(map(str, cmd))[:200])
@@ -169,6 +172,26 @@ class Run:
             self.emit("stage", stage="report", status="failed", detail=detail)
             return []
 
+    def _stop_stale_superlink(self) -> None:
+        """Kill any running flower-superlink before starting a federation.
+
+        The SuperLink is detached and long-lived: it caches the working directory AND
+        the environment of whichever `flwr run` first started it. A run that later
+        changes RAY_ADDRESS or the data root inherits the old ones, and the simulation
+        dies with an error that points at Ray rather than at the real cause. Starting
+        from a clean SuperLink is cheaper than reasoning about which env it holds.
+        """
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/IM", "flower-superlink.exe"],
+                               capture_output=True, timeout=30)
+            else:
+                subprocess.run(["pkill", "-f", "flower-superlink"],
+                               capture_output=True, timeout=30)
+            self.emit("log", stage="federate", line="stopped any stale flower-superlink")
+        except (OSError, subprocess.SubprocessError) as e:
+            self.emit("log", stage="federate", line=f"could not stop superlink: {e}")
+
     @staticmethod
     def _restore_pyproject() -> None:
         """`flwr run` comments out [tool.flwr.federations] in place. Put it back.
@@ -195,6 +218,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--per-vehicle", type=int, default=0,
+                    help="override images per vehicle (0 = profile default)")
+    ap.add_argument("--partition", default="condition",
+                    choices=("condition", "random", "mixed"),
+                    help="condition = non-IID (default); random = IID control; mixed = both")
     ap.add_argument("--yes", action="store_true", help="confirm the gated stages up front")
     ap.add_argument("--ray-address", help="attach to an existing Ray head (enables its dashboard)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
@@ -205,6 +233,7 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     cfg = Config(profile=args.profile, n_vehicles=args.vehicles,
                  rounds=args.rounds, local_epochs=args.epochs, seed=args.seed,
+                 partition=args.partition, per_vehicle_override=args.per_vehicle,
                  ray_address=args.ray_address)
 
     if args.list or not (args.stages or args.all):

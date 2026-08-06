@@ -254,6 +254,7 @@ class Handler(BaseHTTPRequestHandler):
                 rounds=int(body.get("rounds", 2)),
                 local_epochs=int(body.get("epochs", 1)),
                 seed=int(body.get("seed", 0)),
+                partition=body.get("partition", "condition"),
                 ray_address=body.get("ray_address") or None,
             )
             try:

@@ -79,6 +79,12 @@ def subprocess_env(ray_address: str | None = None, data_root: Path | None = None
         # Makes flwr's ray.init() attach to an already-running head node instead
         # of creating its own with include_dashboard=False hardcoded.
         env["RAY_ADDRESS"] = ray_address
+    else:
+        # Explicitly clear it. Inheriting a stale RAY_ADDRESS makes flwr attach to a
+        # cluster it did not configure, and Ray then rejects the num_cpus/num_gpus
+        # that flwr passes: "When connecting to an existing cluster, num_cpus and
+        # num_gpus must not be provided."
+        env.pop("RAY_ADDRESS", None)
     return env
 
 

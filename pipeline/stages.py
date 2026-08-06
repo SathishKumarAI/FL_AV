@@ -29,10 +29,22 @@ class Config:
     rounds: int = 2
     local_epochs: int = 1
     seed: int = 0
+    partition: str = "condition"     # condition (non-IID) | random (IID) | mixed
+    per_vehicle_override: int = 0    # 0 = use the profile default
     ray_address: str | None = None   # set => attach to an existing head node
 
     @property
     def per_vehicle(self) -> int:
+        """Images per vehicle.
+
+        Worth overriding for condition partitioning: BDD100K only holds ~5 800 rainy
+        and ~6 300 snowy images in total, so asking for 6 308 per vehicle exhausts the
+        condition and the shard tops up with whatever is left -- which quietly turns a
+        non-IID run into a nearly-IID one. Keep it below the rarest condition's count
+        if the bias is meant to be real.
+        """
+        if self.per_vehicle_override:
+            return self.per_vehicle_override
         return 300 if self.profile == "demo" else 6308
 
     @property
@@ -140,6 +152,10 @@ def _check_fleet(cfg: Config) -> Check:
         return Check(False, f"fleet has {len(fleet)} shards, need {want} "
                             f"(the server can assign any id in {tuple(paths.BATCH_IDS)[0]}.."
                             f"{tuple(paths.BATCH_IDS)[-1]})")
+    want_random = cfg.partition == "random"
+    is_random = all(v.get("condition") == "random mix" for v in fleet) if fleet else False
+    if fleet and want_random != is_random:
+        return Check(False, f"fleet was built with a different partition than {cfg.partition!r}")
     short = [v for v in fleet if v.get("n_train", 0) < cfg.per_vehicle]
     if short:
         return Check(False, f"{len(short)} vehicle(s) below {cfg.per_vehicle} images")
@@ -192,7 +208,8 @@ def _cmd_fleet(cfg: Config) -> list[str]:
     return [PY, "-m", "pipeline.build_fleet",
             "--vehicles", str(cfg.n_vehicles),
             "--per-vehicle", str(cfg.per_vehicle),
-            "--seed", str(cfg.seed)]
+            "--seed", str(cfg.seed),
+            "--partition", cfg.partition]
 
 
 def _cmd_sanity(cfg: Config) -> list[str]:

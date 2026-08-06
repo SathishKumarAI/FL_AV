@@ -97,6 +97,14 @@
   <a class="ext" id="rayLink" href="http://127.0.0.1:8265" target="_blank" rel="noopener">Ray ↗</a>
 </header>
 
+<div id="skew" hidden style="margin:12px 20px;padding:10px 14px;border-radius:8px;
+     border:1px solid var(--bad);color:var(--bad);font-size:13px">
+  <b>This page is newer than the server it is talking to.</b>
+  The HTML is read from disk on every request, but the running process still has the old
+  Python loaded, so the live panels have no data to show. Restart it:
+  <code>python -m pipeline.server</code>
+</div>
+
 <main>
   <!-- ------------------------------------------------ CONTROL -->
   <section id="view-control" class="grid" style="grid-template-columns:minmax(300px,380px) 1fr">
@@ -114,6 +122,12 @@
         <div><label for="rounds">Rounds</label><input id="rounds" type="number" min="1" value="2"></div>
         <div><label for="epochs">Local epochs</label><input id="epochs" type="number" min="1" value="1"></div>
         <div><label for="seed">Seed</label><input id="seed" type="number" value="0"></div>
+        <div><label for="partition">Partition</label>
+          <select id="partition">
+            <option value="condition">condition — non-IID</option>
+            <option value="random">random — IID control</option>
+            <option value="mixed">mixed — both</option>
+          </select></div>
       </div>
       <div style="margin-top:14px">
         <label><input type="checkbox" id="confirm" style="width:auto"> Confirm the gated stages
@@ -269,6 +283,7 @@ function config() {
     rounds: +$("rounds").value,
     epochs: +$("epochs").value,
     seed: +$("seed").value,
+    partition: $("partition").value,
     confirm: $("confirm").checked,
   };
 }
@@ -297,6 +312,10 @@ $("stop").onclick = () => fetch("/api/stop", {method:"POST"});
 async function poll() {
   try {
     const s = await (await fetch("/api/state")).json();
+    // The HTML is served fresh from disk but the process is long-lived, so a server
+    // started before an edit serves a new page backed by old code. That combination
+    // used to render every live panel blank with no explanation.
+    $("skew").hidden = !!s.live;
     state.stages = s.stages;
     renderStages(s.stages);
     renderFleet(s.fleet);
@@ -393,8 +412,14 @@ const PALETTE = ["#4493f8","#d29922","#3fb950","#db61a2","#a371f7","#f85149",
 let selectedVehicle = null;
 
 function renderLearning(L) {
-  if (!L || !L.trained || !L.trained.length) {
-    $("smalls").innerHTML = '<p class="hint">No vehicle has trained yet.</p>';
+  if (!L) {
+    $("smalls").innerHTML = '<p class="hint">No learning data from the server ' +
+      '(is it running current code?).</p>';
+    return;
+  }
+  if (!L.trained || !L.trained.length) {
+    $("smalls").innerHTML = '<p class="hint">No vehicle has trained yet. Run the ' +
+      '<b>federate</b> stage.</p>';
     return;
   }
   const series = {};

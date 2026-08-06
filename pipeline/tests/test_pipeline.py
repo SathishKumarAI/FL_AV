@@ -379,3 +379,38 @@ def test_fleet_json_records_val_counts(tmp_path):
     """It recorded n_train only, so every report printed 'val | ?'."""
     v = vehicles.Vehicle(1, "night", ["a.jpg"] * 5, ["b.jpg"] * 2)
     assert v.to_summary() == {"vid": 1, "condition": "night", "n_train": 5, "n_val": 2}
+
+
+# ------------------------------------------------------- partition strategies
+def test_random_partition_ignores_conditions():
+    """The IID control case: no condition filter, every vehicle a uniform draw."""
+    idx = _index()
+    vs = vehicles.assign(3, 30, index=idx, train_pool=set(idx), val_pool=set(idx),
+                         val_per_vehicle=5, seed=2, partition="random")
+    assert {v.condition for v in vs} == {"random mix"}
+    seen = [n for v in vs for n in v.train]
+    assert len(seen) == len(set(seen)), "random slices must still be disjoint"
+
+
+def test_mixed_partition_alternates():
+    idx = _index()
+    vs = vehicles.assign(4, 20, index=idx, train_pool=set(idx), val_pool=set(idx),
+                         val_per_vehicle=4, seed=5, partition="mixed")
+    assert [v.condition for v in vs][1] == "random mix"
+    assert [v.condition for v in vs][0] != "random mix"
+
+
+def test_unknown_partition_is_rejected():
+    idx = _index()
+    with pytest.raises(ValueError):
+        vehicles.assign(2, 10, index=idx, train_pool=set(idx), val_pool=set(idx),
+                        partition="nonsense")
+
+
+def test_fleet_check_catches_a_partition_mismatch(monkeypatch):
+    """A condition fleet must not be silently reused for a random run."""
+    from pipeline import vehicles as _v
+    monkeypatch.setattr(_v, "load_fleet", lambda: [
+        {"vid": i, "condition": "night", "n_train": 300, "n_val": 60} for i in range(1, 11)])
+    assert stages._check_fleet(Config(n_vehicles=6, partition="random")).satisfied is False
+    assert stages._check_fleet(Config(n_vehicles=6, partition="condition")).satisfied is True

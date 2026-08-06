@@ -8,6 +8,17 @@ Federated YOLOv8 over BDD100K driving data: a Flower server aggregating per-clie
 YOLO training, with each client holding its own shard. `pipeline/` reproduces the
 whole flow and visualises a simulated vehicle fleet while it runs.
 
+## Where to look
+
+| Question | File |
+|---|---|
+| How do I branch, commit, merge? | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Why is mAP low, what do I run next? | [`docs/ML_PLAN.md`](docs/ML_PLAN.md) |
+| How do I try another FL algorithm? | [`docs/FL_TECHNIQUES.md`](docs/FL_TECHNIQUES.md) |
+| What should I build? | [`docs/BACKLOG_100.md`](docs/BACKLOG_100.md) |
+| How do I run any of it? | [`pipeline/README.md`](pipeline/README.md) |
+| Where did the last session stop? | [`STATUS.md`](STATUS.md) and `docs/prompts/` |
+
 ## How work gets done here
 
 **plan → prompt → code → verify.** Not optional, and in that order.
@@ -23,7 +34,9 @@ Write the prompt **before** the code, not after. A prompt reconstructed afterwar
 records what happened rather than what was intended, and the gap between those two is
 the part worth keeping. See `docs/prompts/README.md`.
 
-Work on a branch. Do not mix an unverified change into a verified one.
+Work on a branch. Do not mix an unverified change into a verified one. `main` stays
+green and is only reached through a squash-merged PR — the full discipline, and the
+reasons behind each rule, are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Hard rules
 
@@ -73,14 +86,31 @@ consecutive values mean nothing is being learned, whatever the metrics say.
   `[tool.flwr.federations]`. Restore it; never commit the rewritten form. The pipeline
   does this automatically after every run.
 - Blackwell (`sm_120`) needs torch **cu128**. cu118 has no kernel for it.
-- One client peaks at **15.9 GB of 16.3 GB** VRAM, so clients train serialised.
-  `client-resources.num-gpus = 1.0` is required, not cautious.
+- VRAM depends on the profile: a full 6 308-image shard peaks at **15.9 GB of 16.3 GB**,
+  the 300-image demo at ~5 GB. `client-resources.num-gpus = 1.0` serialises clients,
+  which is required at full scale and leaves real headroom at demo scale.
+- The detached SuperLink caches the CWD **and environment** of whichever `flwr run`
+  started it. The pipeline kills it before every federation for that reason.
+- Condition partitioning is only real while the condition has images: `overcast
+  residential` has 1 419 in all of BDD100K. Asking for more per vehicle silently tops up
+  with random images and turns a non-IID run into a nearly-IID one.
+
+## Agile, in the way that actually matters here
+
+Small vertical slices that each end in something demonstrable — a passing test, a moved
+metric, a screenshot. A slice that cannot be demonstrated is not done, it is in progress.
+
+Every increment leaves three artifacts behind: the **prompt** it was built from, the
+**verification** that it works, and an updated **STATUS.md** so the next session starts
+from fact rather than archaeology. Experiments live on `exp/` branches and are allowed to
+be thrown away — but their *result* gets written down somewhere permanent before the
+branch dies.
 
 ## Verification
 
 ```bash
 python -m pytest my-project/tests -q     # 24 tests
-python -m pytest pipeline/tests -q       # 22 tests
+python -m pytest pipeline/tests -q       # 42 tests
 python -m pipeline.verify                # the four pass criteria against the last run
 ```
 

@@ -63,17 +63,37 @@ def per_vehicle_rounds() -> dict[str, list[dict]]:
     return out
 
 
-def per_vehicle_epochs() -> dict[str, list[dict]]:
+def _fleet_built_at() -> float:
+    """When the current fleet was defined. Anything older belongs to a previous run."""
+    f = paths.VEHICLE_ROOT / "fleet.json"
+    try:
+        return f.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def per_vehicle_epochs(since: float | None = None) -> dict[str, list[dict]]:
     """{vid: [per-epoch rows]} from each vehicle's Ultralytics results.csv.
 
     Ultralytics reuses the same run directory every round, so this holds the most
     recent round's epochs -- not the whole history. Cross-round history comes from
     per_vehicle_rounds(); the UI says which is which rather than implying otherwise.
+
+    Files older than the current fleet are skipped. Without that, a results.csv left
+    behind by an earlier run gets folded into the analysis: a 20-epoch curve from a
+    10-image fixture was being reported as a vehicle that "overfit", in a run where
+    that vehicle trained for one epoch on 300 images.
     """
+    cutoff = _fleet_built_at() if since is None else since
     out: dict[str, list[dict]] = {}
     for csv_path in sorted(paths.PROJECT.glob(RESULTS_GLOB)):
         m = re.search(r"batch(\d+)", csv_path.parent.name)
         if not m:
+            continue
+        try:
+            if cutoff and csv_path.stat().st_mtime < cutoff:
+                continue
+        except OSError:
             continue
         rows: list[dict] = []
         try:
@@ -188,3 +208,63 @@ def demo() -> None:
 
 if __name__ == "__main__":
     demo()
+
+
+# --------------------------------------------------------------------------
+# Fit diagnosis
+# --------------------------------------------------------------------------
+def fit_diagnosis(epochs: dict[str, list[dict]] | None = None,
+                  rounds: dict[str, list[dict]] | None = None) -> dict:
+    """Underfitting or overfitting? Say which, from train vs val loss.
+
+    The distinction decides what to change, and guessing wrong wastes GPU hours:
+
+    * val loss still falling with train loss, both high  -> UNDERFIT: train longer.
+    * val loss rising while train loss falls             -> OVERFIT: stop earlier,
+      augment more, or shrink the model.
+
+    A low mAP on its own says neither. It is the *gap* and the *direction* that do.
+    """
+    epochs = per_vehicle_epochs() if epochs is None else epochs
+    rounds = per_vehicle_rounds() if rounds is None else rounds
+
+    per: dict[str, dict] = {}
+    for vid, rows in epochs.items():
+        tr = [r.get("box_loss") for r in rows if r.get("box_loss") is not None]
+        va = [r.get("val_box_loss") for r in rows if r.get("val_box_loss") is not None]
+        if not tr or not va:
+            continue
+        gap = va[-1] - tr[-1]
+        # Direction over the last half of the epochs, which is where divergence shows.
+        half = max(1, len(va) // 2)
+        val_trend = va[-1] - va[-half]
+        train_trend = tr[-1] - tr[-half]
+        if val_trend > 0 and train_trend < 0:
+            verdict = "overfitting"
+        elif val_trend < 0 and train_trend < 0:
+            verdict = "still learning"
+        else:
+            verdict = "flat"
+        per[vid] = {"train_loss": round(tr[-1], 4), "val_loss": round(va[-1], 4),
+                    "gap": round(gap, 4), "val_trend": round(val_trend, 4),
+                    "train_trend": round(train_trend, 4), "verdict": verdict,
+                    "epochs": len(rows)}
+
+    # Fleet-level: is the aggregate still improving round over round?
+    finals = [rows[-1].get("mAP50") for rows in rounds.values()
+              if rows and rows[-1].get("mAP50") is not None]
+    firsts = [rows[0].get("mAP50") for rows in rounds.values()
+              if rows and rows[0].get("mAP50") is not None]
+    improving = bool(finals and firsts and sum(finals)/len(finals) > sum(firsts)/len(firsts))
+    n_rounds = max((len(r) for r in rounds.values()), default=0)
+
+    if improving and n_rounds < 10:
+        fleet = ("UNDERFIT — mAP is still climbing every round and the run stopped early. "
+                 "More rounds x local epochs is the fix, not a different model.")
+    elif not improving and any(p["verdict"] == "overfitting" for p in per.values()):
+        fleet = "OVERFIT — validation loss is rising while training loss falls."
+    elif not improving:
+        fleet = "PLATEAU — the aggregate stopped improving; change LR or data, not duration."
+    else:
+        fleet = "IMPROVING — keep going."
+    return {"per_vehicle": per, "fleet": fleet, "rounds": n_rounds, "improving": improving}
