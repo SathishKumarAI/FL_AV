@@ -674,3 +674,34 @@ def test_fleet_check_catches_a_partition_mismatch(monkeypatch):
         {"vid": i, "condition": "night", "n_train": 300, "n_val": 60} for i in range(1, 11)])
     assert stages._check_fleet(Config(n_vehicles=6, partition="random")).satisfied is False
     assert stages._check_fleet(Config(n_vehicles=6, partition="condition")).satisfied is True
+
+
+def test_the_report_leads_with_the_metric_no_client_could_flatter(monkeypatch):
+    """A report that shows only self-evaluated numbers invites the comparison that
+    the holdout exists to prevent."""
+    from pipeline import baseline as _b, holdout as _h
+
+    monkeypatch.setattr(_h, "curve", lambda: {
+        "holdout": {"size": 1000},
+        "rounds": [{"round": 1, "mAP50": 0.35, "mAP50-95": 0.19, "precision": 0.5, "recall": 0.3},
+                   {"round": 2, "mAP50": 0.43, "mAP50-95": 0.24, "precision": 0.6, "recall": 0.4}]})
+    monkeypatch.setattr(_b, "gap", lambda: {
+        "federated_mAP50": 0.43, "centralised_mAP50": 0.50, "gap": 0.07, "retained": 0.86})
+
+    md = report.to_markdown(report.collect(config={"profile": "full"}))
+    assert "## The honest global metric" in md
+    assert "1000 images that no vehicle trained" in md
+    assert "0.4300" in md and "0.5000" in md and "86.0%" in md
+    # And the old number keeps its caveat rather than its old headline.
+    assert "per client, on its own split" in md
+
+
+def test_the_report_says_when_the_number_has_no_scale(monkeypatch):
+    from pipeline import baseline as _b, holdout as _h
+
+    monkeypatch.setattr(_h, "curve", lambda: {
+        "holdout": {"size": 500},
+        "rounds": [{"round": 1, "mAP50": 0.35, "mAP50-95": 0.19, "precision": 0.5, "recall": 0.3}]})
+    monkeypatch.setattr(_b, "gap", lambda: {})
+    md = report.to_markdown(report.collect(config={}))
+    assert "still has no scale" in md

@@ -15,7 +15,7 @@ import platform
 import time
 from pathlib import Path
 
-from . import gpu, logparse, paths, vehicle_metrics, vehicles
+from . import baseline, gpu, holdout, logparse, paths, vehicle_metrics, vehicles
 
 
 def collect(config: dict | None = None, telemetry: dict | None = None,
@@ -53,6 +53,9 @@ def collect(config: dict | None = None, telemetry: dict | None = None,
         "stages": results or [],
         "checkpoints": sorted(p.name for p in (paths.PROJECT / "checkpoints").glob("global_*.pt")),
         "learning": vehicle_metrics.summary(),
+        # The only numbers not measured by a client on its own distribution.
+        "holdout": holdout.curve(),
+        "baseline": baseline.gap(),
     }
 
 
@@ -100,9 +103,31 @@ def to_markdown(d: dict) -> str:
         L += ["| round | aggregate checksum |", "|---|---|"]
         L += [f"| {i} | {c} |" for i, c in enumerate(d["checksums"], 1)] + [""]
 
+    hold = (d.get("holdout") or {}).get("rounds") or []
+    if hold:
+        size = ((d.get("holdout") or {}).get("holdout") or {}).get("size", "?")
+        L += ["## The honest global metric", "",
+              f"Scored on a shared holdout of {size} images that no vehicle trained or "
+              f"self-evaluated on. Every other number in this report was measured by a "
+              f"client on its own distribution, so this is the one that can be compared "
+              f"between runs.", "",
+              "| round | mAP50 | mAP50-95 | precision | recall |", "|---|---|---|---|---|"]
+        for r in hold:
+            L.append(f"| {r.get('round')} | {r['mAP50']:.4f} | {r['mAP50-95']:.4f} | "
+                     f"{r['precision']:.3f} | {r['recall']:.3f} |")
+        L.append("")
+        gap = d.get("baseline") or {}
+        if gap:
+            L += [f"Centralised ceiling on the same images: **{gap['centralised_mAP50']:.4f}**. "
+                  f"The federation reaches **{gap['federated_mAP50']:.4f}**, retaining "
+                  f"**{100 * gap['retained']:.1f}%** of it (gap {gap['gap']:+.4f}).", ""]
+        else:
+            L += ["No centralised baseline for this budget yet, so this number still has "
+                  "no scale — run `python -m pipeline.baseline`.", ""]
+
     if d["metrics"]:
         keys = ["round", "stage", "loss", "precision", "recall", "mAP50", "mAP50-95"]
-        L += ["## Metrics", "", "| " + " | ".join(keys) + " |",
+        L += ["## Metrics — per client, on its own split", "", "| " + " | ".join(keys) + " |",
               "|" + "---|" * len(keys)]
         for r in d["metrics"]:
             L.append("| " + " | ".join(str(r.get(k, "")) for k in keys) + " |")
