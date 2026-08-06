@@ -282,6 +282,70 @@ def test_report_route_refuses_paths_outside_the_reports_dir():
     assert paths.REPORTS.resolve() in inside.parents
 
 
+def test_one_path_guard_covers_every_route_that_maps_a_url_to_a_file(tmp_path):
+    """Reports and shard images share `safe_child`; both traversals must fail."""
+    from pipeline import server
+
+    root = tmp_path / "root"
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "ok.jpg").write_bytes(b"x")
+    (tmp_path / "secret.txt").write_text("credentials")
+
+    assert server.safe_child(root, "sub/ok.jpg") == (root / "sub" / "ok.jpg").resolve()
+    assert server.safe_child(root, "../secret.txt") is None
+    assert server.safe_child(root, "..\\secret.txt") is None
+    assert server.safe_child(root, "sub") is None            # a directory is not a file
+    assert server.safe_child(root, "sub/missing.jpg") is None
+
+
+def test_every_file_the_dashboard_imports_is_servable():
+    """index.html references app.css and js/main.js; a 404 there renders a blank page."""
+    from pipeline import server
+
+    html = (server.STATIC / "index.html").read_text(encoding="utf-8")
+    referenced = re.findall(r'(?:href|src)="/static/([^"]+)"', html)
+    assert referenced, "index.html no longer references any static asset"
+    for rel in referenced:
+        target = server.safe_child(server.STATIC, rel)
+        assert target is not None, f"{rel} is referenced but not servable"
+        assert target.suffix in server.Handler.STATIC_TYPES, f"{rel} has no content type"
+
+    # And every module those modules import, one level of transitive closure deep.
+    for js in (server.STATIC / "js").glob("*.js"):
+        for imported in re.findall(r'from "\./([^"]+)"', js.read_text(encoding="utf-8")):
+            assert (server.STATIC / "js" / imported).is_file(), f"{js.name} imports missing {imported}"
+
+
+def test_shard_composition_counts_what_the_vehicle_actually_holds(tmp_path, monkeypatch):
+    """The condition label is a claim; this counts the images behind it."""
+    batches = tmp_path / "batch"
+    shard = batches / "batch_2"
+    (shard / "images" / "train").mkdir(parents=True)
+    (shard / "images" / "val").mkdir(parents=True)
+    (shard / "train.txt").write_text("a.jpg\nb.jpg\nc.jpg\n")
+    (shard / "images" / "train" / "a.jpg").write_bytes(b"x")
+    (shard / "images" / "val" / "v.jpg").write_bytes(b"x")
+
+    monkeypatch.setattr(paths, "VEHICLE_BATCHES", batches)
+    index = {"a.jpg": {"weather": "rainy", "scene": "city street", "timeofday": "night"},
+             "b.jpg": {"weather": "rainy", "scene": "highway", "timeofday": "night"}}
+    comp = vehicles.composition(2, index=index)
+
+    assert comp["n_train"] == 3 and comp["n_val"] == 1
+    assert comp["counts"]["weather"] == {"rainy": 2, "unknown": 1}
+    assert list(comp["counts"]["weather"]) == ["rainy", "unknown"]   # sorted by frequency
+    assert comp["samples"] == ["a.jpg"]         # only the image that exists on disk
+
+
+def test_composition_never_triggers_an_attribute_index_build(monkeypatch):
+    """It runs inside a request handler; streaming 1.45 GB of JSON there hangs the page."""
+    monkeypatch.setattr(vehicles, "build_attribute_index",
+                        lambda *a, **k: pytest.fail("composition must not build the index"))
+    monkeypatch.setattr(vehicles, "ATTR_CACHE", Path("does-not-exist.json"))
+    monkeypatch.setattr(vehicles, "_ATTR_MEMO", None)
+    assert vehicles.cached_attributes() == {}
+
+
 def test_live_state_is_derived_from_disk_not_from_the_event_bus(monkeypatch, tmp_path):
     """A run launched from the CLI must still light up the dashboard."""
     from pipeline import server, verify as _verify

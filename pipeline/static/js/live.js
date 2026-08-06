@@ -1,0 +1,195 @@
+// Live view: polling, the heartbeat, GPU readouts, criteria, reports, log stream.
+import { $, esc } from "./util.js";
+import { lineChart } from "./chart.js";
+import { state } from "./state.js";
+import { renderStages } from "./control.js";
+import { renderFleet } from "./fleet.js";
+
+const POLL_MS = 2000;
+
+export async function poll() {
+  try {
+    const s = await (await fetch("/api/state")).json();
+    $("skew").hidden = !!s.live;
+    state.cfg = s.config || {};
+    state.fleet = s.fleet || [];
+    state.learning = s.live && s.live.learning;
+    renderStages(s.stages);
+    renderGpu(s.gpu);
+    renderLive(s.live, s.config);
+    renderReports(s.reports);
+    renderFleet();
+    document.body.dataset.loaded = "1";
+    $("runState").textContent = s.busy ? (s.current || "running") : "idle";
+    $("runState").className = "lamp " + (s.busy ? "l-run" : "l-idle");
+    $("launch").disabled = s.busy;
+    $("stop").disabled = !s.busy;
+    $("mlflowLink").href = s.links.mlflow;
+    $("rayLink").href = s.links.ray;
+  } catch {
+    /* the server is restarting; the next tick catches up */
+  }
+  setTimeout(poll, POLL_MS);
+}
+
+function renderLive(L, cfg) {
+  if (!L) return;
+  const evald = (L.map50 || []).filter(v => v != null);
+  const losses = (L.loss || []).filter(v => v != null);
+  // The server's own config only describes runs launched from the form. A CLI run
+  // has its own round count, and printing "4/2" against it is a lie, so the total
+  // is shown only while it is still credible.
+  const planned = cfg && cfg.rounds != null && cfg.rounds >= L.rounds_done ? `/${cfg.rounds}` : "";
+  $("rRound").textContent    = `${L.rounds_done}${planned}`;
+  $("rVehicles").textContent = Object.keys(L.per_vehicle || {}).length || "0";
+  $("rMap").textContent      = evald.length ? evald[evald.length - 1].toFixed(4) : "—";
+  $("rLoss").textContent     = losses.length ? losses[losses.length - 1].toFixed(4) : "—";
+  $("rCkpt").textContent     = (L.checkpoints || []).length;
+  $("rBar").style.width = cfg && cfg.rounds
+    ? Math.min(100, 100 * L.rounds_done / cfg.rounds) + "%" : "0";
+
+  for (const [vid, v] of Object.entries(L.per_vehicle || {})) {
+    state.vehicles[vid] = Object.assign({}, state.vehicles[vid] || {}, v,
+      { training: String(L.training_now) === String(vid) });
+  }
+
+  $("criteria").innerHTML = (L.criteria || []).map(c => {
+    const cls = c.startsWith("[PASS]") ? "s-ok" : c.startsWith("[WARN]") ? "s-needs_confirm" : "s-failed";
+    const word = c.slice(1, c.indexOf("]"));
+    return `<li><span class="lamp ${cls}">${word}</span>` +
+           `<span style="color:var(--ink-2)">${esc(c.slice(c.indexOf("]") + 2))}</span></li>`;
+  }).join("") || '<li class="hint">No run has produced criteria yet.</li>';
+
+  lineChart("mapChart", {
+    series: [{ label: "mAP50", color: "var(--accent)", values: evald, area: true }],
+    aria: "Evaluated mAP50 by round", yFmt: v => v.toFixed(3),
+  });
+  $("mapNote").innerHTML = evald.length
+    ? "By round: " + evald.map(v => v.toFixed(4)).join(" → ") +
+      (evald.length > 1 ? ` <b>${evald[evald.length - 1] >= evald[0] ? "+" : ""}` +
+        `${(evald[evald.length - 1] - evald[0]).toFixed(4)} overall</b>` : "")
+    : "Waiting for the first evaluation. The federate stage produces this.";
+  if (L.no_optimizer_steps) {
+    $("mapNote").innerHTML += ` <span class="warn">${L.no_optimizer_steps} round(s) took no ` +
+      `optimizer step — the weights could not change.</span>`;
+  }
+
+  if ((L.checksums || []).length !== state.checksums.length) {
+    state.checksums = (L.checksums || []).slice();
+  }
+  drawHeartbeat();
+}
+
+/** The signature panel: the one number whose stillness invalidates every other one. */
+export function drawHeartbeat() {
+  const v = state.checksums;
+  lineChart("heartChart", {
+    series: [{ label: "checksum", color: "var(--accent)", values: v, area: true }],
+    aria: "Aggregate weight checksum by round",
+    yFmt: n => Math.abs(n) >= 1000 ? n.toFixed(0) : n.toFixed(2),
+  });
+
+  const lamp = $("heartLamp");
+  if (!v.length) {
+    lamp.className = "lamp l-idle";
+    lamp.textContent = "waiting";
+    $("heartValue").textContent = "—";
+    $("heartSub").textContent = "No aggregate yet. The federate stage produces one per round.";
+    return;
+  }
+  const stuck = new Set(v.map(n => n.toFixed(6))).size !== v.length;
+  const moving = v.length > 1 && !stuck;
+  lamp.className = "lamp " + (moving ? "l-ok" : stuck ? "l-bad" : "l-warn");
+  lamp.textContent = moving ? "moving" : stuck ? "stuck" : "one round";
+  $("heartValue").textContent = v[v.length - 1].toFixed(2);
+  $("heartSub").innerHTML = stuck
+    ? '<span class="warn">Two rounds aggregated to the same weights. Nothing is being learned.</span>'
+    : v.length > 1
+      ? `Δ ${(v[v.length - 1] - v[v.length - 2]).toFixed(2)} since the previous round, ` +
+        `over ${v.length} rounds.`
+      : "One round so far — two are needed before movement can be claimed.";
+}
+
+function renderGpu(g) {
+  if (!g) return;
+  $("gUtil").textContent   = g.util_pct ?? "—";
+  $("gMem").textContent    = g.mem_used_mib ? Math.round(g.mem_used_mib) : "—";
+  $("gPower").textContent  = g.power_w ?? "—";
+  $("gEnergy").textContent = (g.energy_wh ?? 0).toFixed(2);
+  $("gTemp").textContent   = g.temp_c ?? "—";
+  $("gUtilBar").style.width = (g.util_pct || 0) + "%";
+  const pct = g.mem_used_mib ? 100 * g.mem_used_mib / (g.mem_ceiling_mib || 16303) : 0;
+  $("gMemBar").style.width = Math.min(100, pct) + "%";
+  $("gMemBar").style.background = pct > 92 ? "var(--bad)" : pct > 75 ? "var(--warn)" : "var(--accent)";
+
+  const hist = g.history || [];
+  const maxP = Math.max.apply(null, [1].concat(hist.map(h => h.power || 0)));
+  lineChart("gpuChart", {
+    series: [{ label: "util %", color: "var(--accent)", values: hist.map(h => h.util || 0), area: true },
+             { label: "power W", color: "var(--warn)", values: hist.map(h => h.power || 0), dashed: true }],
+    xLabel: i => "t-" + (hist.length - i), zero: true, yFmt: v => v.toFixed(0),
+    aria: `GPU utilisation and power, last ${hist.length} samples, peak power ${maxP.toFixed(0)} watts`,
+  });
+}
+
+function renderReports(list) {
+  $("reports").innerHTML = (list && list.length)
+    ? list.map(r => `<li><a class="ext" href="${r.url}" target="_blank" rel="noopener">` +
+        `${esc(r.name)} ↗</a></li>`).join("")
+    : '<li class="hint">No reports yet. One is written at the end of every run.</li>';
+}
+
+// ---- event stream: the low-latency half, for the log and stage transitions ---
+const SIGNAL_HINTS = ["checksum", "batch_id", "Run finished", "optimizer step", "cuda", "mAP"];
+const looksStructured = (line) => SIGNAL_HINTS.some(h => line.includes(h));
+
+export function connectEvents() {
+  const es = new EventSource("/api/events");
+  es.onmessage = (m) => {
+    const ev = JSON.parse(m.data);
+    if (ev.kind === "log") {
+      if ($("onlySignals").checked && !looksStructured(ev.line)) return;
+      const pre = $("log");
+      pre.insertAdjacentHTML("beforeend", `<b>${esc(ev.stage)}</b> ${esc(ev.line)}\n`);
+      while (pre.childNodes.length > 600) pre.removeChild(pre.firstChild);
+      pre.scrollTop = pre.scrollHeight;
+    } else if (ev.kind === "signal") {
+      onSignal(ev);
+    } else if (ev.kind === "stage") {
+      state.current = ev.status === "running" ? ev.stage : null;
+      addTimeline(ev);
+    } else if (ev.kind === "run_end") {
+      addTimeline({ stage: "run", status: ev.ok ? "ok" : "failed", seconds: ev.seconds,
+                    detail: `energy ${(ev.gpu && ev.gpu.energy_wh) ?? 0} Wh` });
+    }
+  };
+}
+
+function onSignal(ev) {
+  if (ev.signal === "aggregate_checksum") {
+    state.checksums.push(ev.value);
+    drawHeartbeat();
+  }
+  if (ev.signal === "training_start") {
+    Object.values(state.vehicles).forEach(v => { v.training = false; });
+    state.vehicles[ev.value] = Object.assign({}, state.vehicles[ev.value] || {}, { training: true });
+    renderFleet();
+  }
+  if (ev.signal === "client_received_checksum" || ev.signal === "client_sent_checksum") {
+    const vid = Object.keys(state.vehicles).find(k => state.vehicles[k].training) || "?";
+    const key = ev.signal === "client_received_checksum" ? "received" : "sent";
+    state.vehicles[vid] = Object.assign({}, state.vehicles[vid] || {}, { [key]: ev.value });
+  }
+  if (ev.signal === "no_optimizer_step") {
+    $("heartSub").innerHTML = '<span class="warn">No optimizer step was possible this round — ' +
+      'the shard is too small for the batch size, so the weights cannot change.</span>';
+  }
+}
+
+function addTimeline(ev) {
+  $("timelineEmpty").hidden = true;
+  $("timeline").insertAdjacentHTML("beforeend",
+    `<tr><td>${esc(ev.stage)}</td><td><span class="lamp s-${esc(ev.status)}">${esc(ev.status)}</span></td>` +
+    `<td class="num">${ev.seconds ?? ""}</td><td class="num">${(ev.gpu && ev.gpu.energy_wh) ?? ""}</td>` +
+    `<td style="color:var(--dim);font-size:var(--t-sm)">${esc(ev.detail || "")}</td></tr>`);
+}

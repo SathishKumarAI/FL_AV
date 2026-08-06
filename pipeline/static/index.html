@@ -1,104 +1,32 @@
 <!doctype html>
+<!--
+  Markup only. Styling lives in app.css, behaviour in js/ — see static/README.md
+  for which file owns what, so a change means opening one file, not this one.
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Federated YOLOv8 — fleet control</title>
-<style>
-  :root{
-    --bg:#0d1117; --panel:#151b23; --line:#242c37; --ink:#e6edf3; --dim:#8b949e;
-    --accent:#4493f8; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --idle:#484f58;
-    --mono:ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
-  }
-  @media (prefers-color-scheme:light){
-    :root{--bg:#f6f8fa;--panel:#fff;--line:#d1d9e0;--ink:#1f2328;--dim:#59636e;--idle:#afb8c1}
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-       font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
-  header{display:flex;align-items:center;gap:16px;padding:12px 20px;
-         border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
-  h1{font-size:15px;margin:0;font-weight:600;letter-spacing:-.01em}
-  h1 span{color:var(--dim);font-weight:400}
-  .spacer{flex:1}
-  .tabs{display:flex;gap:4px}
-  .tab{padding:6px 14px;border-radius:6px;border:1px solid transparent;cursor:pointer;
-       background:none;color:var(--dim);font:inherit}
-  .tab[aria-selected=true]{background:var(--bg);border-color:var(--line);color:var(--ink)}
-  a.ext{color:var(--accent);text-decoration:none;font-size:13px}
-  a.ext:hover{text-decoration:underline}
-  main{padding:20px;max-width:1400px;margin:0 auto}
-  .grid{display:grid;gap:16px}
-  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
-  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);
-            margin:0 0 12px;font-weight:600}
-  label{display:block;font-size:12px;color:var(--dim);margin-bottom:4px}
-  input,select{width:100%;padding:7px 9px;background:var(--bg);color:var(--ink);
-               border:1px solid var(--line);border-radius:6px;font:inherit}
-  .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px}
-  button{padding:8px 16px;border-radius:6px;border:1px solid var(--line);background:var(--bg);
-         color:var(--ink);font:inherit;cursor:pointer}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
-  button:disabled{opacity:.45;cursor:not-allowed}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
-  th{color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
-  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;
-        font-family:var(--mono);border:1px solid}
-  .s-ok{color:var(--ok);border-color:var(--ok)}
-  .s-running{color:var(--accent);border-color:var(--accent)}
-  .s-failed,.s-aborted{color:var(--bad);border-color:var(--bad)}
-  .s-skipped{color:var(--dim);border-color:var(--idle)}
-  .s-pending{color:var(--idle);border-color:var(--idle)}
-  .s-needs_confirm{color:var(--warn);border-color:var(--warn)}
-  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
-  .veh{border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--bg)}
-  .veh.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-  .veh .name{font-weight:600;font-size:13px;display:flex;justify-content:space-between}
-  .veh .cond{color:var(--dim);font-size:12px;margin:2px 0 8px}
-  .kv{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;
-      color:var(--dim);padding:1px 0}
-  .kv b{color:var(--ink);font-weight:500}
-  .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:8px}
-  .bar>i{display:block;height:100%;background:var(--accent)}
-  pre{margin:0;max-height:340px;overflow:auto;font-family:var(--mono);font-size:11.5px;
-      line-height:1.55;color:var(--dim);white-space:pre-wrap;word-break:break-word}
-  pre b{color:var(--ink);font-weight:400}
-  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px}
-  .metric{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
-  .metric .n{font-size:19px;font-family:var(--mono);font-weight:600;letter-spacing:-.02em}
-  .metric .l{font-size:11px;color:var(--dim)}
-  .hint{font-size:12px;color:var(--dim);margin-top:8px}
-  .warn{color:var(--warn)}
-  svg{display:block;width:100%;height:auto}
-  .smalls{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
-  .small{border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg);cursor:pointer}
-  .small:hover{border-color:var(--accent)}
-  .small[data-sel=true]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-  .small .t{font-size:12px;font-weight:600;display:flex;justify-content:space-between;align-items:baseline}
-  .small .c{font-size:11px;color:var(--dim);margin-bottom:6px}
-  .small .d{font-family:var(--mono);font-size:11px}
-  .up{color:var(--ok)} .down{color:var(--bad)}
-  .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--dim);margin-top:8px}
-  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
-  [hidden]{display:none !important}
-</style>
+<link rel="stylesheet" href="/static/app.css">
+<!-- Inline so the tab icon costs no request and the console stays free of a 404. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%235ad1e6' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%235ad1e6'/%3E%3C/svg%3E">
 </head>
-<body>
+<body data-loaded="0">
 <header>
-  <h1>Federated YOLOv8 <span id="sub">— fleet control</span></h1>
-  <div class="tabs" role="tablist">
-    <button class="tab" role="tab" aria-selected="true"  data-view="control">Control</button>
-    <button class="tab" role="tab" aria-selected="false" data-view="live">Live</button>
+  <h1 class="brand">Federated&nbsp;YOLOv8 <em>fleet control</em></h1>
+  <div class="tabs" role="tablist" aria-label="Views">
+    <button class="tab" role="tab" aria-selected="true"  aria-controls="view-control" data-view="control">Control</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-live" data-view="live">Live</button>
   </div>
   <div class="spacer"></div>
-  <span class="pill s-pending" id="runState">idle</span>
+  <span class="lamp l-idle" id="runState">idle</span>
   <a class="ext" id="mlflowLink" href="http://127.0.0.1:5000" target="_blank" rel="noopener">MLflow ↗</a>
   <a class="ext" id="rayLink" href="http://127.0.0.1:8265" target="_blank" rel="noopener">Ray ↗</a>
 </header>
 
-<div id="skew" hidden style="margin:12px 20px;padding:10px 14px;border-radius:8px;
-     border:1px solid var(--bad);color:var(--bad);font-size:13px">
+<div id="skew" hidden role="alert" style="margin:var(--s3) var(--s5);padding:10px 14px;
+     border-radius:var(--r2);border:1px solid var(--bad);color:var(--bad);font-size:var(--t-md)">
   <b>This page is newer than the server it is talking to.</b>
   The HTML is read from disk on every request, but the running process still has the old
   Python loaded, so the live panels have no data to show. Restart it:
@@ -106,573 +34,184 @@
 </div>
 
 <main>
-  <!-- ------------------------------------------------ CONTROL -->
-  <section id="view-control" class="grid" style="grid-template-columns:minmax(300px,380px) 1fr">
-    <div class="panel">
-      <h2>Run configuration</h2>
-      <div class="row">
-        <div><label for="profile">Profile</label>
-          <select id="profile">
-            <option value="demo">demo — 300 img, 320px</option>
-            <option value="full">full — 6308 img, 640px</option>
-          </select></div>
-        <div><label for="vehicles">Vehicles</label><input id="vehicles" type="number" min="2" max="8" value="6"></div>
-      </div>
-      <div class="row" style="margin-top:12px">
-        <div><label for="rounds">Rounds</label><input id="rounds" type="number" min="1" value="2"></div>
-        <div><label for="epochs">Local epochs</label><input id="epochs" type="number" min="1" value="1"></div>
-        <div><label for="seed">Seed</label><input id="seed" type="number" value="0"></div>
-        <div><label for="partition">Partition</label>
-          <select id="partition">
-            <option value="condition">condition — non-IID</option>
-            <option value="random">random — IID control</option>
-            <option value="mixed">mixed — both</option>
-          </select></div>
-      </div>
-      <div style="margin-top:14px">
-        <label><input type="checkbox" id="confirm" style="width:auto"> Confirm the gated stages
-          (download, GPU sanity, federated run)</label>
-      </div>
-      <div style="margin-top:14px;display:flex;gap:8px">
-        <button class="primary" id="launch">Launch</button>
-        <button id="stop" disabled>Stop</button>
-      </div>
-      <p class="hint" id="estimate"></p>
-      <p class="hint warn">Vehicles train <b>serialised</b> — one client peaks at 15.9 GB of
-        16.3 GB, so concurrency would OOM. Wall clock scales with vehicle count.</p>
+<!-- ===================================================================== CONTROL -->
+<section id="view-control" class="grid two" role="tabpanel" aria-label="Control"
+         style="grid-template-columns:minmax(300px,400px) 1fr">
+  <div class="panel">
+    <h2>Run configuration</h2>
+    <div class="row">
+      <div><label for="profile">Profile</label>
+        <select id="profile">
+          <option value="demo">demo — 300 img, 320px</option>
+          <option value="full">full — 6308 img, 640px</option>
+        </select></div>
+      <div><label for="vehicles">Vehicles</label><input id="vehicles" type="number" min="2" max="8" value="6"></div>
     </div>
-
-    <div class="panel">
-      <h2>Stages</h2>
-      <table><thead><tr><th>Stage</th><th>State</th><th>Cost</th><th>Detail</th></tr></thead>
-        <tbody id="stageTable"></tbody></table>
-      <p class="hint">“skip” means the stage detected its work is already done. Gated stages
-        need the confirm box above.</p>
+    <div class="row" style="margin-top:var(--s3)">
+      <div><label for="rounds">Rounds</label><input id="rounds" type="number" min="1" value="2"></div>
+      <div><label for="epochs">Local epochs</label><input id="epochs" type="number" min="1" value="1"></div>
+      <div><label for="seed">Seed</label><input id="seed" type="number" value="0"></div>
+      <div><label for="partition">Partition</label>
+        <select id="partition">
+          <option value="condition">condition — non-IID</option>
+          <option value="random">random — IID control</option>
+          <option value="mixed">mixed — both</option>
+        </select></div>
     </div>
-  </section>
+    <div style="margin-top:var(--s4)">
+      <label class="check"><input type="checkbox" id="confirm">
+        <span>Confirm the gated stages — download, GPU sanity, federated run.</span></label>
+    </div>
+    <div style="margin-top:var(--s4);display:flex;gap:var(--s2)">
+      <button class="primary" id="launch">Launch run</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+    <p class="hint" id="estimate"></p>
+    <p class="hint warn">Vehicles train <b>serialised</b>. One client peaks at 15.9 GB of
+      16.3 GB, so running them together would run out of memory. Wall clock scales with
+      vehicle count.</p>
+  </div>
 
-  <!-- ------------------------------------------------ LIVE -->
-  <section id="view-live" class="grid" hidden>
-    <div class="panel">
-      <h2>GPU</h2>
-      <div class="metrics">
-        <div class="metric"><div class="n" id="gUtil">—</div><div class="l">utilisation %</div></div>
-        <div class="metric"><div class="n" id="gMem">—</div><div class="l">VRAM MiB / 16303</div></div>
-        <div class="metric"><div class="n" id="gPower">—</div><div class="l">power W</div></div>
-        <div class="metric"><div class="n" id="gEnergy">—</div><div class="l">energy Wh</div></div>
-        <div class="metric"><div class="n" id="gTemp">—</div><div class="l">temp °C</div></div>
+  <div class="panel">
+    <h2>Stages <span class="n" id="stageCount"></span></h2>
+    <table><thead><tr><th scope="col">Stage</th><th scope="col">State</th>
+      <th scope="col">Cost</th><th scope="col">Detail</th></tr></thead>
+      <tbody id="stageTable"></tbody></table>
+    <p class="hint"><b>skip</b> means the stage found its work already done.
+      <b>gated</b> means it needs the confirm box before it will run.</p>
+  </div>
+</section>
+
+<!-- ======================================================================== LIVE -->
+<section id="view-live" class="grid" hidden role="tabpanel" aria-label="Live">
+
+  <!-- The signature panel: the one number this project's history says is worth
+       more than all the others, given the size and position that says so. -->
+  <div class="panel">
+    <h2>Aggregate checksum — the heartbeat <span class="n">round over round</span></h2>
+    <div class="heart">
+      <div class="stat">
+        <span class="lamp l-idle" id="heartLamp">waiting</span>
+        <div class="big skel" id="heartValue">—</div>
+        <div class="sub" id="heartSub">No aggregate yet.</div>
       </div>
-      <div class="bar" title="VRAM against the measured ceiling"><i id="gMemBar" style="width:0"></i></div>
+      <figure>
+        <svg class="chart" id="heartChart" viewBox="0 0 900 130" role="img" tabindex="0"
+             aria-label="Aggregate weight checksum by round"></svg>
+      </figure>
     </div>
+    <p class="hint">Equal consecutive values mean the global model is not moving — either
+      the clients returned the weights they were sent, or no optimizer step happened.
+      Every other metric on this page can look healthy while that is true.</p>
+  </div>
 
+  <div class="grid two" style="grid-template-columns:1fr 1fr">
     <div class="panel">
       <h2>Round progress</h2>
-      <div class="metrics">
-        <div class="metric"><div class="n" id="rRound">&mdash;</div><div class="l">round</div></div>
-        <div class="metric"><div class="n" id="rVehicles">&mdash;</div><div class="l">vehicles seen</div></div>
-        <div class="metric"><div class="n" id="rMap">&mdash;</div><div class="l">latest mAP50</div></div>
-        <div class="metric"><div class="n" id="rLoss">&mdash;</div><div class="l">latest loss</div></div>
-        <div class="metric"><div class="n" id="rCkpt">&mdash;</div><div class="l">checkpoints</div></div>
+      <div class="readouts">
+        <div class="readout"><span class="v skel" id="rRound">—</span><div class="k">round</div></div>
+        <div class="readout"><span class="v skel" id="rVehicles">—</span><div class="k">vehicles seen</div></div>
+        <div class="readout"><span class="v skel" id="rMap">—</span><div class="k">latest mAP50</div></div>
+        <div class="readout"><span class="v skel" id="rLoss">—</span><div class="k">latest loss</div></div>
+        <div class="readout"><span class="v skel" id="rCkpt">—</span><div class="k">checkpoints</div></div>
       </div>
       <div class="bar"><i id="rBar" style="width:0"></i></div>
     </div>
 
     <div class="panel">
-      <h2>Pass criteria &mdash; live</h2>
-      <ul id="criteria" style="list-style:none;padding:0;margin:0;font-size:13px"></ul>
-      <p class="hint">The same four checks <code>pipeline.verify</code> runs. They read the logs
-        on disk, so they update whether the run was launched here or from the CLI.</p>
+      <h2>GPU</h2>
+      <div class="readouts">
+        <div class="readout"><span class="v skel" id="gUtil">—</span><span class="u">%</span>
+          <div class="k">utilisation</div><div class="scale"><i id="gUtilBar" style="width:0"></i></div></div>
+        <div class="readout"><span class="v skel" id="gMem">—</span><span class="u">MiB</span>
+          <div class="k">VRAM of 16303</div><div class="scale"><i id="gMemBar" style="width:0"></i></div></div>
+        <div class="readout"><span class="v skel" id="gPower">—</span><span class="u">W</span>
+          <div class="k">power</div></div>
+        <div class="readout"><span class="v skel" id="gEnergy">—</span><span class="u">Wh</span>
+          <div class="k">energy this run</div></div>
+        <div class="readout"><span class="v skel" id="gTemp">—</span><span class="u">°C</span>
+          <div class="k">temperature</div></div>
+      </div>
     </div>
+  </div>
 
+  <div class="panel">
+    <h2>Fleet <span class="n" id="fleetCount"></span></h2>
+    <div class="fleet" id="fleet"></div>
+    <p class="hint">One card per vehicle: the mAP50 it reaches on its own slice, and how far
+      that is from where it started. Open a card for its curves, its weight movement, and
+      what its shard actually contains.</p>
+  </div>
+
+  <div class="grid two" style="grid-template-columns:1fr 1fr">
     <div class="panel">
-      <h2>Evaluated mAP50 per round</h2>
-      <svg id="mapChart" viewBox="0 0 900 200" preserveAspectRatio="none"></svg>
+      <h2>Global model — evaluated mAP50</h2>
+      <figure><svg class="chart" id="mapChart" viewBox="0 0 900 220" role="img" tabindex="0"
+                   aria-label="Evaluated mAP50 by round"></svg></figure>
       <p class="hint" id="mapNote">Waiting for the first evaluation.</p>
     </div>
 
     <div class="panel">
-      <h2>How each vehicle is learning</h2>
-      <div class="smalls" id="smalls"></div>
-      <p class="hint">One card per vehicle: its own mAP50 across rounds, on a shared
-        scale so they are comparable. Click one to focus the loss curves below.</p>
+      <h2>Pass criteria — live</h2>
+      <ul class="plain" id="criteria"></ul>
+      <p class="hint">The same four checks <code>python -m pipeline.verify</code> runs. They
+        read the logs on disk, so a run launched from the CLI lights them up too.</p>
     </div>
+  </div>
 
-    <div class="panel">
-      <h2>Fleet comparison — divergence is the point</h2>
-      <svg id="fleetChart" viewBox="0 0 900 240" preserveAspectRatio="none"></svg>
-      <div class="legend" id="fleetLegend"></div>
-      <p class="hint">Every vehicle trains a different slice of the world. If these
-        curves overlapped exactly, the fleet would be learning nothing the pooled data
-        would not have taught it.</p>
-    </div>
+  <div class="panel">
+    <h2>Fleet comparison <span class="n">divergence is the point</span></h2>
+    <figure><svg class="chart" id="fleetChart" viewBox="0 0 900 260" role="img" tabindex="0"
+                 aria-label="mAP50 by round for every vehicle"></svg></figure>
+    <div class="legend" id="fleetLegend"></div>
+    <p class="hint">Every vehicle trains a different slice of the world. If these curves
+      overlapped exactly, the fleet would be learning nothing that pooling the data would
+      not have taught it.</p>
+  </div>
 
-    <div class="panel">
-      <h2>Divergence from fleet mean</h2>
-      <svg id="divChart" viewBox="0 0 900 180" preserveAspectRatio="none"></svg>
-      <p class="hint" id="divNote"></p>
-    </div>
+  <div class="panel">
+    <h2>Divergence from the fleet mean</h2>
+    <figure><svg class="chart" id="divChart" viewBox="0 0 900 190" role="img"
+                 aria-label="Signed distance from the fleet mean, per vehicle"></svg></figure>
+    <p class="hint" id="divNote"></p>
+  </div>
 
-    <div class="panel">
-      <h2>Loss curves — <span id="lossWho" style="text-transform:none">select a vehicle</span></h2>
-      <svg id="lossChart" viewBox="0 0 900 200" preserveAspectRatio="none"></svg>
-      <div class="legend">
-        <span><i style="background:var(--accent)"></i>box</span>
-        <span><i style="background:var(--warn)"></i>cls</span>
-        <span><i style="background:var(--ok)"></i>dfl</span>
-      </div>
-      <p class="hint" id="lossNote"></p>
-    </div>
-
-    <div class="panel">
-      <h2>Fleet</h2>
-      <div class="cards" id="fleetCards"></div>
-      <p class="hint">Each vehicle trains a condition-biased slice, so the curves are
-        expected to diverge — that divergence is what makes this federated rather than
-        merely distributed.</p>
-    </div>
-
-    <div class="panel">
-      <h2>Weight flow — does the global model actually move?</h2>
-      <svg id="chkChart" viewBox="0 0 900 200" preserveAspectRatio="none"></svg>
-      <p class="hint" id="chkNote">Waiting for the first aggregate.</p>
-    </div>
-
+  <div class="grid two" style="grid-template-columns:1fr 1fr">
     <div class="panel">
       <h2>Stage timeline</h2>
-      <table><thead><tr><th>Stage</th><th>Status</th><th>Seconds</th><th>Energy Wh</th><th>Detail</th></tr></thead>
+      <table><thead><tr><th scope="col">Stage</th><th scope="col">Status</th>
+        <th scope="col">Seconds</th><th scope="col">Wh</th><th scope="col">Detail</th></tr></thead>
         <tbody id="timeline"></tbody></table>
+      <p class="hint" id="timelineEmpty">Stages appear here as they run.</p>
     </div>
-
     <div class="panel">
       <h2>GPU history</h2>
-      <svg id="gpuChart" viewBox="0 0 900 160" preserveAspectRatio="none"></svg>
-      <p class="hint">Solid: utilisation %. Dashed: power draw, scaled to the peak seen.</p>
+      <figure><svg class="chart" id="gpuChart" viewBox="0 0 900 190" role="img"
+                   aria-label="GPU utilisation and power over time"></svg></figure>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>utilisation %</span>
+        <span><i style="background:var(--warn)"></i>power W</span>
+      </div>
     </div>
+  </div>
 
+  <div class="grid two" style="grid-template-columns:minmax(260px,340px) 1fr">
     <div class="panel">
       <h2>Reports</h2>
-      <ul id="reports" style="list-style:none;padding:0;margin:0;font-size:13px"></ul>
-      <p class="hint">Every run writes HTML + Markdown + JSON. Newest first.</p>
+      <ul class="plain" id="reports"></ul>
+      <p class="hint">Every run writes HTML, Markdown and JSON. Newest first.</p>
     </div>
-
     <div class="panel">
-      <h2>Log <span style="float:right;font-weight:400;text-transform:none;letter-spacing:0">
-        <label style="display:inline;color:var(--dim)"><input type="checkbox" id="onlySignals"
-          style="width:auto"> signals only</label></span></h2>
-      <pre id="log"></pre>
+      <h2>Log
+        <span class="n"><label class="check" style="display:inline-flex"><input type="checkbox"
+          id="onlySignals"> <span>signals only</span></label></span></h2>
+      <pre id="log" tabindex="0" aria-label="Run log"></pre>
     </div>
-  </section>
+  </div>
+</section>
 </main>
 
-<script>
-const $ = (id) => document.getElementById(id);
-const state = { checksums: [], vehicles: {}, current: null, stages: [] };
-
-// ---- tabs -----------------------------------------------------------------
-document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
-  document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x === t));
-  $("view-control").hidden = t.dataset.view !== "control";
-  $("view-live").hidden = t.dataset.view !== "live";
-});
-
-// ---- control --------------------------------------------------------------
-function config() {
-  return {
-    profile: $("profile").value,
-    vehicles: +$("vehicles").value,
-    rounds: +$("rounds").value,
-    epochs: +$("epochs").value,
-    seed: +$("seed").value,
-    partition: $("partition").value,
-    confirm: $("confirm").checked,
-  };
-}
-function estimate() {
-  const c = config();
-  const per = c.profile === "demo" ? 300 : 6308;
-  // ~919 s measured for 2 clients x 2 rounds x 1 epoch on 6308 images, serialised.
-  const secs = (per / 6308) * 230 * c.vehicles * c.rounds * c.epochs;
-  const m = Math.max(1, Math.round(secs / 60));
-  $("estimate").textContent =
-    `${c.vehicles} vehicles x ${per} images x ${c.rounds} rounds — very roughly ${m} min of GPU time.`;
-}
-["profile","vehicles","rounds","epochs"].forEach(id => $(id).oninput = estimate);
-estimate();
-
-$("launch").onclick = async () => {
-  $("launch").disabled = true;
-  const r = await fetch("/api/run", {method:"POST", headers:{"Content-Type":"application/json"},
-                                     body: JSON.stringify(config())});
-  if (!r.ok) { alert((await r.json()).error || "a run is already in flight"); $("launch").disabled = false; return; }
-  document.querySelector('.tab[data-view=live]').click();
-};
-$("stop").onclick = () => fetch("/api/stop", {method:"POST"});
-
-// ---- state polling --------------------------------------------------------
-async function poll() {
-  try {
-    const s = await (await fetch("/api/state")).json();
-    // The HTML is served fresh from disk but the process is long-lived, so a server
-    // started before an edit serves a new page backed by old code. That combination
-    // used to render every live panel blank with no explanation.
-    $("skew").hidden = !!s.live;
-    state.stages = s.stages;
-    renderStages(s.stages);
-    renderFleet(s.fleet);
-    renderGpu(s.gpu);
-    renderLive(s.live, s.config);
-    renderReports(s.reports);
-    renderLearning(s.live && s.live.learning);
-    $("runState").textContent = s.busy ? (s.current || "running") : "idle";
-    $("runState").className = "pill " + (s.busy ? "s-running" : "s-pending");
-    $("launch").disabled = s.busy;
-    $("stop").disabled = !s.busy;
-    $("mlflowLink").href = s.links.mlflow;
-    $("rayLink").href = s.links.ray;
-  } catch (e) { /* server restarting; the next tick will catch up */ }
-  setTimeout(poll, 2000);
-}
-
-function renderStages(rows) {
-  $("stageTable").innerHTML = rows.map(r => {
-    const cls = r.satisfied ? "s-skipped" : (r.gated ? "s-needs_confirm" : "s-pending");
-    const word = r.satisfied ? "skip" : (r.gated ? "gated" : "will run");
-    return `<tr><td><b>${r.name}</b><br><span style="color:var(--dim);font-size:12px">${r.title}</span></td>
-      <td><span class="pill ${cls}">${word}</span></td><td>${r.est}</td>
-      <td style="color:var(--dim);font-size:12px">${r.detail}</td></tr>`;
-  }).join("");
-}
-
-function renderFleet(fleet) {
-  if (!fleet || !fleet.length) {
-    $("fleetCards").innerHTML = `<p class="hint">No fleet built yet — run the <b>fleet</b> stage.</p>`;
-    return;
-  }
-  $("fleetCards").innerHTML = fleet.map(v => {
-    const live = state.vehicles[v.vid] || {};
-    const active = state.current === "federate" && live.training;
-    return `<div class="veh ${active ? "active" : ""}">
-      <div class="name">Vehicle ${v.vid}<span class="pill ${active ? "s-running" : "s-pending"}">${active ? "training" : "idle"}</span></div>
-      <div class="cond">${v.condition}</div>
-      <div class="kv"><span>train images</span><b>${v.n_train ?? "—"}</b></div>
-      <div class="kv"><span>val images</span><b>${v.n_val ?? "—"}</b></div>
-      <div class="kv"><span>received</span><b>${fmt(live.received)}</b></div>
-      <div class="kv"><span>sent back</span><b>${fmt(live.sent)}</b></div>
-      <div class="kv"><span>delta</span><b>${live.received != null && live.sent != null
-          ? fmt(live.sent - live.received) : "—"}</b></div>
-      <div class="kv"><span>rounds trained</span><b>${live.rounds ?? 0}</b></div>
-      <div class="kv"><span>device</span><b>${esc(live.device ?? "—")}</b></div>
-    </div>`;
-  }).join("");
-}
-const fmt = (x) => x == null ? "—" : (Math.abs(x) > 1e4 ? x.toExponential(3) : x.toFixed(3));
-
-function renderLive(L, cfg) {
-  if (!L) return;
-  const evald = (L.map50 || []).filter(v => v != null);
-  const losses = (L.loss || []).filter(v => v != null);
-  $("rRound").textContent    = L.rounds_done + "/" + (cfg.rounds != null ? cfg.rounds : "?");
-  $("rVehicles").textContent = Object.keys(L.per_vehicle || {}).length || "—";
-  $("rMap").textContent      = evald.length ? evald[evald.length - 1].toFixed(4) : "—";
-  $("rLoss").textContent     = losses.length ? losses[losses.length - 1].toFixed(4) : "—";
-  $("rCkpt").textContent     = (L.checkpoints || []).length;
-  $("rBar").style.width = cfg.rounds ? Math.min(100, 100 * L.rounds_done / cfg.rounds) + "%" : "0";
-
-  // Checksums come from disk, so a CLI-launched run still draws this chart.
-  if ((L.checksums || []).length > state.checksums.length) {
-    state.checksums = L.checksums.slice();
-    drawChecksums();
-  }
-  Object.entries(L.per_vehicle || {}).forEach(function (entry) {
-    const vid = entry[0], v = entry[1];
-    state.vehicles[vid] = Object.assign({}, state.vehicles[vid] || {}, v,
-      { training: String(L.training_now) === String(vid) });
-  });
-
-  $("criteria").innerHTML = (L.criteria || []).map(function (c) {
-    const cls = c.indexOf("[PASS]") === 0 ? "s-ok"
-              : c.indexOf("[WARN]") === 0 ? "s-needs_confirm" : "s-failed";
-    const word = c.slice(1, c.indexOf("]"));
-    return '<li style="padding:4px 0"><span class="pill ' + cls + '">' + word + '</span> ' +
-           '<span style="color:var(--dim)">' + esc(c.slice(c.indexOf("]") + 2)) + '</span></li>';
-  }).join("");
-
-  drawSeries("mapChart", evald, "var(--accent)");
-  $("mapNote").textContent = evald.length
-    ? "mAP50 by round: " + evald.map(function (v) { return v.toFixed(4); }).join("  →  ")
-    : "Waiting for the first evaluation.";
-  if (L.no_optimizer_steps) {
-    $("mapNote").innerHTML += ' <span class="warn">' + L.no_optimizer_steps +
-      ' round(s) took no optimizer step — the weights could not change.</span>';
-  }
-}
-
-const PALETTE = ["#4493f8","#d29922","#3fb950","#db61a2","#a371f7","#f85149",
-                "#2dd4bf","#f0883e","#8b949e","#6e7681"];
-let selectedVehicle = null;
-
-function renderLearning(L) {
-  if (!L) {
-    $("smalls").innerHTML = '<p class="hint">No learning data from the server ' +
-      '(is it running current code?).</p>';
-    return;
-  }
-  if (!L.trained || !L.trained.length) {
-    $("smalls").innerHTML = '<p class="hint">No vehicle has trained yet. Run the ' +
-      '<b>federate</b> stage.</p>';
-    return;
-  }
-  const series = {};
-  L.trained.forEach(function (vid) {
-    series[vid] = (L.rounds[vid] || []).map(function (r) { return r.mAP50; })
-                                       .filter(function (v) { return v != null; });
-  });
-  const all = Object.values(series).flat();
-  if (!all.length) return;
-  const lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
-
-  // Small multiples, shared scale so the cards are visually comparable.
-  $("smalls").innerHTML = L.trained.map(function (vid, i) {
-    const v = series[vid], colour = PALETTE[i % PALETTE.length];
-    const div = (L.divergence[vid] || []).slice(-1)[0];
-    const delta = v.length > 1 ? v[v.length-1] - v[0] : 0;
-    const share = ((L.contribution || {})[vid] || 0) * 100;
-    return '<div class="small" data-vid="' + vid + '" data-sel="' + (selectedVehicle === vid) + '">' +
-      '<div class="t"><span>Vehicle ' + vid + '</span>' +
-        '<span class="d ' + (delta >= 0 ? "up" : "down") + '">' +
-        (delta >= 0 ? "▲" : "▼") + Math.abs(delta).toFixed(4) + '</span></div>' +
-      '<div class="c">' + esc(L.conditions[vid] || "?") + '</div>' +
-      miniChart(v, lo, hi, colour) +
-      '<div class="d" style="display:flex;justify-content:space-between;margin-top:6px">' +
-        '<span>mAP ' + (v.length ? v[v.length-1].toFixed(4) : "—") + '</span>' +
-        '<span class="' + (div >= 0 ? "up" : "down") + '">' +
-        (div == null ? "" : (div >= 0 ? "+" : "") + div.toFixed(4)) + '</span>' +
-        '<span style="color:var(--dim)">' + share.toFixed(0) + '%</span>' +
-      '</div></div>';
-  }).join("");
-  document.querySelectorAll(".small").forEach(function (el) {
-    el.onclick = function () { selectedVehicle = el.dataset.vid; renderLearning(L); };
-  });
-
-  drawFleet(series, L, lo, hi);
-  drawDivergence(L);
-  drawLoss(L);
-}
-
-function miniChart(values, lo, hi, colour) {
-  if (!values.length) return '<svg viewBox="0 0 200 46"></svg>';
-  const W = 200, H = 46, pad = 5, span = (hi - lo) || 1;
-  const x = function (i) { return pad + (values.length === 1 ? (W-2*pad)/2 : i*(W-2*pad)/(values.length-1)); };
-  const y = function (v) { return H - pad - ((v - lo)/span)*(H - 2*pad); };
-  const pts = values.map(function (v, i) { return x(i) + "," + y(v); }).join(" ");
-  const dots = values.map(function (v, i) {
-    return '<circle cx="' + x(i) + '" cy="' + y(v) + '" r="2.5" fill="' + colour + '"/>';
-  }).join("");
-  return '<svg viewBox="0 0 ' + W + ' ' + H + '"><polyline points="' + pts +
-         '" fill="none" stroke="' + colour + '" stroke-width="2"/>' + dots + '</svg>';
-}
-
-function drawFleet(series, L, lo, hi) {
-  const W = 900, H = 240, pad = 34, span = (hi - lo) || 1;
-  const maxLen = Math.max.apply(null, Object.values(series).map(function (v) { return v.length; }));
-  const x = function (i) { return pad + (maxLen <= 1 ? (W-2*pad)/2 : i*(W-2*pad)/(maxLen-1)); };
-  const y = function (v) { return H - pad - ((v - lo)/span)*(H - 2*pad); };
-  let svg = '<line x1="' + pad + '" y1="' + (H-pad) + '" x2="' + (W-pad) + '" y2="' + (H-pad) +
-            '" stroke="var(--line)"/>';
-  L.trained.forEach(function (vid, i) {
-    const v = series[vid], colour = PALETTE[i % PALETTE.length];
-    if (!v.length) return;
-    svg += '<polyline points="' + v.map(function (p, j) { return x(j) + "," + y(p); }).join(" ") +
-           '" fill="none" stroke="' + colour + '" stroke-width="2.2" opacity="' +
-           (selectedVehicle && selectedVehicle !== vid ? 0.25 : 1) + '"/>';
-    svg += v.map(function (p, j) {
-      return '<circle cx="' + x(j) + '" cy="' + y(p) + '" r="3.5" fill="' + colour + '"/>';
-    }).join("");
-  });
-  $("fleetChart").innerHTML = svg;
-  $("fleetLegend").innerHTML = L.trained.map(function (vid, i) {
-    return '<span><i style="background:' + PALETTE[i % PALETTE.length] + '"></i>' +
-           vid + " · " + esc(L.conditions[vid] || "?") + '</span>';
-  }).join("");
-}
-
-function drawDivergence(L) {
-  const vids = L.trained, W = 900, H = 180, pad = 24;
-  const last = vids.map(function (v) { return (L.divergence[v] || []).slice(-1)[0] || 0; });
-  const mx = Math.max.apply(null, [0.0001].concat(last.map(Math.abs)));
-  const bw = (W - 2*pad) / Math.max(1, vids.length) * 0.62;
-  const mid = H / 2;
-  let svg = '<line x1="' + pad + '" y1="' + mid + '" x2="' + (W-pad) + '" y2="' + mid +
-            '" stroke="var(--line)"/>';
-  vids.forEach(function (vid, i) {
-    const d = last[i];
-    const cx = pad + (i + 0.5) * (W - 2*pad) / Math.max(1, vids.length);
-    const h = Math.abs(d) / mx * (mid - pad);
-    svg += '<rect x="' + (cx - bw/2) + '" y="' + (d >= 0 ? mid - h : mid) + '" width="' + bw +
-           '" height="' + Math.max(1, h) + '" fill="' + (d >= 0 ? "var(--ok)" : "var(--bad)") +
-           '" opacity="0.85"/>';
-    svg += '<text x="' + cx + '" y="' + (H - 6) + '" fill="var(--dim)" font-size="10" ' +
-           'text-anchor="middle">' + vid + '</text>';
-  });
-  $("divChart").innerHTML = svg;
-  const best = vids[last.indexOf(Math.max.apply(null, last))];
-  const worst = vids[last.indexOf(Math.min.apply(null, last))];
-  $("divNote").innerHTML = 'Ahead: <b>' + esc(L.conditions[best] || best) +
-    '</b>. Behind: <b>' + esc(L.conditions[worst] || worst) +
-    '</b>. Signed difference from the fleet mean on the latest round.';
-}
-
-function drawLoss(L) {
-  const vid = selectedVehicle || L.trained[0];
-  const rows = (L.epochs || {})[vid] || [];
-  $("lossWho").textContent = "vehicle " + vid + " · " + (L.conditions[vid] || "?");
-  if (!rows.length) {
-    $("lossChart").innerHTML = "";
-    $("lossNote").textContent = "No per-epoch data for this vehicle yet.";
-    return;
-  }
-  const keys = [["box_loss","var(--accent)"],["cls_loss","var(--warn)"],["dfl_loss","var(--ok)"]];
-  const all = keys.flatMap(function (k) {
-    return rows.map(function (r) { return r[k[0]]; }).filter(function (v) { return v != null; });
-  });
-  const lo = Math.min.apply(null, all), hi = Math.max.apply(null, all), span = (hi - lo) || 1;
-  const W = 900, H = 200, pad = 28;
-  const x = function (i) { return pad + (rows.length === 1 ? (W-2*pad)/2 : i*(W-2*pad)/(rows.length-1)); };
-  const y = function (v) { return H - pad - ((v - lo)/span)*(H - 2*pad); };
-  let svg = "";
-  keys.forEach(function (k) {
-    const pts = rows.map(function (r, i) {
-      return r[k[0]] == null ? null : x(i) + "," + y(r[k[0]]);
-    }).filter(Boolean).join(" ");
-    if (pts) svg += '<polyline points="' + pts + '" fill="none" stroke="' + k[1] + '" stroke-width="2"/>';
-  });
-  $("lossChart").innerHTML = svg;
-  $("lossNote").textContent = rows.length + " epoch(s). " + (L.epochs_note || "");
-}
-
-function renderReports(list) {
-  $("reports").innerHTML = (list && list.length)
-    ? list.map(function (r) {
-        return '<li style="padding:3px 0"><a class="ext" href="' + r.url +
-               '" target="_blank" rel="noopener">' + esc(r.name) + ' ↗</a></li>';
-      }).join("")
-    : '<li class="hint">No reports yet.</li>';
-}
-
-function drawSeries(id, values, colour, height) {
-  height = height || 200;
-  const svg = $(id);
-  if (!svg) return;
-  if (!values.length) { svg.innerHTML = ""; return; }
-  const W = 900, pad = 28;
-  const lo = Math.min.apply(null, values), hi = Math.max.apply(null, values);
-  const span = (hi - lo) || 1;
-  const x = function (i) { return pad + (values.length === 1 ? (W - 2*pad)/2 : i*(W - 2*pad)/(values.length - 1)); };
-  const y = function (v) { return height - pad - ((v - lo)/span)*(height - 2*pad); };
-  const pts = values.map(function (v, i) { return x(i) + "," + y(v); }).join(" ");
-  const dots = values.map(function (v, i) {
-    return '<circle cx="' + x(i) + '" cy="' + y(v) + '" r="3.5" fill="' + colour + '"/>';
-  }).join("");
-  svg.innerHTML = '<polyline points="' + pts + '" fill="none" stroke="' + colour +
-                  '" stroke-width="2"/>' + dots;
-}
-
-function drawGpuHistory(hist) {
-  const svg = $("gpuChart");
-  if (!svg || !hist || !hist.length) return;
-  const W = 900, H = 160, pad = 16;
-  const maxPower = Math.max.apply(null, [1].concat(hist.map(function (h) { return h.power || 0; })));
-  const x = function (i) { return pad + i*(W - 2*pad)/Math.max(1, hist.length - 1); };
-  const yU = function (v) { return H - pad - (v/100)*(H - 2*pad); };
-  const yP = function (v) { return H - pad - (v/maxPower)*(H - 2*pad); };
-  const u = hist.map(function (h, i) { return x(i) + "," + yU(h.util || 0); }).join(" ");
-  const p = hist.map(function (h, i) { return x(i) + "," + yP(h.power || 0); }).join(" ");
-  svg.innerHTML =
-    '<polyline points="' + u + '" fill="none" stroke="var(--accent)" stroke-width="1.8"/>' +
-    '<polyline points="' + p + '" fill="none" stroke="var(--warn)" stroke-width="1.4" stroke-dasharray="3 2"/>';
-}
-
-function renderGpu(g) {
-  if (!g) return;
-  $("gUtil").textContent   = g.util_pct   ?? "—";
-  $("gMem").textContent    = g.mem_used_mib ? Math.round(g.mem_used_mib) : "—";
-  $("gPower").textContent  = g.power_w    ?? "—";
-  $("gEnergy").textContent = (g.energy_wh ?? 0).toFixed(3);
-  $("gTemp").textContent   = g.temp_c     ?? "—";
-  const pct = g.mem_used_mib ? 100 * g.mem_used_mib / (g.mem_ceiling_mib || 16303) : 0;
-  $("gMemBar").style.width = Math.min(100, pct) + "%";
-  $("gMemBar").style.background = pct > 92 ? "var(--bad)" : pct > 75 ? "var(--warn)" : "var(--accent)";
-  drawGpuHistory(g.history);
-}
-
-// ---- checksum chart: the B4 guard, drawn ----------------------------------
-function drawChecksums() {
-  const v = state.checksums, svg = $("chkChart");
-  if (v.length < 1) return;
-  const W = 900, H = 200, pad = 30;
-  const min = Math.min(...v), max = Math.max(...v), span = (max - min) || 1;
-  const x = i => pad + (v.length === 1 ? (W - 2*pad)/2 : i * (W - 2*pad) / (v.length - 1));
-  const y = k => H - pad - ((k - min) / span) * (H - 2*pad);
-  const pts = v.map((k, i) => `${x(i)},${y(k)}`).join(" ");
-  const dots = v.map((k, i) =>
-    `<circle cx="${x(i)}" cy="${y(k)}" r="4" fill="var(--accent)"></circle>
-     <text x="${x(i)}" y="${y(k) - 12}" fill="var(--dim)" font-size="11" text-anchor="middle">r${i+1}</text>`).join("");
-  svg.innerHTML =
-    `<polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2"></polyline>${dots}`;
-  const stuck = new Set(v.map(n => n.toFixed(6))).size !== v.length;
-  $("chkNote").innerHTML = stuck
-    ? `<span class="warn"><b>Identical checksums across rounds.</b> Either the clients returned the
-       weights they were sent, or no optimizer step happened — raise local epochs.</span>`
-    : `Global weight checksum moves every round: ${v.map(n => n.toFixed(3)).join(" → ")}`;
-}
-
-// ---- event stream ---------------------------------------------------------
-const es = new EventSource("/api/events");
-es.onmessage = (m) => {
-  const ev = JSON.parse(m.data);
-  if (ev.kind === "log") {
-    if ($("onlySignals").checked && !looksStructured(ev.line)) return;
-    const pre = $("log");
-    pre.insertAdjacentHTML("beforeend", `<b>${esc(ev.stage)}</b> ${esc(ev.line)}\n`);
-    while (pre.childNodes.length > 600) pre.removeChild(pre.firstChild);
-    pre.scrollTop = pre.scrollHeight;
-  } else if (ev.kind === "signal") {
-    onSignal(ev);
-  } else if (ev.kind === "stage") {
-    state.current = ev.status === "running" ? ev.stage : null;
-    addTimeline(ev);
-  } else if (ev.kind === "run_end") {
-    addTimeline({stage: "run", status: ev.ok ? "ok" : "failed",
-                 seconds: ev.seconds, detail: `energy ${ev.gpu?.energy_wh ?? 0} Wh`});
-  }
-};
-function onSignal(ev) {
-  if (ev.signal === "aggregate_checksum") { state.checksums.push(ev.value); drawChecksums(); }
-  if (ev.signal === "training_start") {
-    Object.values(state.vehicles).forEach(v => v.training = false);
-    state.vehicles[ev.value] = {...(state.vehicles[ev.value] || {}), training: true};
-  }
-  if (ev.signal === "client_received_checksum" || ev.signal === "client_sent_checksum") {
-    const vid = Object.keys(state.vehicles).find(k => state.vehicles[k].training) || "?";
-    const key = ev.signal === "client_received_checksum" ? "received" : "sent";
-    state.vehicles[vid] = {...(state.vehicles[vid] || {}), [key]: ev.value};
-  }
-  if (ev.signal === "no_optimizer_step") {
-    $("chkNote").innerHTML = `<span class="warn"><b>No optimizer step possible this round.</b>
-      The shard is too small for the batch size — the weights cannot change.</span>`;
-  }
-}
-function addTimeline(ev) {
-  $("timeline").insertAdjacentHTML("beforeend",
-    `<tr><td>${esc(ev.stage)}</td><td><span class="pill s-${ev.status}">${ev.status}</span></td>
-     <td>${ev.seconds ?? ""}</td><td>${ev.gpu?.energy_wh ?? ""}</td>
-     <td style="color:var(--dim);font-size:12px">${esc(ev.detail || "")}</td></tr>`);
-}
-const SIGNAL_HINTS = ["checksum", "batch_id", "Run finished", "optimizer step", "cuda", "mAP"];
-const looksStructured = (line) => SIGNAL_HINTS.some(h => line.includes(h));
-const esc = (s) => String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
-
-poll();
-</script>
+<div id="tip" hidden></div>
+<script type="module" src="/static/js/main.js"></script>
 </body>
 </html>

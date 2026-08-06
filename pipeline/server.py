@@ -26,6 +26,19 @@ STATIC = Path(__file__).resolve().parent / "static"
 HISTORY_LIMIT = 500
 
 
+def safe_child(root: Path, rel: str) -> Path | None:
+    """``root/rel`` if it is a real file genuinely under ``root``, else None.
+
+    One guard for every route that maps a URL onto a path. Written once because two
+    copies of a traversal check is one copy too many: `/reports/../../secret` and
+    `/api/shard-image/1/../../../secret` are the same bug.
+    """
+    target = (root / rel).resolve()
+    if not target.is_file() or root.resolve() not in target.parents:
+        return None
+    return target
+
+
 class Broadcaster:
     """Fan one Run's event queue out to every connected browser."""
 
@@ -201,15 +214,62 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(STATE.snapshot(CONFIG))
         if self.path == "/api/events":
             return self._sse()
+        if self.path.startswith("/static/"):
+            return self._static()
+        if self.path.startswith("/api/vehicle/"):
+            return self._vehicle()
+        if self.path.startswith("/api/shard-image/"):
+            return self._shard_image()
         if self.path.startswith("/reports/"):
             return self._report_file()
         self._json({"error": "not found"}, 404)
 
+    #: Only what the dashboard is made of. An unknown suffix is a 404, not an
+    #: octet-stream download, so a stray file here cannot be exfiltrated by URL.
+    STATIC_TYPES = {
+        ".css": "text/css; charset=utf-8",
+        ".js": "text/javascript; charset=utf-8",
+        ".html": "text/html; charset=utf-8",
+        ".svg": "image/svg+xml",
+    }
+
+    def _static(self) -> None:
+        """Serve the dashboard's own CSS and JS modules, straight off disk.
+
+        Read per request on purpose: an edit is live on reload, which is what makes
+        a no-build-step page worth having.
+        """
+        target = safe_child(STATIC, self.path[len("/static/"):].split("?")[0])
+        if target is None or target.suffix not in self.STATIC_TYPES:
+            return self._json({"error": "not found"}, 404)
+        self._send(200, target.read_bytes(), self.STATIC_TYPES[target.suffix])
+
+    def _vehicle(self) -> None:
+        """Shard composition for one vehicle, for the detail drawer."""
+        try:
+            vid = int(self.path.rsplit("/", 1)[-1].split("?")[0])
+        except ValueError:
+            return self._json({"error": "vehicle id must be an integer"}, 400)
+        self._json(vehicles.composition(vid))
+
+    def _shard_image(self) -> None:
+        """One image out of one vehicle's shard: what its condition looks like."""
+        rel = self.path[len("/api/shard-image/"):].split("?")[0]
+        vid, _, name = rel.partition("/")
+        if not vid.isdigit():
+            return self._json({"error": "vehicle id must be an integer"}, 400)
+        root = paths.VEHICLE_BATCHES / f"batch_{int(vid)}" / "images" / "train"
+        target = safe_child(root, name)
+        if target is None:
+            return self._json({"error": "not found"}, 404)
+        ctype = "image/png" if target.suffix.lower() == ".png" else "image/jpeg"
+        self._send(200, target.read_bytes(), ctype)
+
     def _report_file(self) -> None:
         """Serve a generated report, refusing anything outside the reports dir."""
         rel = self.path[len("/reports/"):].split("?")[0]
-        target = (paths.REPORTS / rel).resolve()
-        if not target.is_file() or paths.REPORTS.resolve() not in target.parents:
+        target = safe_child(paths.REPORTS, rel)
+        if target is None:
             return self._json({"error": "not found"}, 404)
         ctype = "text/html; charset=utf-8" if target.suffix == ".html" else "text/plain; charset=utf-8"
         self._send(200, target.read_bytes(), ctype)

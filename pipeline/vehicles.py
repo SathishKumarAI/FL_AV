@@ -235,6 +235,66 @@ def load_fleet() -> list[dict]:
     return json.loads(f.read_text()) if f.exists() else []
 
 
+# --------------------------------------------------------------------------
+# What a shard actually contains
+# --------------------------------------------------------------------------
+_ATTR_MEMO: dict | None = None
+
+
+def cached_attributes() -> dict:
+    """The attribute index if it has already been built, else ``{}``.
+
+    Deliberately never builds it: this is called from a request handler, and
+    streaming the 1.45 GB label JSON there would hang the page for minutes with no
+    way to see why. An empty index degrades to "unknown", which is honest.
+    """
+    global _ATTR_MEMO
+    if _ATTR_MEMO is None:
+        _ATTR_MEMO = json.loads(ATTR_CACHE.read_text()) if ATTR_CACHE.exists() else {}
+    return _ATTR_MEMO
+
+
+def composition(vid: int, samples: int = 8, index: dict | None = None) -> dict:
+    """Attribute breakdown of one vehicle's own shard, plus a few image names.
+
+    "Vehicle 3 is the rain / fog one" is a claim about the data, and until now the
+    only evidence for it was the label the assignment printed. This counts what the
+    shard holds, so a condition that silently topped up with random images shows as
+    the mixture it is.
+    """
+    bd = paths.VEHICLE_BATCHES / f"batch_{vid}"
+    if not bd.is_dir():
+        return {"vid": vid, "error": "no shard for this vehicle"}
+
+    listing = bd / "train.txt"
+    names = [n.strip() for n in listing.read_text().splitlines() if n.strip()] if listing.exists() else []
+    index = cached_attributes() if index is None else index
+
+    counts: dict[str, dict[str, int]] = {"weather": {}, "scene": {}, "timeofday": {}}
+    for name in names:
+        attrs = index.get(name) or {}
+        for key, bucket in counts.items():
+            value = attrs.get(key) or "unknown"
+            bucket[value] = bucket.get(value, 0) + 1
+
+    train_dir = bd / "images" / "train"
+    present: list[str] = []
+    for name in names:
+        if len(present) >= samples:
+            break
+        if (train_dir / name).is_file():
+            present.append(name)
+
+    return {
+        "vid": vid,
+        "n_train": len(names),
+        "n_val": paths.count_files(bd / "images" / "val"),
+        "indexed": bool(index),
+        "counts": {k: dict(sorted(v.items(), key=lambda kv: -kv[1])) for k, v in counts.items()},
+        "samples": present,
+    }
+
+
 def demo() -> None:
     """Self-check on a synthetic index: bias applied, slices disjoint, deterministic."""
     index = {}
