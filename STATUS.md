@@ -42,6 +42,44 @@ city 0.4513, v8 parking/tunnel 0.4324, v10 night 0.4243, v2 night 0.4163, v5
 dawn/dusk 0.4069. Spread is the point — those are different distributions, which is
 exactly why the holdout had to exist.
 
+## The centralised ceiling, and why the retention figure is a lower bound
+
+`pipeline/.state/baseline-14000img-24ep.json`: **0.4771 mAP50 / 0.2659 mAP50-95** on
+the same holdout. Against the federation's 0.4334 that is a gap of 0.0437, and the
+federation retains **90.8%** of it.
+
+Read that as a **lower bound**, not the result. The run pooled all ten materialised
+shards, not the six that trained, so it saw 14 000 images for 24 epochs -- 336 000
+image-visits against the federation's 201 600, a 1.667x advantage in data *and*
+compute. `pooled_names()` now defaults to the shards that actually trained and the
+CLI prints the parity ratio, so the next one is matched by construction.
+
+**To get the matched number** (about 90 min, and it needs a fresh federation because
+the fleet has since been rebuilt):
+
+```powershell
+.\scriptsun_pipeline.ps1 -Profile full -Vehicles 6 -PerVehicle 1400 -Rounds 6 -Epochs 4 -Baseline
+```
+
+## Running it standalone found seven defects that never showed interactively
+
+Every one of these only appears when the pipeline is driven by a script rather than
+typed into a shell, which is how anyone reproducing this project would run it.
+
+| | Defect | Why it hid |
+|---|---|---|
+| 1 | `python -m ultralytics.cfg` stopped being executable in ultralytics 8.4 | the sanity stage had a marker and was being skipped |
+| 2 | sanity trained on `data.runtime.yaml`, which a *client* writes at runtime | it only passed where a client had already run |
+| 3 | the runner's output thread died on a cp1252-unencodable line | redirected stdout only |
+| 4 | `flwr` resolved from PATH | an activated venv has it; a script's shell does not |
+| 5 | flwr's own banner emoji killed it under cp1252 | same |
+| 6 | flwr launches `flower-superlink` from PATH too | our children spawn children |
+| 7 | the holdout scorer mixed this run's checkpoints with the last run's | the directory is never cleared |
+
+An eighth, found while reading the output: the checksum criterion concatenated every
+server log it could find, so a three-round run was judged on eleven checksums from
+three runs.
+
 - **Next action:** read `pipeline/.state/baseline.json` — a centralised model was
   training on the pooled 8 400 images for 24 epochs (the same image-visits the fleet
   made) when this was written. `python -m pipeline.baseline` prints the gap and what
@@ -50,7 +88,16 @@ exactly why the holdout had to exist.
 
   Then: backlog 42 (seeds — one run is an anecdote), 31 (the rounds × epochs sweep at
   constant product), 27 and 30 (freeze the backbone for round 1, LR schedule for
-  short rounds — both ⚠, both in `docs/ML_PLAN.md`).
+  short rounds — both ⚠, both in `docs/ML_PLAN.md`). Each is now one command:
+  `python -m pipeline.experiment --preset seeds --seeds 0,1,2 --yes`.
+
+  A first real comparison is already on disk
+  (`pipeline/.state/experiments/20260806-034438.md`): fedavg vs fedadam at demo scale,
+  same fleet fingerprint `a0b504089c0e`, 2 rounds × 1 epoch. fedavg 0.0042 holdout
+  mAP50, fedadam 0.0000. Too small a budget to conclude anything about the
+  strategies — at 2 rounds the server-side optimiser has not had time to help — but
+  it demonstrates the machinery: one setting varied, identical data proven by the
+  fingerprint, both scored on the same held-out images.
 
 ## What exists now that did not before
 
