@@ -56,8 +56,13 @@
           <option value="condition">condition — non-IID</option>
           <option value="random">random — IID control</option>
           <option value="mixed">mixed — both</option>
+          <option value="dirichlet">dirichlet — tunable α</option>
         </select></div>
+      <div id="alphaWrap" hidden><label for="alpha">Dirichlet α</label>
+        <input id="alpha" type="number" min="0.01" step="0.05" value="0.5"></div>
     </div>
+    <p class="hint" id="alphaNote" hidden>α → 0 gives each vehicle a single condition;
+      α → ∞ gives them all the same mixture, which is IID.</p>
     <div style="margin-top:var(--s4)">
       <label class="check"><input type="checkbox" id="confirm">
         <span>Confirm the gated stages — download, GPU sanity, federated run.</span></label>

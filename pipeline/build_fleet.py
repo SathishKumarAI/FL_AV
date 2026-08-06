@@ -26,7 +26,11 @@ def main(argv=None) -> int:
     ap.add_argument("--val-per-vehicle", type=int, default=0, help="0 = per-vehicle/5")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--partition", default="condition", choices=vehicles.PARTITIONS,
-                    help="condition = non-IID (default); random = IID control; mixed = both")
+                    help="condition = non-IID (default); random = IID control; "
+                         "mixed = both; dirichlet = tunable skew via --alpha")
+    ap.add_argument("--alpha", type=float, default=0.5,
+                    help="dirichlet concentration: 0.05 = one condition per vehicle, "
+                         "100 = effectively IID")
     args = ap.parse_args(argv)
 
     names, nc = class_names()
@@ -41,8 +45,14 @@ def main(argv=None) -> int:
     n_shards = max(args.vehicles, len(list(paths.BATCH_IDS)))
     fleet = vehicles.assign(n_shards, args.per_vehicle,
                             val_per_vehicle=args.val_per_vehicle, seed=args.seed, index=index,
-                            partition=args.partition)
-    root = vehicles.materialise(fleet, names, nc)
+                            partition=args.partition, alpha=args.alpha)
+    root = vehicles.materialise(fleet, names, nc, meta={
+        "partition": args.partition,
+        "alpha": args.alpha if args.partition == "dirichlet" else None,
+        "seed": args.seed,
+        "per_vehicle": args.per_vehicle,
+        "n_shards": n_shards,
+    })
 
     for v in fleet:
         used = " (in this run)" if v.vid <= args.vehicles else ""

@@ -29,7 +29,8 @@ class Config:
     rounds: int = 2
     local_epochs: int = 1
     seed: int = 0
-    partition: str = "condition"     # condition (non-IID) | random (IID) | mixed
+    partition: str = "condition"     # any key of vehicles.PARTITIONERS
+    alpha: float = 0.5               # dirichlet only: smaller = more skewed
     per_vehicle_override: int = 0    # 0 = use the profile default
     ray_address: str | None = None   # set => attach to an existing head node
 
@@ -152,10 +153,25 @@ def _check_fleet(cfg: Config) -> Check:
         return Check(False, f"fleet has {len(fleet)} shards, need {want} "
                             f"(the server can assign any id in {tuple(paths.BATCH_IDS)[0]}.."
                             f"{tuple(paths.BATCH_IDS)[-1]})")
-    want_random = cfg.partition == "random"
-    is_random = all(v.get("condition") == "random mix" for v in fleet) if fleet else False
-    if fleet and want_random != is_random:
-        return Check(False, f"fleet was built with a different partition than {cfg.partition!r}")
+    meta = vehicles.load_fleet_meta()
+    if meta:
+        # The manifest says how this fleet was built, so intent is compared rather
+        # than guessed. Alpha counts only where it means something.
+        differs = [k for k, want in (("partition", cfg.partition), ("seed", cfg.seed),
+                                     ("per_vehicle", cfg.per_vehicle)) if meta.get(k) != want]
+        if cfg.partition == "dirichlet" and meta.get("alpha") != cfg.alpha:
+            differs.append("alpha")
+        if differs:
+            return Check(False, "fleet on disk differs in " + ", ".join(differs) +
+                                f" (built {meta.get('partition')!r}, want {cfg.partition!r})")
+    else:
+        # Pre-manifest fleet: fall back to the old inference, which can only
+        # distinguish random from everything else.
+        want_random = cfg.partition == "random"
+        is_random = all(v.get("condition") == "random mix" for v in fleet)
+        if want_random != is_random:
+            return Check(False, f"fleet was built with a different partition than {cfg.partition!r}")
+
     short = [v for v in fleet if v.get("n_train", 0) < cfg.per_vehicle]
     if short:
         return Check(False, f"{len(short)} vehicle(s) below {cfg.per_vehicle} images")
@@ -209,7 +225,8 @@ def _cmd_fleet(cfg: Config) -> list[str]:
             "--vehicles", str(cfg.n_vehicles),
             "--per-vehicle", str(cfg.per_vehicle),
             "--seed", str(cfg.seed),
-            "--partition", cfg.partition]
+            "--partition", cfg.partition,
+            "--alpha", str(cfg.alpha)]
 
 
 def _cmd_sanity(cfg: Config) -> list[str]:

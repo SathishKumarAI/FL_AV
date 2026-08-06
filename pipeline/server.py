@@ -315,8 +315,14 @@ class Handler(BaseHTTPRequestHandler):
                 local_epochs=int(body.get("epochs", 1)),
                 seed=int(body.get("seed", 0)),
                 partition=body.get("partition", "condition"),
+                alpha=float(body.get("alpha", 0.5) or 0.5),
                 ray_address=body.get("ray_address") or None,
             )
+            if CONFIG.partition not in vehicles.PARTITIONS:
+                # Rejected here rather than three subprocesses later, where it would
+                # surface as a stage failure with the real cause buried in a log.
+                return self._json({"error": f"unknown partition {CONFIG.partition!r}; "
+                                            f"known: {', '.join(vehicles.PARTITIONS)}"}, 400)
             try:
                 chain = stages.resolve(body.get("stages"))
             except SystemExit as e:

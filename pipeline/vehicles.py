@@ -98,64 +98,210 @@ def _available(split_dir: Path) -> set[str]:
 # --------------------------------------------------------------------------
 # Assignment
 # --------------------------------------------------------------------------
-PARTITIONS = ("condition", "random", "mixed")
+@dataclass
+class Request:
+    """One fleet's worth of parameters. What every partitioner is handed."""
+
+    n_vehicles: int
+    per_vehicle: int
+    val_per_vehicle: int
+    index: dict
+    train_pool: set[str]
+    val_pool: set[str]
+    alpha: float = 0.5          # dirichlet only: smaller = more skewed
+
+
+#: name -> partitioner. Registering is the only step needed to make a strategy
+#: reachable from the CLI, the dashboard and the fleet check -- all three read
+#: PARTITIONS, which is this dict's keys.
+PARTITIONERS: dict[str, callable] = {}
+
+
+def partitioner(name: str):
+    """Register a partition strategy: ``fn(req: Request, rng) -> list[Vehicle]``.
+
+    A partitioner must be deterministic given ``rng`` and must hand out disjoint
+    slices -- overlap would let one image train two vehicles in a round, which is
+    not what a fleet does and would quietly flatter the aggregate.
+    """
+    def register(fn):
+        PARTITIONERS[name] = fn
+        return fn
+    return register
+
+
+def _picker(req: Request, rng, used: set[str]):
+    """Take `want` unused images matching a predicate, topping up if short."""
+    def pick(pool: set[str], want: int, matches) -> list[str]:
+        on = [n for n in pool if n not in used and matches(req.index.get(n, {}))]
+        rng.shuffle(on)
+        chosen = on[:want]
+        if len(chosen) < want:
+            # Not enough images match this condition -- top up with anything unused
+            # so the vehicle still trains, and let the caller see the shortfall in
+            # the summary rather than silently getting a tiny shard.
+            rest = [n for n in pool if n not in used and n not in set(chosen)]
+            rng.shuffle(rest)
+            chosen += rest[: want - len(chosen)]
+        used.update(chosen)
+        return sorted(chosen)
+    return pick
+
+
+def _by_profile(req: Request, rng, profile_for) -> list[Vehicle]:
+    """Shared body of every predicate-based partitioner."""
+    used: set[str] = set()
+    out: list[Vehicle] = []
+    pick = _picker(req, rng, used)
+    for i in range(req.n_vehicles):
+        label, matches = profile_for(i)
+        out.append(Vehicle(i + 1, label,
+                           pick(req.train_pool, req.per_vehicle, matches),
+                           pick(req.val_pool, req.val_per_vehicle, matches)))
+    return out
+
+
+@partitioner("condition")
+def _assign_condition(req: Request, rng) -> list[Vehicle]:
+    """Each vehicle biased toward one driving condition. The interesting case:
+    divergence between vehicles is the expected result."""
+    return _by_profile(req, rng, lambda i: PROFILES[i % len(PROFILES)])
+
+
+ANY = (lambda a: True)
+
+
+@partitioner("random")
+def _assign_random(req: Request, rng) -> list[Vehicle]:
+    """Uniform random slices. IID, and the control: these curves *should* converge,
+    and if they do not, something other than the data is going on."""
+    return _by_profile(req, rng, lambda i: ("random mix", ANY))
+
+
+@partitioner("mixed")
+def _assign_mixed(req: Request, rng) -> list[Vehicle]:
+    """Alternating, so one run shows both behaviours side by side."""
+    return _by_profile(req, rng,
+                       lambda i: ("random mix", ANY) if i % 2 else PROFILES[i % len(PROFILES)])
+
+
+# ---------------------------------------------------------------- dirichlet
+def _group_of(attrs: dict) -> str:
+    """Which condition an image belongs to, by the same predicates PROFILES uses.
+
+    One definition of "a driving condition" for the whole package: if a profile's
+    predicate changes, the Dirichlet groups change with it.
+    """
+    for label, matches in PROFILES:
+        if matches(attrs):
+            return label
+    return "other"
+
+
+def _groups(pool: set[str], index: dict) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for name in pool:
+        out.setdefault(_group_of(index.get(name, {})), []).append(name)
+    for names in out.values():
+        names.sort()                      # deterministic before any shuffle
+    return out
+
+
+def _dirichlet_draw(k: int, alpha: float, rng) -> list[float]:
+    """A Dir(alpha) sample over k categories, from stdlib gammas.
+
+    Dir(alpha) is k independent Gamma(alpha, 1) draws normalised -- no numpy needed,
+    and one fewer import that has to exist inside a Ray worker.
+    """
+    xs = [rng.gammavariate(alpha, 1.0) for _ in range(k)]
+    total = sum(xs) or 1.0
+    return [x / total for x in xs]
+
+
+@partitioner("dirichlet")
+def _assign_dirichlet(req: Request, rng) -> list[Vehicle]:
+    """Each vehicle draws its own mixture over conditions from Dir(alpha).
+
+    alpha -> 0 concentrates a vehicle on a single condition; alpha -> infinity gives
+    every vehicle the same mixture, which is IID. This is the knob FL papers report
+    against, so a run here can be compared with published ones.
+
+    The per-client-mixture variant is used rather than the per-group split, so shard
+    sizes stay equal: quantity skew and distribution skew are different experiments
+    and mixing them makes neither readable. See docs/prompts/2026-08-06-dirichlet-
+    partition.md for the rejected variant.
+    """
+    if req.alpha <= 0:
+        raise ValueError(f"dirichlet alpha must be > 0, got {req.alpha}")
+
+    train_groups = _groups(req.train_pool, req.index)
+    val_groups = _groups(req.val_pool, req.index)
+    keys = sorted(train_groups)
+    used: set[str] = set()
+    out: list[Vehicle] = []
+
+    def take(groups: dict[str, list[str]], shares: list[float], want: int) -> list[str]:
+        chosen: list[str] = []
+        for key, share in zip(keys, shares):
+            # Clamped to what is left: rounding each group's share independently can
+            # sum to more than the budget, which would hand one vehicle a bigger
+            # shard than another and turn the FedAvg weights into a second variable.
+            quota = min(int(round(share * want)), want - len(chosen))
+            available = [n for n in groups.get(key, []) if n not in used]
+            rng.shuffle(available)
+            picked = available[:quota]
+            used.update(picked)
+            chosen += picked
+        if len(chosen) < want:               # rounding, or a group ran dry
+            rest = [n for names in groups.values() for n in names if n not in used]
+            rng.shuffle(rest)
+            top_up = rest[: want - len(chosen)]
+            used.update(top_up)
+            chosen += top_up
+        return sorted(chosen)
+
+    for i in range(req.n_vehicles):
+        shares = _dirichlet_draw(len(keys), req.alpha, rng)
+        train = take(train_groups, shares, req.per_vehicle)
+        val = take(val_groups, shares, req.val_per_vehicle)
+
+        # Label by what the vehicle actually got, not by what was drawn: a group
+        # that ran dry is exactly the case a label must not hide.
+        got: dict[str, int] = {}
+        for name in train:
+            key = _group_of(req.index.get(name, {}))
+            got[key] = got.get(key, 0) + 1
+        top = max(got, key=got.get) if got else "empty"
+        pct = round(100 * got.get(top, 0) / max(1, len(train)))
+        out.append(Vehicle(i + 1, f"dirichlet a={req.alpha:g} - {top} {pct}%", train, val))
+    return out
+
+
+PARTITIONS = tuple(PARTITIONERS)
 
 
 def assign(n_vehicles: int, per_vehicle: int, val_per_vehicle: int = 0,
            seed: int = 0, index: dict | None = None,
            train_pool: set[str] | None = None, val_pool: set[str] | None = None,
-           partition: str = "condition") -> list[Vehicle]:
-    """Give each vehicle a disjoint slice, partitioned one of three ways.
-
-    * ``condition`` -- each vehicle biased toward one driving condition. Non-IID, and
-      the interesting case: divergence between vehicles is the expected result.
-    * ``random`` -- each vehicle gets a uniform random slice. IID, and the control
-      case: the curves *should* converge, and if they do not, something else is
-      going on. Worth running precisely because it is the boring baseline.
-    * ``mixed`` -- alternating, so a single run shows both behaviours side by side.
-
-    Disjoint matters: overlapping shards would let the same image train two vehicles
-    in one round, which is not what a fleet does and would quietly flatter the
-    aggregate.
+           partition: str = "condition", alpha: float = 0.5) -> list[Vehicle]:
+    """Give each vehicle a disjoint slice, by whichever registered strategy is named.
 
     ``train_pool``/``val_pool`` are injectable so this is testable without a populated
     repo; they default to the images actually present in my-project's shards.
     """
-    index = index if index is not None else build_attribute_index()
-    rng = random.Random(seed)
-
-    train_pool = _available(Path("train")) if train_pool is None else train_pool
-    val_pool = _available(Path("val")) if val_pool is None else val_pool
-    val_per_vehicle = val_per_vehicle or max(20, per_vehicle // 5)
-
-    if partition not in PARTITIONS:
+    if partition not in PARTITIONERS:
         raise ValueError(f"partition must be one of {PARTITIONS}, got {partition!r}")
 
-    used: set[str] = set()
-    vehicles: list[Vehicle] = []
-    for i in range(n_vehicles):
-        if partition == "random" or (partition == "mixed" and i % 2):
-            # No filter at all: a uniform draw from whatever is left.
-            label, matches = "random mix", (lambda a: True)
-        else:
-            label, matches = PROFILES[i % len(PROFILES)]
-
-        def pick(pool: set[str], want: int) -> list[str]:
-            on = [n for n in pool if n not in used and matches(index.get(n, {}))]
-            rng.shuffle(on)
-            chosen = on[:want]
-            if len(chosen) < want:
-                # Not enough images match this condition -- top up with anything
-                # unused so the vehicle still trains, and let the caller see the
-                # shortfall in the summary rather than silently getting a tiny shard.
-                rest = [n for n in pool if n not in used and n not in set(chosen)]
-                rng.shuffle(rest)
-                chosen += rest[: want - len(chosen)]
-            used.update(chosen)
-            return sorted(chosen)
-
-        vehicles.append(Vehicle(i + 1, label, pick(train_pool, per_vehicle), pick(val_pool, val_per_vehicle)))
-    return vehicles
+    req = Request(
+        n_vehicles=n_vehicles,
+        per_vehicle=per_vehicle,
+        val_per_vehicle=val_per_vehicle or max(20, per_vehicle // 5),
+        index=index if index is not None else build_attribute_index(),
+        train_pool=_available(Path("train")) if train_pool is None else train_pool,
+        val_pool=_available(Path("val")) if val_pool is None else val_pool,
+        alpha=alpha,
+    )
+    return PARTITIONERS[partition](req, random.Random(seed))
 
 
 # --------------------------------------------------------------------------
@@ -196,8 +342,15 @@ def _link(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
-def materialise(vehicles: list[Vehicle], class_names: list[str], nc: int = 13) -> Path:
-    """Write pipeline/vehicles/batch/batch_<vid>/ for each vehicle. Returns the root."""
+def materialise(vehicles: list[Vehicle], class_names: list[str], nc: int = 13,
+                meta: dict | None = None) -> Path:
+    """Write pipeline/vehicles/batch/batch_<vid>/ for each vehicle. Returns the root.
+
+    ``meta`` -- partition, alpha, seed, images per vehicle -- is written beside the
+    summaries as ``fleet.meta.json``. Before it existed, the fleet stage decided
+    whether a rebuild was needed by checking whether every label read "random mix",
+    which cannot tell a condition fleet from a mixed one.
+    """
     images, labels = _image_index(), _label_index()
     root = paths.VEHICLE_BATCHES
     if root.exists():
@@ -227,12 +380,22 @@ def materialise(vehicles: list[Vehicle], class_names: list[str], nc: int = 13) -
     (root.parent / "fleet.json").write_text(
         json.dumps([v.to_summary() for v in vehicles], indent=1)
     )
+    (root.parent / "fleet.meta.json").write_text(json.dumps(meta or {}, indent=1))
     return paths.VEHICLE_ROOT
 
 
 def load_fleet() -> list[dict]:
     f = paths.VEHICLE_ROOT / "fleet.json"
     return json.loads(f.read_text()) if f.exists() else []
+
+
+def load_fleet_meta() -> dict:
+    """How the fleet on disk was built. ``{}`` for a fleet built before manifests."""
+    f = paths.VEHICLE_ROOT / "fleet.meta.json"
+    try:
+        return json.loads(f.read_text()) if f.exists() else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 # --------------------------------------------------------------------------

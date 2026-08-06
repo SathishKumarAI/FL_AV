@@ -220,9 +220,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--per-vehicle", type=int, default=0,
                     help="override images per vehicle (0 = profile default)")
-    ap.add_argument("--partition", default="condition",
-                    choices=("condition", "random", "mixed"),
-                    help="condition = non-IID (default); random = IID control; mixed = both")
+    ap.add_argument("--partition", default="condition", choices=vehicles.PARTITIONS,
+                    help="condition = non-IID (default); random = IID control; "
+                         "mixed = both; dirichlet = tunable skew via --alpha")
+    ap.add_argument("--alpha", type=float, default=0.5,
+                    help="dirichlet concentration: 0.05 concentrates each vehicle on one "
+                         "condition, 100 is effectively IID")
     ap.add_argument("--yes", action="store_true", help="confirm the gated stages up front")
     ap.add_argument("--ray-address", help="attach to an existing Ray head (enables its dashboard)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
@@ -233,7 +236,8 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     cfg = Config(profile=args.profile, n_vehicles=args.vehicles,
                  rounds=args.rounds, local_epochs=args.epochs, seed=args.seed,
-                 partition=args.partition, per_vehicle_override=args.per_vehicle,
+                 partition=args.partition, alpha=args.alpha,
+                 per_vehicle_override=args.per_vehicle,
                  ray_address=args.ray_address)
 
     if args.list or not (args.stages or args.all):

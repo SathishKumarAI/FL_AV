@@ -471,6 +471,97 @@ def test_unknown_partition_is_rejected():
                         partition="nonsense")
 
 
+def _mixed_index(n=1200):
+    """An index spanning several PROFILES, so a Dirichlet draw has groups to skew over."""
+    kinds = [
+        {"timeofday": "daytime", "scene": "city street", "weather": "clear"},   # daytime city
+        {"timeofday": "night", "scene": "residential", "weather": "clear"},     # night
+        {"timeofday": "daytime", "scene": "residential", "weather": "rainy"},   # rain / fog
+        {"timeofday": "daytime", "scene": "highway", "weather": "clear"},       # highway
+        {"timeofday": "dawn/dusk", "scene": "residential", "weather": "clear"}, # dawn / dusk
+        {"timeofday": "daytime", "scene": "residential", "weather": "snowy"},   # snow
+    ]
+    return {f"img{i}.jpg": kinds[i % len(kinds)] for i in range(n)}
+
+
+def _dominant_share(vehicle, index):
+    counts = {}
+    for name in vehicle.train:
+        key = vehicles._group_of(index.get(name, {}))
+        counts[key] = counts.get(key, 0) + 1
+    return max(counts.values()) / max(1, len(vehicle.train))
+
+
+def test_dirichlet_alpha_is_the_skew_knob():
+    """Small alpha concentrates a vehicle on one condition; large alpha flattens it.
+
+    The direction is asserted, not a magic number: the draw is random, and pinning
+    an exact share would make this a test of one seed rather than of the mechanism.
+    """
+    idx = _mixed_index()
+    kw = dict(index=idx, train_pool=set(idx), val_pool=set(idx), val_per_vehicle=10,
+              partition="dirichlet")
+
+    skewed = vehicles.assign(6, 60, seed=1, alpha=0.02, **kw)
+    flat = vehicles.assign(6, 60, seed=1, alpha=200.0, **kw)
+
+    skewed_share = sum(_dominant_share(v, idx) for v in skewed) / len(skewed)
+    flat_share = sum(_dominant_share(v, idx) for v in flat) / len(flat)
+    assert skewed_share > flat_share + 0.2, (skewed_share, flat_share)
+    assert skewed_share > 0.8, "alpha=0.02 should put a vehicle almost entirely on one condition"
+
+
+def test_dirichlet_slices_are_disjoint_and_deterministic():
+    idx = _mixed_index()
+    kw = dict(index=idx, train_pool=set(idx), val_pool=set(idx), val_per_vehicle=10,
+              partition="dirichlet", alpha=0.4, seed=11)
+    vs = vehicles.assign(5, 50, **kw)
+
+    seen = [n for v in vs for n in v.train]
+    assert len(seen) == len(set(seen)), "dirichlet slices must not overlap"
+    assert all(len(v.train) == 50 for v in vs), "the per-client-mixture variant keeps sizes equal"
+    assert [v.train for v in vehicles.assign(5, 50, **kw)] == [v.train for v in vs]
+    assert all(v.condition.startswith("dirichlet") for v in vs)
+
+
+def test_dirichlet_rejects_an_alpha_that_has_no_meaning():
+    idx = _mixed_index(60)
+    with pytest.raises(ValueError):
+        vehicles.assign(2, 10, index=idx, train_pool=set(idx), val_pool=set(idx),
+                        partition="dirichlet", alpha=0)
+
+
+def test_the_registry_is_what_every_caller_reads():
+    """Registering a partitioner is the only step; CLI choices follow from it."""
+    assert vehicles.PARTITIONS == tuple(vehicles.PARTITIONERS)
+    assert set(vehicles.PARTITIONS) >= {"condition", "random", "mixed", "dirichlet"}
+
+    from pipeline import build_fleet, runner
+    for parser, flag in ((build_fleet, None), (runner, None)):
+        pass
+    choices = runner.build_parser()._option_string_actions["--partition"].choices
+    assert tuple(choices) == vehicles.PARTITIONS
+
+
+def test_fleet_manifest_is_compared_rather_than_guessed(monkeypatch):
+    """Label-sniffing could not tell condition from mixed, or one alpha from another."""
+    from pipeline import vehicles as _v
+    monkeypatch.setattr(_v, "load_fleet", lambda: [
+        {"vid": i, "condition": "dirichlet a=0.5 - night 90%", "n_train": 300, "n_val": 60}
+        for i in range(1, 11)])
+    monkeypatch.setattr(_v, "load_fleet_meta", lambda: {
+        "partition": "dirichlet", "alpha": 0.5, "seed": 0, "per_vehicle": 300})
+
+    same = Config(n_vehicles=6, partition="dirichlet", alpha=0.5)
+    assert stages._check_fleet(same).satisfied is True
+
+    other_alpha = stages._check_fleet(Config(n_vehicles=6, partition="dirichlet", alpha=0.1))
+    assert other_alpha.satisfied is False and "alpha" in other_alpha.detail
+
+    other_partition = stages._check_fleet(Config(n_vehicles=6, partition="condition"))
+    assert other_partition.satisfied is False and "partition" in other_partition.detail
+
+
 def test_fleet_check_catches_a_partition_mismatch(monkeypatch):
     """A condition fleet must not be silently reused for a random run."""
     from pipeline import vehicles as _v

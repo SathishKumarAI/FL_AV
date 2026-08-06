@@ -9,6 +9,7 @@ export function config() {
     epochs: +$("epochs").value,
     seed: +$("seed").value,
     partition: $("partition").value,
+    alpha: +$("alpha").value,
     confirm: $("confirm").checked,
   };
 }
@@ -22,6 +23,9 @@ export function estimate() {
   $("estimate").textContent =
     `${c.vehicles} vehicles × ${per} images × ${c.rounds} rounds × ${c.epochs} epochs — ` +
     `roughly ${m} min of GPU time.`;
+  const dirichlet = c.partition === "dirichlet";
+  $("alphaWrap").hidden = !dirichlet;
+  $("alphaNote").hidden = !dirichlet;
 }
 
 export function renderStages(rows) {
