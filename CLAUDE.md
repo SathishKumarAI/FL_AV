@@ -142,9 +142,10 @@ branch dies.
 ## Verification
 
 ```bash
-python -m pytest my-project/tests -q     # 24 tests
-python -m pytest pipeline/tests -q       # 42 tests
+python -m pytest my-project/tests -q     # 31 tests
+python -m pytest pipeline/tests -q       # 59 tests
 python -m pipeline.verify                # the four pass criteria against the last run
+python -m pipeline.holdout --evaluate    # the global model on data no vehicle saw
 ```
 
 CI additionally runs an end-to-end federation smoke on CPU and asserts the aggregate
