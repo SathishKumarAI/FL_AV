@@ -1243,3 +1243,45 @@ def test_the_plan_emits_commands_that_the_runner_accepts():
         if parts[2:4] != ["pipeline.runner", "--all"]:
             continue
         parser.parse_args(parts[4:])        # raises SystemExit on anything unknown
+
+
+# --------------------------------------------------------------------- docs tab
+from pipeline import docs_index as _docs  # noqa: E402
+
+
+def test_every_program_in_the_docs_index_exists_and_imports():
+    """A docs page that names a module nobody wrote is worse than no docs page."""
+    d = _docs.index()
+    assert d["modules"], "the index should list the package's programs"
+    for m in d["modules"]:
+        path = REPO / m["module"]
+        assert path.is_file(), m["module"]
+        assert "could not import" not in m["doc"], f"{m['module']}: {m['doc'][:80]}"
+        assert m["summary"], f"{m['module']} has no docstring first line"
+        assert m["contributes"], f"{m['module']} does not say what it is for"
+
+
+def test_the_docs_text_comes_from_the_modules_not_a_copy():
+    """Copied prose rots. The summary must be the module's own first line."""
+    from pipeline import holdout as _h
+
+    entry = next(m for m in _docs.index()["modules"] if m["module"].endswith("holdout.py"))
+    assert entry["summary"] == (_h.__doc__ or "").strip().splitlines()[0]
+
+
+def test_the_documented_chain_is_the_chain_that_runs():
+    chain = [s["name"] for s in _docs.index()["chain"]]
+    assert chain == [s.name for s in stages.STAGES]
+    gated = {s["name"] for s in _docs.index()["chain"] if s["gated"]}
+    assert {"dataset", "sanity", "federate", "baseline"} <= gated
+
+
+def test_the_documented_tabs_are_the_tabs_the_page_has():
+    """A Docs tab describing a tab that does not exist is its own kind of lie."""
+    html = (REPO / "pipeline" / "static" / "index.html").read_text(encoding="utf-8")
+    for tab in _docs.index()["tabs"]:
+        assert f'data-view="{tab["name"].lower()}"' in html, tab["name"]
+    import re
+    in_html = set(re.findall(r'data-view="([a-z]+)"', html))
+    documented = {t["name"].lower() for t in _docs.index()["tabs"]}
+    assert in_html == documented, (in_html ^ documented)

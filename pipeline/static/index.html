@@ -20,6 +20,7 @@
     <button class="tab" role="tab" aria-selected="false" aria-controls="view-live" data-view="live">Live</button>
     <button class="tab" role="tab" aria-selected="false" aria-controls="view-data" data-view="data">Data</button>
     <button class="tab" role="tab" aria-selected="false" aria-controls="view-plan" data-view="plan">Plan</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-docs" data-view="docs">Docs</button>
   </div>
   <div class="spacer"></div>
   <span class="lamp l-idle" id="runState">idle</span>
@@ -247,6 +248,11 @@
     <button id="dataRefresh" style="margin-left:auto">Recount</button>
   </div>
   <div id="dataBody" class="grid"></div>
+</section>
+
+<!-- ======================================================================== DOCS -->
+<section id="view-docs" class="grid" hidden role="tabpanel" aria-label="Docs">
+  <div id="docsBody" class="grid"></div>
 </section>
 
 <!-- ======================================================================== PLAN -->
