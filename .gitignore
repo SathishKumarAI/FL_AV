@@ -186,6 +186,13 @@ Temporary Items
 # Federated global-model checkpoints
 checkpoints/
 
+# Pretrained weights Ultralytics downloads on its own. The AMP check pulls a small
+# model into the CWD the first time train() runs, so one lands in the repo root
+# after any baseline or sanity run. They are 5-50 MB each and reproducible.
+/*.pt
+/models/
+my-project/models/*.pt
+
 # TLS certificates (secrets)
 certs/
 

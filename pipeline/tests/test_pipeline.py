@@ -221,7 +221,12 @@ def test_generated_paths_are_all_gitignored():
                paths.VEHICLE_ROOT / "holdout" / "images" / "val" / "x.jpg",
                paths.VEHICLE_ROOT / "pooled" / "images" / "train" / "x.jpg",
                paths.STATE / "baseline_runs" / "centralised" / "weights" / "best.pt",
-               paths.STATE / "holdout_metrics.json"]
+               paths.STATE / "holdout_metrics.json",
+               # Ultralytics' AMP check downloads a small model into the CWD the
+               # first time train() runs, so one lands in the repo root after any
+               # baseline or sanity run.
+               REPO / "yolo26n.pt",
+               REPO / "models" / "yolov8s.pt"]
     for t in targets:
         rel = t.relative_to(REPO).as_posix()
         out = subprocess.run(["git", "check-ignore", rel], cwd=REPO,
