@@ -25,6 +25,14 @@ Aggregate checksum moved every round: 159.9 → −158.7 → −415.8 → −583
 
 The holdout curve is the honest one, and it is **0.031 lower** than the
 self-evaluated number — which is the size of the flattery the old metric contained.
+
+**One caveat, stated rather than buried.** The fleet on disk was built *before* the
+holdout existed, and `python -m pipeline.validate` reports that 439 of the 1 000
+held-out images sit in vehicles' **val** splits. No client trained on them — train and
+val pools are disjoint by construction — so the global model never saw them and the
+curve above is sound. But those 439 did feed clients' self-evaluation, so the
+0.4642 self-reported number is the affected one. Rebuilding the fleet clears it, and
+the fleet check now forces that rebuild.
 Previous session's run reached 0.320 self-evaluated on 2 effective epochs; this one
 did 24 effective epochs on 4.7× the data.
 
@@ -54,8 +62,10 @@ exactly why the holdout had to exist.
 | Any of 12 Flower strategies | `... --strategy fedadam` |
 | The dashboard, rebuilt | `python -m pipeline.server` |
 
-Stage chain is now: env → dataset → populate → **holdout** → fleet → sanity →
-federate → **evaluate** → verify → **baseline** (gated).
+| Shard validation — six ways a fleet can be quietly wrong | `python -m pipeline.validate` |
+
+Stage chain is now: env → dataset → populate → **holdout** → fleet → **validate** →
+sanity → federate → **evaluate** → verify → **baseline** (gated).
 
 ## Traps confirmed again this session
 
