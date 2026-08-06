@@ -31,11 +31,14 @@ graph TB
     SRV["server.py<br/>HTTP + SSE"]
     RUN["runner.py<br/>sequence · gate · halt"]
     STG["stages.py<br/>detect · skip · command"]
-    VEH["vehicles.py<br/>condition slices"]
+    VEH["vehicles.py<br/>partition registry<br/>condition · random · mixed · dirichlet"]
+    HOLD["holdout.py<br/>the shared val set<br/>+ global scoring"]
+    BASE["baseline.py<br/>centralised ceiling"]
     LOG["logparse.py<br/>markers → events"]
     GPUM["gpu.py<br/>power → Wh"]
     REP["report.py<br/>HTML + Markdown"]
     SINK["mlflow_sink.py"]
+    UI["static/<br/>index.html · app.css · js/*"]
   end
 
   subgraph proj["my-project/ (read + invoke only)"]
@@ -56,7 +59,13 @@ graph TB
   RUN --> STG
   STG -->|subprocess| POP & FLWR & YOLO
   VEH -->|hardlinks| VSHARD[("pipeline/vehicles/<br/>batch/batch_N")]
+  HOLD -->|carved before the fleet| HSHARD[("pipeline/vehicles/<br/>holdout")]
+  HOLD -.->|excluded from| VEH
   FLWR -.->|FL_AV_DATA_ROOT| VSHARD
+  OUT -->|global_round_N.pt| HOLD
+  VSHARD -->|pooled union| BASE
+  HSHARD --> BASE
+  SRV -->|/static| UI
   POP & FLWR & YOLO --> OUT
   OUT --> LOG --> RUN
   RUN --> GPUM & SINK & REP
@@ -136,13 +145,23 @@ stateDiagram-v2
 | `env` | torch + CUDA capability probe | never | no |
 | `dataset` | `kagglehub.dataset_download` | pool has 10 000 val images | **yes** |
 | `populate` | `scripts/populate_images.py` | every shard matches its split list | no |
-| `fleet` | `pipeline.build_fleet` | fleet size and per-vehicle counts match config | no |
+| `holdout` | `pipeline.holdout --build` | the carved set matches size and seed | no |
+| `fleet` | `pipeline.build_fleet` | the manifest matches partition, α, seed, per-vehicle count **and holdout size** | no |
 | `sanity` | one-epoch `yolo detect train` | marker from a previous pass | **yes** |
 | `federate` | `flwr run . --stream` | never | **yes** |
+| `evaluate` | `pipeline.holdout --evaluate` | never | no |
 | `verify` | the four pass criteria | never | no |
+| `baseline` | `pipeline.baseline` | a centralised run exists at this budget | **yes** |
 
 Gating exists so a browser tab cannot start a multi-hour GPU job unprompted. A test
-asserts `dataset`, `sanity` and `federate` are all gated.
+asserts `dataset`, `sanity`, `federate` and `baseline` are all gated.
+
+**`holdout` before `fleet` is load-bearing.** It carves a val slice that `build_fleet`
+subtracts from the pool, so no vehicle can train or self-evaluate on it. Carved the
+other way round, the holdout would already sit inside somebody's val split and the
+"global" metric would be partly self-referential — the exact shape of silent failure
+this project keeps producing. The fleet manifest records the holdout size, so a fleet
+built against a different one is rebuilt rather than reused.
 
 ## Why the fleet is condition-biased
 

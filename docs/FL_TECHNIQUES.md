@@ -21,26 +21,37 @@ import flwr.server.strategy as st   # 24 exported
 
 ## What this repo has today
 
-`server_app.CustomBatchStrategy` extends `FedAvg` and adds two things Flower does not:
-shard assignment per client, and checkpoint/metrics persistence. `strategy = "fedavg" |
-"fedprox"` in `pyproject.toml` selects between plain averaging and a **weight-space
-approximation** of FedProx — the proximal pull is applied on the client after training
+**Built 2026-08-06 (backlog 47).** `BatchAssignmentMixin` holds the two things Flower
+does not do — shard assignment per client, and checkpoint/metrics persistence — and
+composes with any Flower strategy:
+
+```bash
+python -m pipeline.runner --all --strategy fedadam --yes
+flwr run . --run-config 'strategy="fedyogi" eta=0.01 tau=0.001'
+```
+
+Twelve are registered in this Flower build: `fedavg`, `fedprox`, `fedadam`, `fedyogi`,
+`fedadagrad`, `fedavgm`, `fedmedian`, `fedtrimmedavg`, `krum`, `bulyan`, `qfedavg`,
+`faulttolerantfedavg`. Each base is passed only the keyword arguments its `__init__`
+accepts, and anything dropped is logged — a silently dropped `eta` would make a FedAdam
+sweep report identical numbers for every value and look like the knob does nothing.
+An unregistered name raises at server start rather than falling back to FedAvg.
+
+`strategy = "fedprox"` still selects a **weight-space approximation** of FedProx — the proximal pull is applied on the client after training
 (`w ← w − μ(w − w_global)`) rather than as a per-step loss term, because Ultralytics'
 high-level trainer exposes no per-step hook.
 
 That approximation is honest but it is *not* FedProx. A real comparison needs the true
 proximal term or an explicit note that it is an approximation.
 
-## The problem with adding more
+## The design, as built
 
-`CustomBatchStrategy` inherits from `FedAvg` **by name**. Trying `FedAdam` today means
-editing the class definition — so every strategy is a source change, and two strategies
-cannot coexist. That is the thing to fix before running rung 5 of the ML plan.
+The problem it solved: `CustomBatchStrategy` inherited `FedAvg` **by name**, so trying
+`FedAdam` meant copying the class — every strategy a source change, and two copies of
+shard-assignment logic that had already produced two silent failures.
 
-## Proposed design: strategy as a plugin
-
-Keep the two project-specific behaviours (shard assignment, persistence) in a **mixin**,
-and compose it with whichever Flower strategy is requested:
+`CustomBatchStrategy` still exists and still means FedAvg; it is now literally
+`BatchAssignmentMixin + FedAvg`. Sketch of the mechanism:
 
 ```python
 class BatchAssignmentMixin:
@@ -58,7 +69,7 @@ def build_strategy(name: str, **kw):
     return type(f"Batch{base.__name__}", (BatchAssignmentMixin, base), {})(**kw)
 ```
 
-Three properties this buys:
+Three properties this bought:
 
 1. **Every Flower strategy works immediately**, including ones released later.
 2. **The mixin is testable on its own** — assignment logic no longer entangled with
@@ -66,9 +77,11 @@ Three properties this buys:
    have been caught by a mixin test in isolation.
 3. **DP wrappers compose**, because they wrap a strategy instance rather than subclass it.
 
-Cost: it changes `my-project/my_project/server_app.py`, which the `pipeline/` component
-is forbidden to touch. This is a **my-project change**, on its own branch, with its own
-prompt — not something the pipeline should reach into.
+It changed `my-project/my_project/server_app.py`, so it went on its own branch with its
+own prompt (`docs/prompts/2026-08-06-strategy-registry.md`) — the pipeline never reaches
+into that package. The pipeline mirrors the name list in `pipeline/stages.py` rather than
+importing it, to stay free of flwr and ultralytics; `my-project/tests/test_strategy_registry.py`
+asserts the two lists have not drifted.
 
 ## Per-strategy notes for this dataset
 
@@ -92,5 +105,12 @@ materialises deterministic shards, so the remaining discipline is not changing t
 things at once.
 
 Report per strategy: final global mAP50 / mAP50-95 on a shared holdout, rounds to reach
-a target mAP, per-vehicle divergence spread, wall clock, and GPU energy. The pipeline
-already collects the last two.
+a target mAP, per-vehicle divergence spread, wall clock, and GPU energy. **The shared
+holdout now exists** (`python -m pipeline.holdout --evaluate`), so this comparison is
+finally possible — before it, every strategy would have been scored by each client on
+its own distribution, and the winner would partly have been whoever drew the easier
+conditions.
+
+The FedAvg reference to beat, 6 rounds x 4 local epochs x 6 vehicles x 1 400 images,
+condition-partitioned, seed 0: **0.4334 mAP50 / 0.2454 mAP50-95** on the 1 000-image
+holdout, 3 296 s, 82.2 Wh.
