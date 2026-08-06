@@ -28,6 +28,40 @@
 
 ---
 
+## ▶️ Run it — one command
+
+```powershell
+.\scriptsun_pipeline.ps1                 # Windows, demo profile, ~10 min on a 5070 Ti
+```
+```bash
+./scripts/run_pipeline.sh                   # Linux/macOS
+```
+
+Tests → shared holdout → dataset → shards → fleet → validation → federated run →
+holdout evaluation → pass criteria → comparison. It stops at the first failure
+instead of continuing, and prints where the report is.
+
+Compare runs, one command per question:
+
+```bash
+python -m pipeline.experiment --preset seeds      --seeds 0,1,2 --yes
+python -m pipeline.experiment --preset strategies --strategies fedavg,fedadam --yes
+python -m pipeline.experiment --preset partitions --partitions condition,random,dirichlet --yes
+python -m pipeline.experiment --preset alpha      --alphas 0.05,0.5,100 --yes
+python -m pipeline.compare --last 10              # runs you already have
+```
+
+**Full instructions, costs, troubleshooting and how to read the numbers:
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md).**
+
+Latest measured result — 6 vehicles × 1 400 images, condition-partitioned, 6 rounds ×
+4 local epochs, on an RTX 5070 Ti: **holdout mAP50 0.3543 → 0.4334** over the rounds,
+mAP50-95 0.2454, 3 296 s, 82.2 Wh. Measured on 1 000 images no vehicle trained on —
+the per-client self-evaluated figure is 0.4642, and that 0.031 difference is why the
+holdout exists.
+
+---
+
 ## 🔒 Why Federated Learning?  
 - **Data Privacy**: Sensitive data (e.g., surveillance footage, vehicle sensors) stays on-device.  
 - **Bandwidth Efficiency**: Only model gradients (not raw images) are transmitted.  

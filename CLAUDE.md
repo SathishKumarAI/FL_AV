@@ -40,6 +40,8 @@ Open the one file that owns the thing. Do not read the package to find it.
 | The centralised baseline, and the gap to it | `pipeline/baseline.py` |
 | What makes a fleet's shards invalid | `pipeline/validate.py` |
 | Comparing runs to each other | `pipeline/compare.py` |
+| Running a set of configurations and tabling them | `pipeline/experiment.py` |
+| The human-facing runbook | `docs/RUNBOOK.md`, `scripts/run_pipeline.{ps1,sh}` |
 | Per-vehicle learning maths (divergence, contribution) | `pipeline/vehicle_metrics.py` |
 | The run report | `pipeline/report.py` |
 | ⚠ Aggregation strategy — **different branch and prompt** | `my-project/my_project/server_app.py` |
