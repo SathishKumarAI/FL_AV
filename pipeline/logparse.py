@@ -93,10 +93,28 @@ def iter_logs(pattern: str, log_dir: Path | None = None):
             yield from sorted(d.glob(pattern))
 
 
-def aggregate_checksums(log_dir: Path | None = None) -> list[float]:
-    """Per-round global checksums, in order. Equal consecutive values == no learning."""
+def latest_log(pattern: str, log_dir: Path | None = None) -> Path | None:
+    """The most recently written matching log, or None.
+
+    Logs are named per process, so they accumulate across runs. Reading all of them
+    concatenates several runs into one sequence -- eleven checksums for a three-round
+    run -- and the checksum criterion then judges a mixture rather than this run.
+    """
+    files = [f for f in iter_logs(pattern, log_dir) if f.is_file()]
+    return max(files, key=lambda f: f.stat().st_mtime) if files else None
+
+
+def aggregate_checksums(log_dir: Path | None = None, all_runs: bool = False) -> list[float]:
+    """This run's per-round global checksums, in order.
+
+    Equal consecutive values mean nothing is being learned, whatever the metrics say
+    -- which is why it matters that these come from one run. Pass ``all_runs=True``
+    for the historical sequence.
+    """
+    files = list(iter_logs("server*.log", log_dir)) if all_runs else \
+        [f for f in [latest_log("server*.log", log_dir)] if f]
     out: list[float] = []
-    for f in iter_logs("server*.log", log_dir):
+    for f in files:
         out += [e.value for e in parse_text(f.read_text(errors="replace"))
                 if e.kind == "aggregate_checksum"]
     return out

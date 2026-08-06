@@ -1099,3 +1099,26 @@ def test_a_demo_ceiling_does_not_overwrite_the_archive_of_a_full_one(tmp_path):
     names = {f"baseline-{images}img-{epochs}ep.json"
              for images, epochs in ((8400, 24), (1200, 2))}
     assert len(names) == 2, "the archive name must distinguish the budgets"
+
+
+def test_the_checksum_criterion_judges_one_run_not_a_pile_of_them(tmp_path):
+    """Logs are per process and accumulate. Reading all of them gave eleven
+    checksums for a three-round run, so the single most important signal in this
+    project was being computed over a mixture."""
+    import os
+    import time
+
+    old = time.time() - 3600
+    (tmp_path / "server.111.log").write_text(
+        "Aggregated parameters with checksum: 5.0\n"
+        "Aggregated parameters with checksum: 5.0\n")     # a previous run that stalled
+    os.utime(tmp_path / "server.111.log", (old, old))
+    (tmp_path / "server.222.log").write_text(
+        "Aggregated parameters with checksum: 1.0\n"
+        "Aggregated parameters with checksum: 2.0\n")
+
+    assert logparse.aggregate_checksums(tmp_path) == [1.0, 2.0]
+    assert logparse.aggregate_checksums(tmp_path, all_runs=True) == [5.0, 5.0, 1.0, 2.0]
+    # And the verdict follows this run, not the pile: the old run's stall must not
+    # condemn a federation that is learning.
+    assert logparse.federation_learned(tmp_path)[0] is True
