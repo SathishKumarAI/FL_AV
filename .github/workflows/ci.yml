@@ -35,6 +35,44 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/my-project
         run: pytest tests -q
 
+  pipeline:
+    # The pipeline package had 80 tests and CI ran none of them: every guarantee
+    # added there -- the isolation rule, the gitignore rules, the traversal guards,
+    # the holdout containment check -- held only on the machine that last ran pytest.
+    name: pipeline tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is not redundant here. Every path trap this project has hit --
+        # CWD-relative logs, a detached SuperLink caching its working directory,
+        # backslash separators in shard listings -- is a Windows trap, and Linux
+        # alone would never have caught them.
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        # No torch and no ultralytics: the pipeline package imports them lazily,
+        # inside the two functions that actually evaluate a checkpoint, so its tests
+        # run on a bare interpreter in seconds.
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pyyaml
+
+      - name: Run pipeline tests
+        run: pytest pipeline/tests -q
+
+      - name: The validator must run on an empty checkout without crashing
+        # It reports "no fleet on disk" and exits 1; a traceback here would mean the
+        # stage fails for the wrong reason on a fresh clone.
+        run: python -m pipeline.validate || true
+
   simulation-smoke:
     name: federated simulation smoke (CPU)
     runs-on: ubuntu-latest
