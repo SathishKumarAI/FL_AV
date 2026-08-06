@@ -143,3 +143,113 @@ four criteria the CI smoke job already uses.
 
 Scheduling, retries, multi-machine deployment, and comparing runs across machines.
 `docs/DEPLOYMENT.md`'s SuperLink/TLS path stays a separate exercise.
+
+---
+
+# Revision 2 — vehicle simulation, two dashboards, run report
+
+Requested after Revision 1 was approved. It changes one of Revision 1's constraints,
+so the reasoning is recorded rather than quietly overwritten.
+
+## What changed, and why the "no dashboard" rule bends
+
+Revision 1 forbade building a UI, because the UI being proposed duplicated MLflow.
+The new requirement is not that: it is a **fleet view** — N simulated vehicles, each
+learning from a different slice of the world, watched live — plus a form to launch a
+run. MLflow is run-centric and cannot launch anything; the Ray Dashboard is
+actor-centric and has no concept of a vehicle. Neither can be made to do this.
+
+So the rule narrows rather than disappears:
+
+> Do not reimplement metric storage, run history or chart persistence — MLflow owns
+> those. The custom layer may only do what neither tool can: **launch runs** and
+> **narrate the fleet**.
+
+Everything the new UI displays is read from MLflow, the existing log markers, or
+`nvidia-smi`. It stores nothing of its own.
+
+## Vehicles
+
+`N` simulated vehicles (default 6), each a Flower client with a shard biased toward a
+driving condition, so their learning curves visibly diverge — the thing that makes
+this federated rather than merely distributed.
+
+Conditions come from BDD100K's own attributes, confirmed present in the download
+(`bdd100k_labels_release/.../bdd100k_labels_images_{train,val}.json`), one record per
+image: `{"name", "attributes": {"weather", "scene", "timeofday"}}`.
+
+| Vehicle | Bias |
+|---|---|
+| 1 | daytime · city street |
+| 2 | night |
+| 3 | rainy / foggy |
+| 4 | highway |
+| 5 | dawn/dusk |
+| 6 | overcast · residential |
+
+The train JSON is 1.45 GB, so the attribute index is built by **streaming** (`ijson`)
+and cached to `pipeline/.state/attributes.json` — parse once, reuse.
+
+**Isolation is preserved.** Vehicle shards are materialised under
+`pipeline/vehicles/batch/batch_N/` (hardlinked images, hardlinked labels, own
+`data.yaml`), and the federation is pointed at them with the **existing**
+`FL_AV_DATA_ROOT` env var that `task.py` already honours. No shard is created inside
+`my-project`, and no source there changes.
+
+## Profiles
+
+| Profile | Images/vehicle | imgsz | Why |
+|---|---|---|---|
+| `demo` | 300 | 320 | a 6-vehicle round completes in minutes and is watchable |
+| `full` | whole biased slice | 640 | real training |
+
+Vehicles train **serialised** — one client peaks at 15.9 GB of 16.3 GB, so
+concurrency would OOM. Wall clock scales linearly with vehicle count; the UI says so
+rather than pretending otherwise.
+
+## Dashboards
+
+Two views, one thin stdlib server (`ThreadingHTTPServer` + SSE, one HTML file, no
+build step, loopback only):
+
+- **Control** — pick profile, vehicle count, rounds, epochs; launch; confirm-gate the
+  expensive stages; links out to MLflow and the Ray Dashboard.
+- **Live** — per-vehicle cards (condition, shard size, current round, loss, mAP50),
+  the weight-flow strip (global checksum → each vehicle's received/sent → new
+  aggregate), a GPU panel (utilisation, VRAM against the measured 15.9 GB ceiling,
+  **power draw in W and cumulative energy in Wh**), and the stage timeline.
+
+## GPU power
+
+`nvidia-smi --query-gpu=power.draw,utilization.gpu,memory.used,temperature.gpu`
+polled on an interval; power integrated over time to Wh per stage and per vehicle.
+Reported live and in the final report.
+
+## Report
+
+Emitted at end of run, from the MLflow store plus the sampled telemetry:
+
+- `pipeline/reports/<run>/report.html` — self-contained, inline SVG charts, no CDN
+- `pipeline/reports/<run>/report.md` — the same content as a diffable record
+
+Contents: inputs (full config, vehicle→condition map, shard sizes, versions), per
+round and per vehicle metrics, weight-flow checksums, GPU energy and peak VRAM,
+stage timings, and outputs (checkpoint paths, final model metrics).
+
+## Added modules
+
+```
+pipeline/
+├── vehicles.py    # attribute index (streamed), condition slices, shard materialisation
+├── gpu.py         # nvidia-smi sampler -> W, Wh, peak VRAM
+├── server.py      # control + live dashboards (SSE)
+├── static/        # one HTML file
+└── report.py      # MLflow + telemetry -> HTML and Markdown
+```
+
+## Testing additions
+
+- condition slicing is deterministic for a fixed seed, and slices are disjoint
+- vehicle shard materialisation writes **only** under `pipeline/` (asserted)
+- GPU sampler integrates a known series to the right Wh
+- report renders from a fixture MLflow store with no network access
