@@ -33,6 +33,7 @@ val pools are disjoint by construction — so the global model never saw them an
 curve above is sound. But those 439 did feed clients' self-evaluation, so the
 0.4642 self-reported number is the affected one. Rebuilding the fleet clears it, and
 the fleet check now forces that rebuild.
+
 Previous session's run reached 0.320 self-evaluated on 2 effective epochs; this one
 did 24 effective epochs on 4.7× the data.
 
@@ -61,7 +62,6 @@ exactly why the holdout had to exist.
 | Dirichlet partitioning, α as the skew knob | `... --partition dirichlet --alpha 0.3` |
 | Any of 12 Flower strategies | `... --strategy fedadam` |
 | The dashboard, rebuilt | `python -m pipeline.server` |
-
 | Shard validation — six ways a fleet can be quietly wrong | `python -m pipeline.validate` |
 
 Stage chain is now: env → dataset → populate → **holdout** → fleet → **validate** →
