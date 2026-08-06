@@ -48,6 +48,9 @@ run_args=(-m pipeline.runner --all --profile "$PROFILE" --vehicles "$VEHICLES"
           --rounds "$ROUNDS" --epochs "$EPOCHS" --partition "$PARTITION"
           --alpha "$ALPHA" --strategy "$STRATEGY" --yes)
 [ "$PER_VEHICLE" -gt 0 ] && run_args+=(--per-vehicle "$PER_VEHICLE")
+# --all includes the gated baseline stage, so without this the ceiling would be
+# trained twice: once in the chain and once by the step that used to follow.
+[ "$BASELINE" = "1" ] || run_args+=(--skip baseline)
 
 step "Full chain: dataset, shards, fleet, validate, federate, evaluate, verify" \
   "$PYTHON" "${run_args[@]}"

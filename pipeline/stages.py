@@ -400,15 +400,26 @@ STAGES: list[Stage] = [
 BY_NAME = {s.name: s for s in STAGES}
 
 
-def resolve(names: str | None) -> list[Stage]:
-    """'fleet,federate' -> [Stage, Stage]; None -> the whole chain."""
-    if not names:
-        return list(STAGES)
-    out = []
-    for n in [x.strip() for x in names.split(",") if x.strip()]:
+def resolve(names: str | None, skip: str | None = None) -> list[Stage]:
+    """'fleet,federate' -> [Stage, Stage]; None -> the whole chain, minus `skip`.
+
+    Skipping by name rather than by listing everything else keeps a caller from
+    silently missing a stage added later -- the failure mode a hardcoded chain in a
+    shell script would have.
+    """
+    if names:
+        out = []
+        for n in [x.strip() for x in names.split(",") if x.strip()]:
+            if n not in BY_NAME:
+                raise SystemExit(f"unknown stage {n!r}; known: {', '.join(BY_NAME)}")
+            out.append(BY_NAME[n])
+    else:
+        out = list(STAGES)
+
+    for n in [x.strip() for x in (skip or "").split(",") if x.strip()]:
         if n not in BY_NAME:
             raise SystemExit(f"unknown stage {n!r}; known: {', '.join(BY_NAME)}")
-        out.append(BY_NAME[n])
+        out = [s for s in out if s.name != n]
     return out
 
 

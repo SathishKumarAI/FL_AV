@@ -335,7 +335,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": f"unknown partition {CONFIG.partition!r}; "
                                             f"known: {', '.join(vehicles.PARTITIONS)}"}, 400)
             try:
-                chain = stages.resolve(body.get("stages"))
+                chain = stages.resolve(body.get("stages"), body.get("skip"))
             except SystemExit as e:
                 return self._json({"error": str(e)}, 400)
             started = STATE.start(CONFIG, chain, bool(body.get("confirm")),

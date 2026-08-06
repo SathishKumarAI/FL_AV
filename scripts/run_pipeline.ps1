@@ -79,15 +79,12 @@ $runArgs = @(
   '--strategy', $Strategy, '--yes'
 )
 if ($PerVehicle -gt 0) { $runArgs += @('--per-vehicle', $PerVehicle) }
+# --all includes the gated baseline stage, so without this the ceiling would be
+# trained twice: once in the chain and once by the step below.
+if (-not $Baseline) { $runArgs += @('--skip', 'baseline') }
 
-Step "Full chain: dataset, shards, fleet, validate, federate, evaluate, verify" {
+Step "Full chain: shards, fleet, validate, federate, evaluate, verify$(if ($Baseline) {', baseline'})" {
   & $Python @runArgs
-}
-
-if ($Baseline) {
-  Step "Centralised ceiling (pooled data, matched budget)" {
-    & $Python -m pipeline.baseline --rounds $Rounds --local-epochs $Epochs
-  }
 }
 
 Step "Comparison against previous runs" {

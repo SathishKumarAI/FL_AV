@@ -1132,3 +1132,24 @@ def test_no_document_promises_a_command_with_a_mangled_path():
         assert broken not in doc.read_bytes(), doc.name
     for doc in (REPO / "docs").glob("*.md"):
         assert broken not in doc.read_bytes(), doc.name
+
+
+def test_a_stage_can_be_skipped_from_the_full_chain():
+    """--all includes the gated baseline stage, so a script that also invoked
+    pipeline.baseline afterwards trained the ceiling twice -- 40 minutes of GPU time
+    for a duplicate."""
+    full = [s.name for s in stages.resolve(None)]
+    assert "baseline" in full
+
+    without = [s.name for s in stages.resolve(None, skip="baseline")]
+    assert "baseline" not in without
+    assert without == [n for n in full if n != "baseline"], "nothing else moved"
+
+    # Skipping by name, so a stage added later is still included by default rather
+    # than silently missing from a hardcoded list.
+    assert [s.name for s in stages.resolve("env,fleet", skip="fleet")] == ["env"]
+
+
+def test_skipping_a_stage_that_does_not_exist_is_refused():
+    with pytest.raises(SystemExit, match="unknown stage"):
+        stages.resolve(None, skip="basline")

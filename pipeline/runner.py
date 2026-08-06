@@ -212,6 +212,7 @@ def build_parser() -> argparse.ArgumentParser:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--list", action="store_true", help="show stages and their current state")
     ap.add_argument("--stages", help="comma-separated subset, e.g. env,fleet")
+    ap.add_argument("--skip", help="comma-separated stages to leave out, e.g. baseline")
     ap.add_argument("--all", action="store_true", help="run the whole chain")
     ap.add_argument("--profile", choices=("demo", "full"), default="demo")
     ap.add_argument("--vehicles", type=int, default=6)
@@ -259,7 +260,7 @@ def main(argv=None) -> int:
         print("\nnothing was run; pass --stages <names> or --all")
         return 0
 
-    chain = stages.resolve(args.stages) if args.stages else list(stages.STAGES)
+    chain = stages.resolve(args.stages, args.skip)
     run = Run(cfg, confirm_all=args.yes, ray_address=args.ray_address)
 
     printer = threading.Thread(target=_drain, args=(run,), daemon=True)
