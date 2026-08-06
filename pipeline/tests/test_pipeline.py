@@ -1026,3 +1026,21 @@ def test_a_line_the_console_cannot_encode_does_not_kill_the_output_thread(monkey
     monkeypatch.undo()
     written = raw.getvalue().decode("cp1252")
     assert "progress" in written and "bar" in written, written
+
+
+def test_flwr_is_resolved_next_to_the_interpreter_not_from_path(monkeypatch, tmp_path):
+    """A shell a person types into has the venv on PATH; one started by a script does
+    not, and the stage died with '[WinError 2] The system cannot find the file
+    specified' -- which names no file."""
+    fake = tmp_path / "flwr.exe"
+    fake.write_bytes(b"")
+    monkeypatch.setattr(stages, "PY", str(tmp_path / "python.exe"))
+    assert stages.flwr_executable() == str(fake)
+    assert stages._cmd_federate(Config())[0] == str(fake)
+
+
+def test_a_missing_flwr_says_which_environment_to_install_it_into(monkeypatch, tmp_path):
+    monkeypatch.setattr(stages, "PY", str(tmp_path / "python.exe"))
+    monkeypatch.setattr(stages.shutil, "which", lambda _: None)
+    with pytest.raises(RuntimeError, match="pip install flwr"):
+        stages.flwr_executable()

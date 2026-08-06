@@ -275,6 +275,29 @@ def _cmd_sanity(cfg: Config) -> list[str]:
         data=str(data), imgsz=cfg.imgsz, device="0")]
 
 
+def flwr_executable() -> str:
+    """The flwr launcher belonging to *this* interpreter, not whatever is on PATH.
+
+    A shell that a person types into has the venv's Scripts directory on PATH; a
+    non-interactive one started by a script does not, and the stage then died with
+    "[WinError 2] The system cannot find the file specified" -- a message that says
+    nothing about which file. Resolving it next to sys.executable also guarantees the
+    launcher and the interpreter come from the same environment, which matters here:
+    flwr spawns clients with the interpreter it was installed against.
+    """
+    here = Path(PY).parent
+    for name in ("flwr.exe", "flwr", "flwr-script.py"):
+        candidate = here / name
+        if candidate.exists():
+            return str(candidate)
+    found = shutil.which("flwr")
+    if found:
+        return found
+    raise RuntimeError(
+        f"flwr not found next to {PY} or on PATH. Install it into this environment: "
+        f"{PY} -m pip install flwr")
+
+
 def _cmd_federate(cfg: Config) -> list[str]:
     # num-supernodes MUST track the vehicle count. It lives in the federation config,
     # which flwr migrates out of pyproject.toml into ~/.flwr/config.toml on first run
@@ -286,7 +309,7 @@ def _cmd_federate(cfg: Config) -> list[str]:
         # exists ("When connecting to an existing cluster, num_cpus and num_gpus must
         # not be provided"), so these are only valid when flwr starts Ray itself.
         fed += " init-args-num-gpus=1 init-args-num-cpus=8"
-    return ["flwr", "run", ".", "--stream", "--federation-config", fed,
+    return [flwr_executable(), "run", ".", "--stream", "--federation-config", fed,
             "--run-config",
             f'num_server_rounds={cfg.rounds} local_epochs={cfg.local_epochs} '
             f'min_clients={cfg.n_vehicles} fraction_fit=1.0 '
