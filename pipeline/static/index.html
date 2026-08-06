@@ -18,6 +18,8 @@
   <div class="tabs" role="tablist" aria-label="Views">
     <button class="tab" role="tab" aria-selected="true"  aria-controls="view-control" data-view="control">Control</button>
     <button class="tab" role="tab" aria-selected="false" aria-controls="view-live" data-view="live">Live</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-data" data-view="data">Data</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-plan" data-view="plan">Plan</button>
   </div>
   <div class="spacer"></div>
   <span class="lamp l-idle" id="runState">idle</span>
@@ -232,6 +234,24 @@
       <pre id="log" tabindex="0" aria-label="Run log"></pre>
     </div>
   </div>
+</section>
+<!-- ======================================================================== DATA -->
+<section id="view-data" class="grid" hidden role="tabpanel" aria-label="Data">
+  <div class="panel" style="display:flex;align-items:center;gap:var(--s3)">
+    <div>
+      <h2 style="margin:0">The dataset behind every number on this page</h2>
+      <p class="hint" style="margin-top:4px">Counted from the shards and their label
+        files, not from a table someone typed. Computed once and cached against the
+        fleet fingerprint, so a rebuilt fleet recounts itself.</p>
+    </div>
+    <button id="dataRefresh" style="margin-left:auto">Recount</button>
+  </div>
+  <div id="dataBody" class="grid"></div>
+</section>
+
+<!-- ======================================================================== PLAN -->
+<section id="view-plan" class="grid" hidden role="tabpanel" aria-label="Plan">
+  <div id="planBody" class="grid"></div>
 </section>
 </main>
 

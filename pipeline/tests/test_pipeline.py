@@ -1153,3 +1153,93 @@ def test_a_stage_can_be_skipped_from_the_full_chain():
 def test_skipping_a_stage_that_does_not_exist_is_refused():
     with pytest.raises(SystemExit, match="unknown stage"):
         stages.resolve(None, skip="basline")
+
+
+# ----------------------------------------------------------- data + plan views
+from pipeline import dataset_stats as _ds, plan as _plan  # noqa: E402
+
+
+def test_class_histogram_counts_instances_not_files(tmp_path):
+    """Two objects in one file is two objects. The headline finding -- car is 55% of
+    BDD100K -- is wrong by a factor if files are counted instead."""
+    labels = tmp_path / "labels"
+    labels.mkdir()
+    (labels / "a.txt").write_text("2 0.5 0.5 0.1 0.1\n2 0.2 0.2 0.1 0.1\n9 0.3 0.3 0.1 0.1\n")
+    (labels / "b.txt").write_text("2 0.5 0.5 0.1 0.1\n")
+    (labels / "notalabel.jpg").write_bytes(b"x")
+
+    assert _ds.class_histogram(labels) == {"2": 3, "9": 1}
+    assert _ds.class_histogram(tmp_path / "nope") == {}
+
+
+def test_dataset_stats_are_cached_against_the_fleet_fingerprint(tmp_path, monkeypatch):
+    """Reading 14 000 label files takes seconds; the 2-second poll must never do it.
+    A rebuilt fleet has a new fingerprint and invalidates the cache by itself."""
+    from pipeline import vehicles as _v
+
+    monkeypatch.setattr(_ds, "CACHE", tmp_path / "stats.json")
+    calls = {"n": 0}
+
+    def counted():
+        calls["n"] += 1
+        return {"fleet": [], "class_names": []}
+
+    monkeypatch.setattr(_ds, "compute", counted)
+    monkeypatch.setattr(_v, "load_fleet_meta", lambda: {"fingerprint": "aaa"})
+
+    _ds.cached()
+    _ds.cached()
+    assert calls["n"] == 1, "the second call must come from the cache"
+
+    monkeypatch.setattr(_v, "load_fleet_meta", lambda: {"fingerprint": "bbb"})
+    _ds.cached()
+    assert calls["n"] == 2, "a different fleet must recount"
+
+
+def test_the_plan_states_the_budget_both_sides_must_match():
+    """The centralised epochs it quotes must be the ones that make the image-visits
+    equal -- the arithmetic whose absence produced a 1.667x ceiling."""
+    from pipeline import baseline as _b
+
+    cfg = Config(profile="full", n_vehicles=6, rounds=6, local_epochs=4,
+                 per_vehicle_override=1400)
+    b = _plan.budget(cfg)
+    assert b["image_visits"] == 6 * 1400 * 6 * 4 == 201600
+    assert b["pooled_images"] == 8400
+
+    par = _b.parity(b["pooled_images"], b["centralised_epochs_to_match"],
+                    cfg.n_vehicles, cfg.per_vehicle, cfg.rounds, cfg.local_epochs)
+    assert par["ratio"] == 1.0 and par["matched"] is True
+
+
+def test_the_plan_warns_about_a_condition_it_cannot_fill(monkeypatch):
+    """Asking for more images than the rarest condition holds turns a non-IID run
+    into a nearly-IID one, silently."""
+    monkeypatch.setattr(_plan.holdout, "names", lambda: {"x.jpg"})
+    warns = _plan.warnings(Config(profile="full", partition="condition",
+                                  per_vehicle_override=6308))
+    assert any("rarest condition" in w for w in warns)
+
+    quiet = _plan.warnings(Config(profile="demo", partition="condition", rounds=2))
+    assert not any("rarest condition" in w for w in quiet)
+
+
+def test_the_plan_warns_when_there_is_no_holdout(monkeypatch):
+    monkeypatch.setattr(_plan.holdout, "names", lambda: set())
+    warns = _plan.warnings(Config(rounds=2))
+    assert any("comparable with nothing" in w for w in warns)
+
+
+def test_the_plan_emits_commands_that_the_runner_accepts():
+    """A plan quoting a command the CLI would reject is worse than none."""
+    cfg = Config(profile="full", n_vehicles=6, rounds=6, local_epochs=4,
+                 per_vehicle_override=1400, partition="dirichlet", alpha=0.3,
+                 strategy="fedadam")
+    from pipeline import runner
+
+    parser = runner.build_parser()
+    for entry in _plan.commands(cfg):
+        parts = entry["cmd"].split()
+        if parts[2:4] != ["pipeline.runner", "--all"]:
+            continue
+        parser.parse_args(parts[4:])        # raises SystemExit on anything unknown

@@ -18,7 +18,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import baseline, gpu, holdout, logparse, paths, stages, vehicle_metrics, vehicles, verify
+from . import (baseline, dataset_stats, gpu, holdout, logparse, paths, plan, stages,
+               vehicle_metrics, vehicles, verify)
 from .runner import Run
 from .stages import Config
 
@@ -222,6 +223,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._sse()
         if self.path.startswith("/static/"):
             return self._static()
+        if self.path.split("?")[0] == "/api/data":
+            # Seconds to compute over 14 000 label files, so it is cached against the
+            # fleet fingerprint and never computed inside the 2-second poll.
+            return self._json(dataset_stats.cached(force="refresh=1" in self.path))
+        if self.path.split("?")[0] == "/api/plan":
+            return self._json(plan.plan(CONFIG))
         if self.path.startswith("/api/vehicle/"):
             return self._vehicle()
         if self.path.startswith("/api/shard-image/"):

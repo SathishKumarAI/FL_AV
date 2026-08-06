@@ -207,3 +207,32 @@ ul.plain li{padding:5px 0;display:flex;gap:var(--s2);align-items:flex-start}
 
 @media (max-width:900px){main{padding:var(--s4)} .two{grid-template-columns:1fr !important}}
 @media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
+
+/* ---------------------------------------------------------- data + plan tabs */
+.stacks{display:grid;gap:6px}
+.stackrow{display:grid;grid-template-columns:minmax(120px,190px) 1fr;gap:var(--s3);align-items:center}
+.stackrow .lbl{font:500 var(--t-xs)/1.4 var(--mono);color:var(--dim);overflow:hidden;
+                text-overflow:ellipsis;white-space:nowrap}
+.stack{display:flex;height:14px;border-radius:3px;overflow:hidden;background:var(--sunk);
+       border:1px solid var(--line-soft)}
+.stack>i{display:block;height:100%}
+.stack>i:hover{filter:brightness(1.35)}
+button.sortbtn{background:none;border:0;padding:0;color:inherit;font:inherit;cursor:pointer;
+               text-transform:inherit;letter-spacing:inherit}
+button.sortbtn:hover{color:var(--ink)}
+button.linky{background:none;border:0;padding:0;color:var(--accent);font:inherit;cursor:pointer;
+             display:inline-flex;align-items:center;gap:5px}
+button.linky:hover{text-decoration:underline}
+tr.shardrow{cursor:pointer}
+tr.shardrow:hover td{background:var(--sunk)}
+tr.shardrow[data-sel=true] td{background:var(--sunk);box-shadow:inset 2px 0 0 var(--accent)}
+td.warn{color:var(--warn)}
+.sum{font:500 var(--t-lg)/1.6 var(--mono);color:var(--ink-2);letter-spacing:-.01em}
+.sum em{color:var(--dim);font-style:normal;padding:0 4px}
+.sum b{color:var(--accent);font-weight:650}
+.cmd{display:grid;grid-template-columns:1fr auto;gap:var(--s2);align-items:start;
+     margin-bottom:var(--s3)}
+.cmd .lbl{grid-column:1 / -1;font:500 var(--t-xs)/1.4 var(--mono);color:var(--dim);
+          text-transform:uppercase;letter-spacing:.08em}
+pre.cmdline{max-height:none;white-space:pre-wrap;word-break:break-all;font-size:var(--t-xs)}
+button.copy{padding:6px 12px;font-size:var(--t-xs)}
