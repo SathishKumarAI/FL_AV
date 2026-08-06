@@ -38,7 +38,9 @@ Open the one file that owns the thing. Do not read the package to find it.
 | The four pass criteria | `pipeline/verify.py` |
 | Per-vehicle learning maths (divergence, contribution) | `pipeline/vehicle_metrics.py` |
 | The run report | `pipeline/report.py` |
-| ⚠ Strategy, client, or model — a **different branch and prompt** | `my-project/*_app.py` |
+| ⚠ Aggregation strategy — **different branch and prompt** | `my-project/my_project/server_app.py` |
+| ⚠ Client training loop, checksums it logs — **ditto** | `my-project/my_project/client_app.py` |
+| ⚠ Data yaml, batch path resolution, model loading — **ditto** | `my-project/my_project/task.py` |
 
 Full dashboard map, including the rules that keep it split:
 [`pipeline/static/README.md`](pipeline/static/README.md).
