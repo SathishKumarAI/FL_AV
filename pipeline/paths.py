@@ -73,6 +73,14 @@ def subprocess_env(ray_address: str | None = None, data_root: Path | None = None
     """
     env = os.environ.copy()
     env["FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION"] = "1"
+    # Every child writes UTF-8 whatever the console codepage is. Without it, a
+    # subprocess whose stdout is a redirected pipe gets cp1252 on Windows, and flwr
+    # -- which prints a flower emoji in its banner -- dies with "'charmap' codec
+    # can't encode character '\U0001f338'". The federation then fails for a reason
+    # that has nothing to do with federated learning, and only when run from a
+    # script rather than a terminal.
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     env["FL_AV_DATA_ROOT"] = str(data_root or PROJECT)
     env.setdefault("MLFLOW_TRACKING_URI", MLFLOW_STORE.as_uri())
     if ray_address:

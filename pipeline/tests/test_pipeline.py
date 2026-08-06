@@ -1044,3 +1044,14 @@ def test_a_missing_flwr_says_which_environment_to_install_it_into(monkeypatch, t
     monkeypatch.setattr(stages.shutil, "which", lambda _: None)
     with pytest.raises(RuntimeError, match="pip install flwr"):
         stages.flwr_executable()
+
+
+def test_every_subprocess_is_told_to_write_utf8():
+    """flwr prints a flower emoji in its banner. With a redirected stdout on Windows
+    the child gets cp1252 and dies with "'charmap' codec can't encode character
+    '\U0001f338'" -- a federation failing for a reason unrelated to federation, and
+    only when launched from a script rather than a terminal."""
+    env = paths.subprocess_env()
+    assert env["PYTHONIOENCODING"] == "utf-8"
+    assert env["PYTHONUTF8"] == "1"
+    assert env["FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION"] == "1"
