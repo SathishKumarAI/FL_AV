@@ -13,19 +13,19 @@ like a product.
 
 | # | Feature | P |
 |---|---|---|
-| 1 | Design system pass: type scale, 8px spacing grid, consistent radii, one accent — replace ad-hoc inline styles | P1 |
-| 2 | Real chart component with axes, gridlines, ticks and hover tooltips (still inline SVG, still no CDN) | P1 |
-| 3 | Vehicle cards as a proper fleet grid: condition icon, sparkline, delta chip, status ring | P1 |
-| 4 | Skeleton loaders instead of "—" while the first poll lands | P1 |
-| 5 | Empty states that say what to do next, not just that data is missing | P1 |
+| 1 | Design system pass: type scale, 8px spacing grid, consistent radii, one accent — replace ad-hoc inline styles | ✅ 2026-08-06 |
+| 2 | Real chart component with axes, gridlines, ticks and hover tooltips (still inline SVG, still no CDN) | ✅ 2026-08-06 |
+| 3 | Vehicle cards as a proper fleet grid: condition icon, sparkline, delta chip, status ring | ✅ 2026-08-06 |
+| 4 | Skeleton loaders instead of "—" while the first poll lands | ✅ 2026-08-06 |
+| 5 | Empty states that say what to do next, not just that data is missing | ✅ 2026-08-06 |
 | 6 | Toast notifications for stage transitions and failures | P2 |
 | 7 | Animated round transitions so progress is felt, not read | P2 |
 | 8 | Dark/light toggle that persists (currently follows OS only) | P2 |
 | 9 | Keyboard shortcuts: `r` run, `s` stop, `1..9` select vehicle, `?` help | P2 |
 | 10 | Command palette (⌘K) for stages, vehicles, reports | P3 |
 | 11 | Responsive layout that works at 1280px and on a tablet | P2 |
-| 12 | Per-vehicle detail drawer: full curve, config, shard composition, sample images | P1 |
-| 13 | Sample image strip per vehicle — see what "rain / fog" actually looks like | P1 |
+| 12 | Per-vehicle detail drawer: full curve, config, shard composition, sample images | ✅ 2026-08-06 |
+| 13 | Sample image strip per vehicle — see what "rain / fog" actually looks like | ✅ 2026-08-06 |
 | 14 | Live map/schematic of the fleet with vehicles lighting up as they train | P3 |
 | 15 | Round timeline scrubber: drag back through the run's history | P2 |
 | 16 | Compare two runs side by side in the browser | P2 |
@@ -34,7 +34,7 @@ like a product.
 | 19 | GPU panel: temperature, clocks, fan, and a cost estimate in local currency | P3 |
 | 20 | Log viewer: level filter, search, regex, jump-to-error, copy-line | P2 |
 | 21 | Progressive disclosure — collapse advanced panels by default | P2 |
-| 22 | Accessibility pass: focus rings, ARIA on charts, contrast ≥ 4.5:1, reduced-motion | P1 |
+| 22 | Accessibility pass: focus rings, ARIA on charts, contrast ≥ 4.5:1, reduced-motion | ✅ 2026-08-06 |
 | 23 | Export any chart as PNG/SVG | P3 |
 | 24 | Server-side render of the first paint so the page is useful before JS runs | P3 |
 
@@ -42,8 +42,8 @@ like a product.
 
 | # | Feature | P |
 |---|---|---|
-| 25 | **Centralised baseline run** — FL numbers mean nothing without the ceiling | P1 |
-| 26 | **Shared holdout set** no vehicle trains on, for honest global evaluation | P1 |
+| 25 | **Centralised baseline run** — FL numbers mean nothing without the ceiling | ✅ 2026-08-06 |
+| 26 | **Shared holdout set** no vehicle trains on, for honest global evaluation | ✅ 2026-08-06 |
 | 27 | Freeze the backbone for round 1 while the random 13-class head settles ⚠ | P1 |
 | 28 | Report mAP50-95 everywhere mAP50 is reported | P1 |
 | 29 | Early stopping on the global model, on the shared holdout | P2 |
@@ -71,7 +71,7 @@ See [`FL_TECHNIQUES.md`](FL_TECHNIQUES.md) — Flower already ships 24 strategie
 
 | # | Feature | P |
 |---|---|---|
-| 47 | **Strategy plugin architecture** — mixin + registry, so any Flower strategy works ⚠ | P1 |
+| 47 | **Strategy plugin architecture** — mixin + registry, so any Flower strategy works ⚠ | ✅ 2026-08-06 |
 | 48 | True FedProx proximal term rather than the weight-space approximation ⚠ | P1 |
 | 49 | FedAdam / FedYogi / FedAdagrad comparison at fixed everything else | P1 |
 | 50 | FedAvgM (server momentum) — cheap, often free gains on non-IID | P2 |
@@ -92,9 +92,9 @@ See [`FL_TECHNIQUES.md`](FL_TECHNIQUES.md) — Flower already ships 24 strategie
 
 | # | Feature | P |
 |---|---|---|
-| 63 | **Partition strategies as plugins**: condition, random, mixed, dirichlet(α), by-size, by-class | P1 |
-| 64 | Dirichlet partitioning with α — the standard non-IID knob in FL papers | P1 |
-| 65 | Manifest per fleet: exact image list, hashes, seed, partition — reproducibility | P1 |
+| 63 | **Partition strategies as plugins**: condition, random, mixed, dirichlet(α), by-size, by-class | ✅ 2026-08-06 |
+| 64 | Dirichlet partitioning with α — the standard non-IID knob in FL papers | ✅ 2026-08-06 |
+| 65 | Manifest per fleet: exact image list, hashes, seed, partition — reproducibility | ✅ 2026-08-06 |
 | 66 | Shard validation: every image has a label, no duplicates, no cross-shard leakage | P1 |
 | 67 | Condition-supply guard: refuse a fleet whose per-vehicle size exceeds the rarest condition | P1 |
 | 68 | Streaming/lazy shard materialisation for fleets larger than disk | P2 |
@@ -153,3 +153,15 @@ See [`FL_TECHNIQUES.md`](FL_TECHNIQUES.md) — Flower already ships 24 strategie
 **1, 2, 3, 12, 13** (the UI stops looking like a log), **25, 26** (results become
 meaningful), **47** (every FL technique unlocks at once), **63/64** (partitioning becomes
 research-grade), **89** (the GPU stops idling between serialised clients).
+
+**Done 2026-08-06:** 1–5, 12, 13, 22 (dashboard rebuilt and split by concern), 25, 26
+(shared holdout + centralised baseline — the federation finally has a scale), 47
+(strategy registry: 12 Flower strategies reachable), 63, 64 (partition registry +
+Dirichlet α), 65 in part (`fleet.meta.json` records partition, α, seed, per-vehicle
+count and holdout size; the exact image list and hashes are still to do).
+
+**Next ten, in order:** 42 (seeds — one run is an anecdote), 31 (rounds × epochs at
+constant product), 27 and 30 (⚠ backbone freeze, LR schedule), 28 (mAP50-95
+everywhere), 32 (per-class), 33 (per-condition matrix), 80 (MLflow actually called),
+89 (pack clients concurrently — peak VRAM at this profile is 5.1 GB of 16.3), 96
+(CI matrix on Windows + Linux).
