@@ -8,8 +8,9 @@ import { renderFleet } from "./fleet.js";
 import { loadData } from "./data.js";
 import { loadPlan } from "./plan.js";
 import { loadDocs } from "./docs.js";
+import { loadMetrics } from "./metrics.js";
 
-const VIEWS = ["control", "live", "data", "plan", "docs"];
+const VIEWS = ["control", "live", "data", "metrics", "plan", "docs"];
 
 function showView(tab) {
   const want = tab.dataset.view;
@@ -22,6 +23,7 @@ function showView(tab) {
   // seconds of label reading, the other is only interesting when someone looks.
   if (want === "data") loadData(false);
   if (want === "plan") loadPlan();
+  if (want === "metrics") loadMetrics(true);
   if (want === "docs") loadDocs();
 }
 document.querySelectorAll(".tab").forEach(t => { t.onclick = () => showView(t); });

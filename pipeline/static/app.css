@@ -261,3 +261,8 @@ button.copy{padding:6px 12px;font-size:var(--t-xs)}
 .doccard summary:hover{color:var(--ink)}
 pre.docstring{margin-top:var(--s2);max-height:220px;font-size:11px;line-height:1.55}
 input[type=search]{width:100%}
+
+/* --------------------------------------------------------------- metrics tab */
+tr.runrow{cursor:pointer}
+tr.runrow:hover td{background:var(--sunk)}
+tr.runrow[data-sel=true] td{background:var(--sunk);box-shadow:inset 2px 0 0 var(--accent)}

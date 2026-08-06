@@ -97,6 +97,14 @@ ROLES: dict[str, dict] = {
                        "1.667x the federation's image-visits.",
         "tab": "Plan",
     },
+    "ledger": {
+        "command": "python -m pipeline.ledger",
+        "contributes": "Every run as one comparable record: approach, data used, wall "
+                       "clock, energy, and what it produced — including the per-epoch "
+                       "losses, where a plateau shows up long before the round-level "
+                       "metric admits it.",
+        "tab": "Metrics",
+    },
     "compare": {
         "command": "python -m pipeline.compare --last 10",
         "contributes": "Runs side by side, holdout number first, with a warning when "
@@ -152,6 +160,10 @@ TABS = [
     {"name": "Plan", "answers": "What will this configuration cost, and what would a "
                                 "fair comparison need?",
      "reads": "plan.budget, plan.commands, stages.snapshot"},
+    {"name": "Metrics", "answers": "Which approach was worth it? What did each run "
+                                   "cost, and was the model still learning when the "
+                                   "round ended?",
+     "reads": "ledger, from the reports each run already wrote"},
     {"name": "Docs", "answers": "What is each program for, and which number does it "
                                 "contribute to?",
      "reads": "this module, from the packages' own docstrings"},

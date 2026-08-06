@@ -1329,3 +1329,74 @@ def test_per_vehicle_metrics_follow_the_current_run(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "log_dirs", lambda: [logs])
     rounds = vm.per_vehicle_rounds()
     assert set(rounds) == {"4"}, "vehicle 9 belongs to a run that is over"
+
+
+# ------------------------------------------------------------------- the ledger
+from pipeline import ledger as _ledger  # noqa: E402
+
+
+def _ledger_report(dir_, name, cfg, holdout_curve=(), seconds=100, wh=10.0, epochs=None):
+    d = dir_ / name
+    d.mkdir(parents=True)
+    data = {
+        "config": cfg, "checksums": [1.0, 2.0], "learned": True,
+        "gpu": {"energy_wh": wh, "peak_mem_mib": 5000, "mean_util_pct": 40},
+        "stages": [{"name": "federate", "status": "ok", "seconds": seconds},
+                   {"name": "verify", "status": "ok", "seconds": 1}],
+        "metrics": [{"stage": "evaluate", "mAP50": 0.5}],
+        "holdout": {"rounds": [{"round": i + 1, "mAP50": v, "mAP50-95": v / 2}
+                               for i, v in enumerate(holdout_curve)]},
+        "learning": {"trained": ["1"], "conditions": {"1": "night"},
+                     "rounds": {"1": [{"mAP50": 0.3}]},
+                     "epochs": {"1": epochs or [{"box_loss": 1.5, "cls_loss": 1.0, "dfl_loss": 1.1}]}},
+    }
+    (d / "report.json").write_text(json.dumps(data))
+    return d
+
+
+def test_the_ledger_records_what_each_approach_cost_and_produced(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "REPORTS", tmp_path)
+    _ledger_report(tmp_path, "20260101-000000",
+                   {"strategy": "fedavg", "partition": "condition", "n_vehicles": 6,
+                    "rounds": 6, "local_epochs": 4, "per_vehicle": 1400},
+                   holdout_curve=(0.33, 0.41), seconds=3296, wh=82.2)
+
+    r = _ledger.load()[0]
+    assert r["data"]["image_visits"] == 6 * 1400 * 6 * 4
+    assert r["data"]["effective_epochs"] == 24
+    assert r["result"]["holdout_mAP50"] == 0.41
+    assert r["time"]["seconds"] == 3297.0
+    assert r["cost"]["wh_per_point"] == round(82.2 / 0.41, 1)
+    assert "fedavg" in r["approach"] and "1400img" in r["approach"]
+    assert r["learning"]["epochs"]["1"][0]["box"] == 1.5, "per-epoch rows must survive"
+
+
+def test_a_federation_above_its_own_ceiling_is_flagged_not_celebrated(tmp_path, monkeypatch):
+    """0.4334 against a ceiling of 0.35 does not mean federation beat centralised; it
+    means the ceiling was stale."""
+    monkeypatch.setattr(paths, "REPORTS", tmp_path)
+    d = _ledger_report(tmp_path, "20260101-000000", {"n_vehicles": 2, "rounds": 1,
+                                                     "local_epochs": 1, "per_vehicle": 10},
+                       holdout_curve=(0.5,))
+    data = json.loads((d / "report.json").read_text())
+    data["baseline"] = {"centralised_mAP50": 0.4, "retained": 1.25, "matched": True}
+    (d / "report.json").write_text(json.dumps(data))
+
+    assert _ledger.load()[0]["result"]["ceiling_suspect"] is True
+
+
+def test_repeats_of_one_approach_are_grouped_so_the_noise_floor_is_visible(tmp_path, monkeypatch):
+    """A difference between two approaches smaller than the spread across repeats of
+    one of them says nothing."""
+    monkeypatch.setattr(paths, "REPORTS", tmp_path)
+    cfg = {"strategy": "fedavg", "partition": "condition", "n_vehicles": 4,
+           "rounds": 2, "local_epochs": 1, "per_vehicle": 300}
+    _ledger_report(tmp_path, "20260101-000000", {**cfg, "seed": 0}, holdout_curve=(0.20,))
+    _ledger_report(tmp_path, "20260102-000000", {**cfg, "seed": 1}, holdout_curve=(0.24,))
+    _ledger_report(tmp_path, "20260103-000000", {**cfg, "strategy": "fedadam"}, holdout_curve=(0.22,))
+
+    groups = {g["approach"]: g for g in _ledger.by_approach()}
+    fedavg = next(g for k, g in groups.items() if k.startswith("fedavg"))
+    assert fedavg["n"] == 2 and fedavg["spread"] == 0.04
+    assert fedavg["mean"] == 0.22
+    assert next(g for k, g in groups.items() if k.startswith("fedadam"))["spread"] is None

@@ -19,6 +19,7 @@
     <button class="tab" role="tab" aria-selected="true"  aria-controls="view-control" data-view="control">Control</button>
     <button class="tab" role="tab" aria-selected="false" aria-controls="view-live" data-view="live">Live</button>
     <button class="tab" role="tab" aria-selected="false" aria-controls="view-data" data-view="data">Data</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-metrics" data-view="metrics">Metrics</button>
     <button class="tab" role="tab" aria-selected="false" aria-controls="view-plan" data-view="plan">Plan</button>
     <button class="tab" role="tab" aria-selected="false" aria-controls="view-docs" data-view="docs">Docs</button>
   </div>
@@ -248,6 +249,11 @@
     <button id="dataRefresh" style="margin-left:auto">Recount</button>
   </div>
   <div id="dataBody" class="grid"></div>
+</section>
+
+<!-- ===================================================================== METRICS -->
+<section id="view-metrics" class="grid" hidden role="tabpanel" aria-label="Metrics">
+  <div id="metricsBody" class="grid"></div>
 </section>
 
 <!-- ======================================================================== DOCS -->
