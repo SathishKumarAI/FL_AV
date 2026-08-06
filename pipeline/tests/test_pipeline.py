@@ -1068,3 +1068,34 @@ def test_the_interpreters_scripts_directory_leads_the_path():
     first = env["PATH"].split(os.pathsep)[0]
     assert first == str(Path(sys.executable).parent)
     assert env["PATH"].count(first) >= 1
+
+
+def test_checkpoints_from_a_previous_run_are_not_plotted_as_this_ones(tmp_path, monkeypatch):
+    """A 2-round run leaves rounds 3..6 from a previous 6-round one in the directory.
+    Scoring all of them drew a curve that jumped 0.014 -> 0.217 between round 2 and
+    round 3: two different models plotted as one."""
+    import os
+    import time
+    from pipeline import holdout as _h
+
+    ckpts = tmp_path / "checkpoints"
+    ckpts.mkdir()
+    old = time.time() - 3600
+    for i in (3, 4, 5, 6):
+        f = ckpts / f"global_round_{i}.pt"
+        f.write_bytes(b"old")
+        os.utime(f, (old, old))
+    for i in (1, 2):
+        (ckpts / f"global_round_{i}.pt").write_bytes(b"new")
+
+    monkeypatch.setattr(paths, "PROJECT", tmp_path)
+    assert [p.name for p in _h.checkpoints()] == ["global_round_1.pt", "global_round_2.pt"]
+
+
+def test_a_demo_ceiling_does_not_overwrite_the_archive_of_a_full_one(tmp_path):
+    """40 minutes of GPU time should not be replaceable by 30 seconds of it."""
+    from pipeline import baseline as _b
+
+    names = {f"baseline-{images}img-{epochs}ep.json"
+             for images, epochs in ((8400, 24), (1200, 2))}
+    assert len(names) == 2, "the archive name must distinguish the budgets"

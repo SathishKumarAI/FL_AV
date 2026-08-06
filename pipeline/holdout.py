@@ -113,12 +113,31 @@ def build(size: int = 1000, seed: int = 0, class_names: list[str] | None = None,
 # Evaluation
 # --------------------------------------------------------------------------
 def checkpoints() -> list[Path]:
-    """Global checkpoints in round order. ``global_last.pt`` is deliberately left
-    out: it duplicates the highest round and would draw a false extra point."""
+    """This run's global checkpoints, in round order.
+
+    ``global_last.pt`` is left out: it duplicates the highest round and would draw a
+    false extra point.
+
+    Checkpoints from *earlier* runs are left out too, and that is the subtle part.
+    The directory is not cleared between runs, so a 2-round run leaves rounds 3..6
+    from a previous 6-round one sitting beside its own. Scoring all of them produced
+    a curve that jumped from 0.014 to 0.217 between round 2 and round 3 -- two
+    different models plotted as one learning curve. A run rewrites round 1 first, so
+    anything older than round 1 belongs to a run that is over.
+    """
     ckpt_dir = paths.PROJECT / "checkpoints"
     rounds = sorted(ckpt_dir.glob("global_round_*.pt"),
                     key=lambda p: int(p.stem.rsplit("_", 1)[-1]))
-    return rounds
+    if not rounds:
+        return []
+    first = rounds[0].stat().st_mtime
+    fresh, stale = [], []
+    for p in rounds:
+        (fresh if p.stat().st_mtime >= first - 1 else stale).append(p)
+    if stale:
+        print(f"ignoring {len(stale)} checkpoint(s) older than round 1 "
+              f"({', '.join(p.name for p in stale)}): they belong to a previous run")
+    return fresh
 
 
 def evaluate(weights: Path, imgsz: int = 640, batch: int = 8, device: str = "0") -> dict:

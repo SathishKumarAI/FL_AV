@@ -206,6 +206,12 @@ def main(argv=None) -> int:
     row["parity"] = p
     RESULT_FILE.parent.mkdir(parents=True, exist_ok=True)
     RESULT_FILE.write_text(json.dumps(row, indent=1))
+    # Archived by what it actually measured, so a 30-second demo ceiling cannot
+    # silently replace a 40-minute full-scale one. baseline.json stays "the latest";
+    # the archive is what a comparison should reach for.
+    archive = RESULT_FILE.parent / f"baseline-{row['images']}img-{row['epochs']}ep.json"
+    archive.write_text(json.dumps(row, indent=1))
+    print(f"archived: {archive.name}")
 
     print(f"\ncentralised on the shared holdout: mAP50 {row['mAP50']:.4f}  "
           f"mAP50-95 {row['mAP50-95']:.4f}")
