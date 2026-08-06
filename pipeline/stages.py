@@ -15,7 +15,7 @@ import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-from . import baseline, holdout, paths, vehicles
+from . import baseline, holdout, paths, validate, vehicles
 
 PY = sys.executable
 
@@ -296,6 +296,17 @@ def _cmd_holdout(cfg: Config) -> list[str]:
             "--size", str(cfg.holdout_size), "--seed", str(cfg.seed)]
 
 
+def _check_validate(_: Config) -> Check:
+    # Never satisfied: it is seconds of scanning, and the whole point is to run it
+    # against the shards a federation is about to train on, not against a memory of
+    # the last time they were sound.
+    return Check(False, "always runs; nothing measured on bad shards is worth reading")
+
+
+def _cmd_validate(_: Config) -> list[str]:
+    return [PY, "-m", "pipeline.validate"]
+
+
 def _check_evaluate(_: Config) -> Check:
     return Check(False, "always runs; the only honest global metric")
 
@@ -330,6 +341,8 @@ STAGES: list[Stage] = [
           cwd=paths.REPO, est="~20 s"),
     Stage("fleet", "Build vehicle fleet", False, _check_fleet, _cmd_fleet,
           cwd=paths.REPO, est="~30 s"),
+    Stage("validate", "Validate the shards", False, _check_validate, _cmd_validate,
+          cwd=paths.REPO, est="~10 s"),
     Stage("sanity", "Single-client GPU sanity", True, _check_sanity, _cmd_sanity, est="~2 min"),
     Stage("federate", "Federated run", True, _check_federate, _cmd_federate,
           data_root=paths.VEHICLE_ROOT, est="minutes to hours",

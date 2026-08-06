@@ -705,3 +705,95 @@ def test_the_report_says_when_the_number_has_no_scale(monkeypatch):
     monkeypatch.setattr(_b, "gap", lambda: {})
     md = report.to_markdown(report.collect(config={}))
     assert "still has no scale" in md
+
+
+# ------------------------------------------------------------ shard validation
+from pipeline import validate as _validate  # noqa: E402
+
+
+def _shard(root, vid, train=("a.jpg",), val=("v.jpg",), label_text="0 0.5 0.5 0.2 0.2\n"):
+    """A minimal but sound shard: listings, images and labels that agree."""
+    shard = root / f"batch_{vid}"
+    for split, names in (("train", train), ("val", val)):
+        (shard / "images" / split).mkdir(parents=True, exist_ok=True)
+        (shard / "labels" / split).mkdir(parents=True, exist_ok=True)
+        for name in names:
+            (shard / "images" / split / name).write_bytes(b"x")
+            (shard / "labels" / split / f"{name.rsplit('.', 1)[0]}.txt").write_text(label_text)
+        (shard / f"{split}.txt").write_text("".join(f"{n}\n" for n in names))
+    return shard
+
+
+def _checks(problems):
+    return {p.check for p in problems}
+
+
+def test_a_sound_fleet_reports_nothing(tmp_path):
+    _shard(tmp_path, 1)
+    _shard(tmp_path, 2, train=("b.jpg",), val=("w.jpg",))
+    assert _validate.check_fleet(tmp_path, held=set()) == []
+
+
+def test_an_image_without_a_label_is_caught(tmp_path):
+    """It trains as a background image: the vehicle learns its condition is empty."""
+    shard = _shard(tmp_path, 1)
+    (shard / "labels" / "train" / "a.txt").unlink()
+    assert "images with no label file" in _checks(_validate.check_fleet(tmp_path, held=set()))
+
+
+def test_an_image_two_vehicles_both_hold_is_caught(tmp_path):
+    """num_examples is FedAvg's weight, so a shared image votes twice."""
+    _shard(tmp_path, 1, train=("a.jpg",))
+    _shard(tmp_path, 2, train=("a.jpg",), val=("w.jpg",))
+    assert ("images shared between two vehicles' train sets"
+            in _checks(_validate.check_fleet(tmp_path, held=set())))
+
+
+def test_an_image_in_both_train_and_val_is_caught(tmp_path):
+    """Evaluation becomes a memory test and mAP stops meaning anything."""
+    _shard(tmp_path, 1, train=("a.jpg",), val=("a.jpg",))
+    assert ("images in both train and val of one shard"
+            in _checks(_validate.check_fleet(tmp_path, held=set())))
+
+
+def test_a_held_out_image_inside_a_shard_is_caught(tmp_path):
+    """The holdout is the only honest metric; an image inside a shard undoes that."""
+    _shard(tmp_path, 1, train=("a.jpg",))
+    problems = _validate.check_fleet(tmp_path, held={"a.jpg"})
+    assert "held-out images found inside a shard" in _checks(problems)
+
+
+def test_a_listing_naming_a_file_that_is_not_there_is_caught(tmp_path):
+    shard = _shard(tmp_path, 1)
+    (shard / "train.txt").write_text("a.jpg\nghost.jpg\n")
+    assert ("images listed but not materialised"
+            in _checks(_validate.check_fleet(tmp_path, held=set())))
+
+
+@pytest.mark.parametrize("text,why", [
+    ("", "empty"),
+    ("0 0.5 0.5\n", "too few fields"),
+    ("x 0.5 0.5 0.2 0.2\n", "non-numeric"),
+    ("99 0.5 0.5 0.2 0.2\n", "class id outside nc"),
+    ("0 1.5 0.5 0.2 0.2\n", "unnormalised coordinates"),
+])
+def test_unusable_label_files_are_caught(tmp_path, text, why):
+    _shard(tmp_path, 1, label_text=text)
+    assert "unusable label files" in _checks(_validate.check_fleet(tmp_path, held=set())), why
+
+
+def test_validation_repairs_nothing(tmp_path):
+    """A validator that edits data hides the bug that produced the data."""
+    shard = _shard(tmp_path, 1)
+    (shard / "labels" / "train" / "a.txt").unlink()
+    before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
+    _validate.check_fleet(tmp_path, held=set())
+    assert sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*")) == before
+
+
+def test_validate_runs_before_the_gpu_stages():
+    """Finding a broken shard after an hour of training is finding it too late."""
+    names = [s.name for s in stages.STAGES]
+    assert names.index("validate") > names.index("fleet")
+    assert names.index("validate") < names.index("sanity") < names.index("federate")
+    assert not stages.BY_NAME["validate"].gated, "seconds of scanning; never worth skipping"
