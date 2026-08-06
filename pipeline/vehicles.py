@@ -283,8 +283,13 @@ PARTITIONS = tuple(PARTITIONERS)
 def assign(n_vehicles: int, per_vehicle: int, val_per_vehicle: int = 0,
            seed: int = 0, index: dict | None = None,
            train_pool: set[str] | None = None, val_pool: set[str] | None = None,
-           partition: str = "condition", alpha: float = 0.5) -> list[Vehicle]:
+           partition: str = "condition", alpha: float = 0.5,
+           exclude: set[str] | None = None) -> list[Vehicle]:
     """Give each vehicle a disjoint slice, by whichever registered strategy is named.
+
+    ``exclude`` is removed from both pools before anything is picked -- it is how the
+    shared holdout stays held out. Subtracting here rather than inside each
+    partitioner means a new strategy cannot forget to do it.
 
     ``train_pool``/``val_pool`` are injectable so this is testable without a populated
     repo; they default to the images actually present in my-project's shards.
@@ -292,13 +297,14 @@ def assign(n_vehicles: int, per_vehicle: int, val_per_vehicle: int = 0,
     if partition not in PARTITIONERS:
         raise ValueError(f"partition must be one of {PARTITIONS}, got {partition!r}")
 
+    blocked = set(exclude or ())
     req = Request(
         n_vehicles=n_vehicles,
         per_vehicle=per_vehicle,
         val_per_vehicle=val_per_vehicle or max(20, per_vehicle // 5),
         index=index if index is not None else build_attribute_index(),
-        train_pool=_available(Path("train")) if train_pool is None else train_pool,
-        val_pool=_available(Path("val")) if val_pool is None else val_pool,
+        train_pool=(_available(Path("train")) if train_pool is None else train_pool) - blocked,
+        val_pool=(_available(Path("val")) if val_pool is None else val_pool) - blocked,
         alpha=alpha,
     )
     return PARTITIONERS[partition](req, random.Random(seed))
@@ -307,7 +313,7 @@ def assign(n_vehicles: int, per_vehicle: int, val_per_vehicle: int = 0,
 # --------------------------------------------------------------------------
 # Materialisation
 # --------------------------------------------------------------------------
-def _label_index() -> dict[str, Path]:
+def label_index() -> dict[str, Path]:
     """basename(without .txt) -> label file, across my-project's shards (read-only)."""
     out: dict[str, Path] = {}
     for batch in sorted(paths.PROJECT.glob("batch/batch_*")):
@@ -321,7 +327,7 @@ def _label_index() -> dict[str, Path]:
     return out
 
 
-def _image_index() -> dict[str, Path]:
+def image_index() -> dict[str, Path]:
     out: dict[str, Path] = {}
     for batch in sorted(paths.PROJECT.glob("batch/batch_*")):
         for split in ("train", "val"):
@@ -333,7 +339,7 @@ def _image_index() -> dict[str, Path]:
     return out
 
 
-def _link(src: Path, dst: Path) -> None:
+def link(src: Path, dst: Path) -> None:
     if dst.exists():
         return
     try:
@@ -351,7 +357,7 @@ def materialise(vehicles: list[Vehicle], class_names: list[str], nc: int = 13,
     whether a rebuild was needed by checking whether every label read "random mix",
     which cannot tell a condition fleet from a mixed one.
     """
-    images, labels = _image_index(), _label_index()
+    images, labels = image_index(), label_index()
     root = paths.VEHICLE_BATCHES
     if root.exists():
         shutil.rmtree(root)        # a fleet is defined per run; stale shards would lie
@@ -363,10 +369,10 @@ def materialise(vehicles: list[Vehicle], class_names: list[str], nc: int = 13,
             (bd / "labels" / split).mkdir(parents=True, exist_ok=True)
             for name in names:
                 if name in images:
-                    _link(images[name], bd / "images" / split / name)
+                    link(images[name], bd / "images" / split / name)
                 stem = name.rsplit(".", 1)[0]
                 if stem in labels:
-                    _link(labels[stem], bd / "labels" / split / f"{stem}.txt")
+                    link(labels[stem], bd / "labels" / split / f"{stem}.txt")
             (bd / f"{split}.txt").write_text("".join(f"{n}\n" for n in names))
         (bd / "test.txt").write_text("")
         # `path` is a placeholder; the client rewrites it via materialize_data_yaml().

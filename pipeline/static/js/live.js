@@ -78,6 +78,39 @@ function renderLive(L, cfg) {
     state.checksums = (L.checksums || []).slice();
   }
   drawHeartbeat();
+  renderHoldout(L.holdout, L.baseline);
+}
+
+/** The one metric no client could have flattered: the shared holdout. */
+function renderHoldout(holdout, baseline) {
+  const rows = (holdout && holdout.rounds) || [];
+  lineChart("holdoutChart", {
+    series: [{ label: "holdout mAP50", color: "var(--ok)", values: rows.map(r => r.mAP50), area: true },
+             { label: "mAP50-95", color: "var(--dim)", values: rows.map(r => r["mAP50-95"]), dashed: true }],
+    aria: "Global model mAP50 on the shared holdout by round", yFmt: v => v.toFixed(3),
+  });
+  const best = rows.length ? Math.max(...rows.map(r => r.mAP50)) : null;
+  $("hMap").textContent = best == null ? "—" : best.toFixed(4);
+  $("hCeiling").textContent = baseline && baseline.retained
+    ? (100 * baseline.retained).toFixed(0) + "%" : "—";
+
+  if (!rows.length) {
+    $("holdoutNote").innerHTML = "No holdout evaluation yet. Run the " +
+      "<code>holdout</code> stage to carve the set, then <code>evaluate</code> to score " +
+      "every global checkpoint on it. Until then, every number on this page was measured " +
+      "by a client on its own split.";
+    return;
+  }
+  const size = (holdout.holdout && holdout.holdout.size) || "?";
+  $("holdoutNote").innerHTML =
+    `${rows.length} checkpoint(s) scored on ${size} images no vehicle trained on: ` +
+    rows.map(r => r.mAP50.toFixed(4)).join(" → ") +
+    (baseline && baseline.centralised_mAP50
+      ? `. Centralised ceiling on the same images: <b>${baseline.centralised_mAP50.toFixed(4)}</b>, ` +
+        `so the federation retains <b>${(100 * baseline.retained).toFixed(1)}%</b> of it ` +
+        `(gap ${baseline.gap.toFixed(4)}).`
+      : ". No centralised baseline yet, so this number still has no scale — run the " +
+        "<code>baseline</code> stage.");
 }
 
 /** The signature panel: the one number whose stillness invalidates every other one. */

@@ -15,7 +15,7 @@ import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-from . import paths, vehicles
+from . import baseline, holdout, paths, vehicles
 
 PY = sys.executable
 
@@ -30,6 +30,7 @@ class Config:
     local_epochs: int = 1
     seed: int = 0
     partition: str = "condition"     # any key of vehicles.PARTITIONERS
+    holdout_size: int = 1000         # images no vehicle may train or self-evaluate on
     alpha: float = 0.5               # dirichlet only: smaller = more skewed
     per_vehicle_override: int = 0    # 0 = use the profile default
     ray_address: str | None = None   # set => attach to an existing head node
@@ -154,6 +155,7 @@ def _check_fleet(cfg: Config) -> Check:
                             f"(the server can assign any id in {tuple(paths.BATCH_IDS)[0]}.."
                             f"{tuple(paths.BATCH_IDS)[-1]})")
     meta = vehicles.load_fleet_meta()
+    held = len(holdout.names())
     if meta:
         # The manifest says how this fleet was built, so intent is compared rather
         # than guessed. Alpha counts only where it means something.
@@ -161,12 +163,20 @@ def _check_fleet(cfg: Config) -> Check:
                                      ("per_vehicle", cfg.per_vehicle)) if meta.get(k) != want]
         if cfg.partition == "dirichlet" and meta.get("alpha") != cfg.alpha:
             differs.append("alpha")
+        # A fleet built against a different holdout may hold images the global model
+        # is about to be scored on. That would make the one honest metric partly
+        # self-referential, so it forces a rebuild.
+        if meta.get("holdout", 0) != held:
+            differs.append("holdout")
         if differs:
             return Check(False, "fleet on disk differs in " + ", ".join(differs) +
                                 f" (built {meta.get('partition')!r}, want {cfg.partition!r})")
     else:
         # Pre-manifest fleet: fall back to the old inference, which can only
         # distinguish random from everything else.
+        if held:
+            return Check(False, f"fleet predates the {held}-image holdout and cannot be shown "
+                                f"to exclude it; rebuild")
         want_random = cfg.partition == "random"
         is_random = all(v.get("condition") == "random mix" for v in fleet)
         if want_random != is_random:
@@ -258,18 +268,66 @@ def _cmd_verify(_: Config) -> list[str]:
     return [PY, "-m", "pipeline.verify"]
 
 
+def _check_holdout(cfg: Config) -> Check:
+    info = holdout.meta()
+    if not info:
+        return Check(False, "not yet carved")
+    if info.get("size") != cfg.holdout_size or info.get("seed") != cfg.seed:
+        return Check(False, f"holdout on disk is size={info.get('size')} seed={info.get('seed')}, "
+                            f"config wants size={cfg.holdout_size} seed={cfg.seed}")
+    return Check(True, f"{info.get('linked')} images held out, no vehicle sees them")
+
+
+def _cmd_holdout(cfg: Config) -> list[str]:
+    return [PY, "-m", "pipeline.holdout", "--build",
+            "--size", str(cfg.holdout_size), "--seed", str(cfg.seed)]
+
+
+def _check_evaluate(_: Config) -> Check:
+    return Check(False, "always runs; the only honest global metric")
+
+
+def _cmd_evaluate(cfg: Config) -> list[str]:
+    return [PY, "-m", "pipeline.holdout", "--evaluate", "--imgsz", str(cfg.imgsz)]
+
+
+def _check_baseline(cfg: Config) -> Check:
+    row = baseline.result()
+    if not row:
+        return Check(False, "no centralised run yet; federated numbers have no scale without it")
+    want = cfg.rounds * cfg.local_epochs
+    if row.get("epochs") != want:
+        return Check(False, f"baseline was {row.get('epochs')} epochs, this run's budget is {want}")
+    return Check(True, f"mAP50 {row['mAP50']:.4f} on {row['images']} pooled images")
+
+
+def _cmd_baseline(cfg: Config) -> list[str]:
+    return [PY, "-m", "pipeline.baseline", "--rounds", str(cfg.rounds),
+            "--local-epochs", str(cfg.local_epochs), "--imgsz", str(cfg.imgsz)]
+
+
 STAGES: list[Stage] = [
     Stage("env", "Environment probe", False, _check_env, _cmd_env, est="~5 s"),
     Stage("dataset", "Download BDD100K", True, _check_dataset, _cmd_dataset, est="~10 min, 7.6 GB"),
     Stage("populate", "Populate shards", False, _check_populate, _cmd_populate, est="~1 min"),
+    # Before fleet, always. A holdout carved afterwards is already inside somebody's
+    # val split, and the "global" metric measured on it would be partly
+    # self-referential -- a silent failure of exactly the kind this project collects.
+    Stage("holdout", "Carve the shared holdout", False, _check_holdout, _cmd_holdout,
+          cwd=paths.REPO, est="~20 s"),
     Stage("fleet", "Build vehicle fleet", False, _check_fleet, _cmd_fleet,
           cwd=paths.REPO, est="~30 s"),
     Stage("sanity", "Single-client GPU sanity", True, _check_sanity, _cmd_sanity, est="~2 min"),
     Stage("federate", "Federated run", True, _check_federate, _cmd_federate,
           data_root=paths.VEHICLE_ROOT, est="minutes to hours",
           crash_markers=CRASH_MARKERS),
+    Stage("evaluate", "Score the global model on the holdout", False,
+          _check_evaluate, _cmd_evaluate, cwd=paths.REPO, est="~10 s per round"),
     Stage("verify", "Verify pass criteria", False, _check_verify, _cmd_verify,
           cwd=paths.REPO, est="~5 s"),
+    # Last, and gated: it trains a whole model. Not part of --all by accident.
+    Stage("baseline", "Centralised ceiling on pooled data", True,
+          _check_baseline, _cmd_baseline, cwd=paths.REPO, est="as long as one full run"),
 ]
 
 BY_NAME = {s.name: s for s in STAGES}

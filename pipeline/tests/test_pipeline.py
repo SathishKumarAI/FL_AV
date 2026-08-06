@@ -215,7 +215,13 @@ def test_generated_paths_are_all_gitignored():
     targets = [paths.VEHICLE_ROOT / "batch" / "batch_1" / "images" / "x.jpg",
                paths.MLFLOW_STORE / "0" / "meta.yaml",
                paths.REPORTS / "20260805" / "report.html",
-               paths.STATE / "attributes.json"]
+               paths.STATE / "attributes.json",
+               # The holdout and the pooled baseline set are hardlinks onto the
+               # 7.6 GB kagglehub cache, same as the shards.
+               paths.VEHICLE_ROOT / "holdout" / "images" / "val" / "x.jpg",
+               paths.VEHICLE_ROOT / "pooled" / "images" / "train" / "x.jpg",
+               paths.STATE / "baseline_runs" / "centralised" / "weights" / "best.pt",
+               paths.STATE / "holdout_metrics.json"]
     for t in targets:
         rel = t.relative_to(REPO).as_posix()
         out = subprocess.run(["git", "check-ignore", rel], cwd=REPO,
@@ -560,6 +566,96 @@ def test_fleet_manifest_is_compared_rather_than_guessed(monkeypatch):
 
     other_partition = stages._check_fleet(Config(n_vehicles=6, partition="condition"))
     assert other_partition.satisfied is False and "partition" in other_partition.detail
+
+
+# ------------------------------------------------------ holdout and baseline
+from pipeline import baseline as _baseline, holdout as _holdout  # noqa: E402
+
+
+def test_holdout_selection_is_deterministic_across_processes():
+    """Set iteration order varies per process; shuffling a set would give a
+    different holdout on every machine and make two runs incomparable."""
+    pool = {f"img{i}.jpg" for i in range(500)}
+    first = _holdout.select(50, seed=4, val_pool=pool)
+    second = _holdout.select(50, seed=4, val_pool=set(reversed(sorted(pool))))
+    assert first == second
+    assert _holdout.select(50, seed=5, val_pool=pool) != first
+    assert len(set(first)) == 50
+
+
+def test_holdout_refuses_to_invent_images_it_does_not_have():
+    with pytest.raises(SystemExit):
+        _holdout.select(500, val_pool={"a.jpg", "b.jpg"})
+
+
+def test_no_vehicle_can_be_assigned_a_held_out_image():
+    """The whole point: a client that self-evaluates on a holdout image makes the
+    global metric partly self-referential."""
+    idx = _mixed_index(600)
+    pool = set(idx)
+    held = set(_holdout.select(100, seed=2, val_pool=pool))
+
+    vs = vehicles.assign(4, 40, index=idx, train_pool=pool, val_pool=pool,
+                         val_per_vehicle=20, seed=1, exclude=held)
+    for v in vs:
+        assert not (set(v.train) & held), f"vehicle {v.vid} trains on held-out images"
+        assert not (set(v.val) & held), f"vehicle {v.vid} self-evaluates on held-out images"
+
+
+def test_a_fleet_that_predates_the_holdout_is_rebuilt(monkeypatch):
+    """Otherwise the fleet stage says 'skip' and the contamination is never noticed."""
+    from pipeline import vehicles as _v
+    monkeypatch.setattr(_v, "load_fleet", lambda: [
+        {"vid": i, "condition": "night", "n_train": 300, "n_val": 60} for i in range(1, 11)])
+    monkeypatch.setattr(_holdout, "names", lambda: {f"h{i}.jpg" for i in range(1000)})
+
+    monkeypatch.setattr(_v, "load_fleet_meta", lambda: {})
+    predates = stages._check_fleet(Config(n_vehicles=6, partition="condition"))
+    assert predates.satisfied is False and "holdout" in predates.detail
+
+    monkeypatch.setattr(_v, "load_fleet_meta", lambda: {
+        "partition": "condition", "seed": 0, "per_vehicle": 300, "holdout": 500})
+    stale = stages._check_fleet(Config(n_vehicles=6, partition="condition"))
+    assert stale.satisfied is False and "holdout" in stale.detail
+
+    monkeypatch.setattr(_v, "load_fleet_meta", lambda: {
+        "partition": "condition", "seed": 0, "per_vehicle": 300, "holdout": 1000})
+    assert stages._check_fleet(Config(n_vehicles=6, partition="condition")).satisfied is True
+
+
+def test_the_holdout_stage_runs_before_the_fleet_stage():
+    """Order is load-bearing: a holdout carved afterwards is already in someone's
+    val split."""
+    names = [s.name for s in stages.STAGES]
+    assert names.index("holdout") < names.index("fleet")
+    assert names.index("evaluate") > names.index("federate")
+    assert stages.BY_NAME["baseline"].gated, "it trains a whole model"
+
+
+def test_evaluating_a_checkpoint_that_is_not_there_fails_loudly(tmp_path):
+    """A zero would look like a bad model rather than a missing one."""
+    with pytest.raises(SystemExit):
+        _holdout.evaluate(tmp_path / "nope.pt")
+
+
+def test_the_gap_is_only_reported_when_both_halves_exist(monkeypatch):
+    monkeypatch.setattr(_baseline, "result", lambda: {})
+    monkeypatch.setattr(_holdout, "curve", lambda: {"rounds": [{"mAP50": 0.4}]})
+    assert _baseline.gap() == {}
+
+    monkeypatch.setattr(_baseline, "result", lambda: {"mAP50": 0.5, "epochs": 24, "images": 8400})
+    g = _baseline.gap()
+    assert g["federated_mAP50"] == 0.4 and g["centralised_mAP50"] == 0.5
+    assert abs(g["gap"] - 0.1) < 1e-9 and abs(g["retained"] - 0.8) < 1e-9
+
+
+def test_the_baseline_budget_matches_the_federated_one():
+    """rounds x local_epochs epochs over the pooled set is the same number of
+    image-visits the fleet makes; anything else flatters one side."""
+    cfg = Config(rounds=6, local_epochs=4)
+    cmd = stages._cmd_baseline(cfg)
+    assert "--rounds" in cmd and cmd[cmd.index("--rounds") + 1] == "6"
+    assert cmd[cmd.index("--local-epochs") + 1] == "4"
 
 
 def test_fleet_check_catches_a_partition_mismatch(monkeypatch):

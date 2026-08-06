@@ -148,9 +148,24 @@
       what its shard actually contains.</p>
   </div>
 
+  <div class="panel">
+    <h2>Honest global metric <span class="n">measured on data no vehicle trained on</span></h2>
+    <div class="grid two" style="grid-template-columns:minmax(220px,300px) 1fr;align-items:center">
+      <div class="readouts">
+        <div class="readout"><span class="v skel" id="hMap">—</span>
+          <div class="k">holdout mAP50</div></div>
+        <div class="readout"><span class="v skel" id="hCeiling">—</span>
+          <div class="k">of the centralised ceiling</div></div>
+      </div>
+      <figure><svg class="chart" id="holdoutChart" viewBox="0 0 900 190" role="img" tabindex="0"
+                   aria-label="Global model mAP50 on the shared holdout, by round"></svg></figure>
+    </div>
+    <p class="hint" id="holdoutNote"></p>
+  </div>
+
   <div class="grid two" style="grid-template-columns:1fr 1fr">
     <div class="panel">
-      <h2>Global model — evaluated mAP50</h2>
+      <h2>Per-client self-evaluation <span class="n">each on its own split</span></h2>
       <figure><svg class="chart" id="mapChart" viewBox="0 0 900 220" role="img" tabindex="0"
                    aria-label="Evaluated mAP50 by round"></svg></figure>
       <p class="hint" id="mapNote">Waiting for the first evaluation.</p>

@@ -18,7 +18,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import gpu, logparse, paths, stages, vehicle_metrics, vehicles, verify
+from . import baseline, gpu, holdout, logparse, paths, stages, vehicle_metrics, vehicles, verify
 from .runner import Run
 from .stages import Config
 
@@ -149,6 +149,10 @@ class State:
             "criteria_ok": ok,
             "checkpoints": sorted(p.name for p in (paths.PROJECT / "checkpoints").glob("global_*.pt")),
             "learning": vehicle_metrics.summary(),
+            # The only metric measured on data no client trained on, and the
+            # centralised ceiling it is worth comparing against.
+            "holdout": holdout.curve(),
+            "baseline": baseline.gap(),
         }
 
     def reports(self) -> list[dict]:

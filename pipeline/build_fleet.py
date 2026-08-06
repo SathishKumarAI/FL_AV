@@ -9,7 +9,7 @@ import json
 
 import yaml
 
-from . import paths, vehicles
+from . import holdout, paths, vehicles
 
 
 def class_names() -> tuple[list[str], int]:
@@ -43,15 +43,24 @@ def main(argv=None) -> int:
     # handed batch_id=7 and died on a directory that did not exist. --vehicles now
     # controls how many clients run; the addressable fleet is always the full range.
     n_shards = max(args.vehicles, len(list(paths.BATCH_IDS)))
+    # The shared holdout is subtracted before anything is picked. A vehicle that
+    # could self-evaluate on a holdout image would make the "global" metric
+    # partly self-referential -- which is exactly the class of silent failure this
+    # project keeps producing.
+    held = holdout.names()
+    if held:
+        print(f"holdout: {len(held)} images withheld from every vehicle")
+
     fleet = vehicles.assign(n_shards, args.per_vehicle,
                             val_per_vehicle=args.val_per_vehicle, seed=args.seed, index=index,
-                            partition=args.partition, alpha=args.alpha)
+                            partition=args.partition, alpha=args.alpha, exclude=held)
     root = vehicles.materialise(fleet, names, nc, meta={
         "partition": args.partition,
         "alpha": args.alpha if args.partition == "dirichlet" else None,
         "seed": args.seed,
         "per_vehicle": args.per_vehicle,
         "n_shards": n_shards,
+        "holdout": len(held),
     })
 
     for v in fleet:
