@@ -1005,3 +1005,24 @@ def test_the_sanity_stage_refuses_to_run_without_a_shard(monkeypatch, tmp_path):
     monkeypatch.setattr(paths, "VEHICLE_BATCHES", tmp_path / "nothing")
     with pytest.raises(RuntimeError, match="fleet stage"):
         stages._cmd_sanity(Config())
+
+
+def test_a_line_the_console_cannot_encode_does_not_kill_the_output_thread(monkeypatch):
+    """On Windows a redirected stdout is cp1252, Ultralytics' progress bars are not,
+    and an unguarded print raised inside the drain thread -- which then died, the pipe
+    it was reading filled, and the stage failed for a reason nothing in the log
+    explained. Reproduced with a real strict cp1252 stream."""
+    import io
+    from pipeline import runner as _r
+
+    raw = io.BytesIO()
+    strict = io.TextIOWrapper(raw, encoding="cp1252", errors="strict", newline="")
+    monkeypatch.setattr(_r.sys, "stdout", strict)
+    monkeypatch.setattr("sys.stdout", strict)
+
+    _r._safe_print("progress ━━ bar")      # box drawing: not in cp1252
+    strict.flush()
+
+    monkeypatch.undo()
+    written = raw.getvalue().decode("cp1252")
+    assert "progress" in written and "bar" in written, written

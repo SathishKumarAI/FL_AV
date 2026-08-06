@@ -269,16 +269,40 @@ def main(argv=None) -> int:
     return 0 if ok else 1
 
 
+def _safe_print(text: str) -> None:
+    """Print a subprocess line without letting the console's encoding kill the run.
+
+    On Windows a redirected stdout is cp1252, Ultralytics' progress bars contain
+    characters it cannot encode, and an unguarded print raises UnicodeEncodeError
+    *inside the drain thread*. The thread then dies, the pipe it was reading fills,
+    and the stage it was narrating hangs or fails for a reason nothing in the log
+    explains. That is what happened the first time this pipeline was run from a
+    script rather than a terminal.
+    """
+    stream = sys.stdout
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = getattr(stream, "encoding", None) or "ascii"
+        print(text.encode(encoding, errors="replace").decode(encoding, errors="replace"))
+
+
 def _drain(run: Run) -> None:
+    # Belt as well as braces: ask for a forgiving stdout up front, so the common
+    # case never reaches the fallback above.
+    try:
+        sys.stdout.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
     while True:
         ev = run.events.get()
         kind = ev.get("kind")
         if kind == "log":
-            print(f"    {ev['line']}")
+            _safe_print(f"    {ev['line']}")
         elif kind == "stage":
-            print(f"[{ev['status']:>13}] {ev['stage']:<9} {ev.get('detail','')}")
+            _safe_print(f"[{ev['status']:>13}] {ev['stage']:<9} {ev.get('detail','')}")
         elif kind == "run_halt":
-            print(f"HALTED at {ev['stage']}: {ev['reason']}")
+            _safe_print(f"HALTED at {ev['stage']}: {ev['reason']}")
         elif kind == "run_end":
             g = ev.get("gpu", {})
             print(f"\nrun {'OK' if ev['ok'] else 'FAILED'} in {ev['seconds']}s | "
