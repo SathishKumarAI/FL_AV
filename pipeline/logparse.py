@@ -104,6 +104,34 @@ def latest_log(pattern: str, log_dir: Path | None = None) -> Path | None:
     return max(files, key=lambda f: f.stat().st_mtime) if files else None
 
 
+def latest_run_log(log_dir: Path | None = None) -> Path | None:
+    """The newest server log that actually recorded a round.
+
+    Not simply the newest server log. Importing my-project's server_app configures a
+    CWD-relative logger, so `logs/server.<pid>.log` appears merely because something
+    imported the module -- running the test suite from the repo root creates one.
+    Those files are empty of rounds, and treating one as "the current run" made
+    verify report `need >=2 rounds to tell, saw 0` immediately after a six-round
+    federation had succeeded.
+
+    A run is a log that aggregated at least once. Everything else is a process that
+    happened to import a module.
+    """
+    best, best_mtime = None, -1.0
+    for f in iter_logs("server*.log", log_dir):
+        if not f.is_file():
+            continue
+        try:
+            if "Aggregated parameters with checksum" not in f.read_text(errors="replace"):
+                continue
+        except OSError:
+            continue
+        mtime = f.stat().st_mtime
+        if mtime > best_mtime:
+            best, best_mtime = f, mtime
+    return best
+
+
 def current_run_logs(pattern: str, log_dir: Path | None = None) -> list[Path]:
     """Matching logs written during the most recent run.
 
@@ -116,7 +144,7 @@ def current_run_logs(pattern: str, log_dir: Path | None = None) -> list[Path]:
     anything written after that belongs to this run. A minute of slack absorbs clock
     granularity between processes.
     """
-    server = latest_log("server*.log", log_dir)
+    server = latest_run_log(log_dir)
     files = [f for f in iter_logs(pattern, log_dir) if f.is_file()]
     if server is None:
         return files
@@ -133,7 +161,7 @@ def aggregate_checksums(log_dir: Path | None = None, all_runs: bool = False) -> 
     for the historical sequence.
     """
     files = list(iter_logs("server*.log", log_dir)) if all_runs else \
-        [f for f in [latest_log("server*.log", log_dir)] if f]
+        [f for f in [latest_run_log(log_dir)] if f]
     out: list[float] = []
     for f in files:
         out += [e.value for e in parse_text(f.read_text(errors="replace"))

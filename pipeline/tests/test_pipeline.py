@@ -1400,3 +1400,33 @@ def test_repeats_of_one_approach_are_grouped_so_the_noise_floor_is_visible(tmp_p
     assert fedavg["n"] == 2 and fedavg["spread"] == 0.04
     assert fedavg["mean"] == 0.22
     assert next(g for k, g in groups.items() if k.startswith("fedadam"))["spread"] is None
+
+
+def test_an_empty_server_log_is_not_mistaken_for_the_current_run(tmp_path):
+    """Importing my-project's server_app configures a CWD-relative logger, so
+    `logs/server.<pid>.log` appears merely because something imported the module --
+    running the test suite from the repo root creates one. Treating that as the
+    current run made verify report "need >=2 rounds to tell, saw 0" straight after a
+    six-round federation had succeeded."""
+    import os
+    import time
+
+    real = tmp_path / "server.100.log"
+    real.write_text("Aggregated parameters with checksum: 1.0\n"
+                    "Aggregated parameters with checksum: 2.0\n")
+    older = time.time() - 60
+    os.utime(real, (older, older))
+
+    # Newer, but it never aggregated anything: a process, not a run.
+    (tmp_path / "server.200.log").write_text("[Server] Detected operating system: Windows\n")
+
+    assert logparse.latest_run_log(tmp_path) == real
+    assert logparse.aggregate_checksums(tmp_path) == [1.0, 2.0]
+    assert logparse.federation_learned(tmp_path)[0] is True
+
+
+def test_with_no_real_run_at_all_the_checksums_are_empty_not_wrong(tmp_path):
+    (tmp_path / "server.1.log").write_text("[Server] starting\n")
+    assert logparse.latest_run_log(tmp_path) is None
+    assert logparse.aggregate_checksums(tmp_path) == []
+    assert logparse.federation_learned(tmp_path)[0] is False
