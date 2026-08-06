@@ -100,6 +100,21 @@ partitioner is one function; the CLI choices, the dashboard menu and the validat
 all follow from the registration. An unknown name is rejected before any subprocess
 starts, never quietly replaced with the default.
 
+## Checking the data, comparing the runs
+
+```bash
+python -m pipeline.validate      # six ways a fleet can be quietly wrong
+python -m pipeline.compare       # the last 5 runs, holdout number first
+```
+
+`validate` is read-only and runs as a stage between `fleet` and `sanity`: it checks
+label coverage, listing integrity, cross-shard leakage, train/val leakage, holdout
+containment and label sanity. It reports and refuses to repair — a validator that
+edits your data hides the bug that produced it.
+
+`compare` warns when the runs it is showing differ in more than one setting, because
+then the difference in their numbers cannot be attributed to any of them.
+
 ## Output
 
 Every run writes `pipeline/reports/<timestamp>/`:

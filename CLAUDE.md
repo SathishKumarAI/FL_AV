@@ -36,6 +36,10 @@ Open the one file that owns the thing. Do not read the package to find it.
 | Shard assignment, conditions, partitioning | `pipeline/vehicles.py` |
 | What a log line means | `pipeline/logparse.py` |
 | The four pass criteria | `pipeline/verify.py` |
+| The shared holdout, and scoring the global model on it | `pipeline/holdout.py` |
+| The centralised baseline, and the gap to it | `pipeline/baseline.py` |
+| What makes a fleet's shards invalid | `pipeline/validate.py` |
+| Comparing runs to each other | `pipeline/compare.py` |
 | Per-vehicle learning maths (divergence, contribution) | `pipeline/vehicle_metrics.py` |
 | The run report | `pipeline/report.py` |
 | ⚠ Aggregation strategy — **different branch and prompt** | `my-project/my_project/server_app.py` |
