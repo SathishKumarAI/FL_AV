@@ -13,6 +13,8 @@ reload. ES modules, no bundler, no CDN, no network at runtime.
 | Polling, heartbeat, GPU readouts, criteria, log stream | `js/live.js` | |
 | The fleet grid, the comparison and divergence charts | `js/fleet.js` | |
 | The per-vehicle drawer | `js/drawer.js` | |
+| The Data tab: counts, mixes, the shard table | `js/data.js` | |
+| Label boxes over a frame, and the trainer's own pictures | `js/consumed.js` | the only file that draws over an image |
 | Helpers, colours, condition glyphs | `js/util.js` | |
 | What the views share | `js/state.js` | one object, documented per field |
 | Wiring and startup | `js/main.js` | ~20 lines; if it grows, something is in the wrong file |
@@ -45,4 +47,13 @@ reload. ES modules, no bundler, no CDN, no network at runtime.
 | `GET /api/events` | SSE: log lines, stage transitions, signals |
 | `GET /api/vehicle/<vid>` | shard composition and sample image names |
 | `GET /api/shard-image/<vid>/<name>` | one image out of that vehicle's shard |
+| `GET /api/shard-labels/<vid>/<name>` | that frame's label rows, normalised, for the overlay |
+| `GET /api/train-artifacts` | which of the trainer's own pictures exist, per vehicle |
+| `GET /api/train-artifact/<vid>/<name>` | one of them; `<name>` must be in `train_artifacts.KINDS` |
 | `POST /api/run`, `POST /api/stop` | start and stop the one allowed run |
+
+The label overlay is an SVG on the unit square laid over the same `<img>` — the frame
+is never sent twice and nothing renders boxes server-side. That only works while the
+image element is not cropped, which is why `.strip .ovfig img` overrides
+`object-fit:cover`; `pipeline/tests/test_pipeline.py::test_label_overlay_boxes_land_where_the_label_file_says`
+runs the conversion under node and fails if a box moves.

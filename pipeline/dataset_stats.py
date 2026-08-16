@@ -61,6 +61,32 @@ def class_histogram(label_dir: Path) -> dict[str, int]:
     return counts
 
 
+def boxes(vid: int, image_name: str) -> list[dict]:
+    """The label rows for one shard image, as the trainer reads them.
+
+    YOLO label format is `cls cx cy w h`, already normalised to the image, which is
+    why nothing here needs the image's pixel size: the browser draws these straight
+    into a unit-square overlay. Malformed rows are skipped rather than raised on — a
+    label file with a bad row still has good rows, and the point of drawing these is
+    to *see* that something is wrong.
+    """
+    stem = Path(image_name).stem
+    path = paths.VEHICLE_BATCHES / f"batch_{int(vid)}" / "labels" / "train" / f"{stem}.txt"
+    if not path.is_file():
+        return []
+    out = []
+    for row in path.read_text(errors="replace").splitlines():
+        parts = row.split()
+        if len(parts) < 5:
+            continue
+        try:
+            cls, cx, cy, w, h = int(float(parts[0])), *map(float, parts[1:5])
+        except ValueError:
+            continue
+        out.append({"cls": cls, "cx": cx, "cy": cy, "w": w, "h": h})
+    return out
+
+
 def _mix(names: list[str], index: dict) -> dict[str, dict[str, int]]:
     out = {"weather": {}, "scene": {}, "timeofday": {}}
     for name in names:
