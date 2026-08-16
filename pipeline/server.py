@@ -371,6 +371,7 @@ class Handler(BaseHTTPRequestHandler):
                 seed=int(body.get("seed", 0)),
                 partition=body.get("partition", "condition"),
                 alpha=float(body.get("alpha", 0.5) or 0.5),
+                size_skew=float(body.get("size_skew", 0.0) or 0.0),
                 strategy=body.get("strategy", "fedavg"),
                 proximal_mu=float(body.get("proximal_mu", 0.0) or 0.0),
                 ray_address=body.get("ray_address") or None,
@@ -383,6 +384,11 @@ class Handler(BaseHTTPRequestHandler):
                 # surface as a stage failure with the real cause buried in a log.
                 return self._json({"error": f"unknown partition {CONFIG.partition!r}; "
                                             f"known: {', '.join(vehicles.PARTITIONS)}"}, 400)
+            if CONFIG.size_skew < 0:
+                # Same reason: caught here, not as a ValueError inside build_fleet's
+                # subprocess three stages later.
+                return self._json({"error": "size_skew must be >= 0, "
+                                            f"got {CONFIG.size_skew}"}, 400)
             try:
                 chain = stages.resolve(body.get("stages"), body.get("skip"))
             except SystemExit as e:

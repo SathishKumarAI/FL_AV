@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import random
 import shutil
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 from . import paths
@@ -111,6 +112,52 @@ def _available(split_dir: Path) -> set[str]:
 # --------------------------------------------------------------------------
 # Assignment
 # --------------------------------------------------------------------------
+def size_floor(per_vehicle: int) -> int:
+    """The smallest shard a vehicle may be given.
+
+    A shard below the batch size takes **no optimizer step at all** and logs a
+    successful round anyway -- already in this project's catalogue of silent
+    failures. So quantity skew is clamped rather than allowed to be as extreme as the
+    draw suggests, and the clamp is one function because the fleet stage needs the
+    same number to know whether a small shard is intended or stale.
+    """
+    return min(max(32, per_vehicle // 10), per_vehicle)
+
+
+def skewed_sizes(n: int, per_vehicle: int, skew: float, rng) -> list[int]:
+    """`n` shard sizes, lognormally spread, summing to exactly ``n * per_vehicle``.
+
+    Lognormal because per-vehicle mileage is multiplicative: a car that drives twice
+    as much as another is the realistic difference, not one that drives 40 images
+    more. ``skew`` is the sigma of the underlying normal, so 0.5 is a mild spread and
+    1.5 an order of magnitude between the busiest and quietest vehicle.
+
+    The **total is preserved on purpose**. Skew must vary how the fleet's images are
+    distributed, never how many there are -- otherwise a skewed arm and an unskewed
+    one differ in image-visits too and neither explains the other, which is the
+    multi-variable confound `compare.py` exists to flag.
+    """
+    total = n * per_vehicle
+    floor = size_floor(per_vehicle)
+    raw = [math.exp(rng.gauss(0.0, skew)) for _ in range(n)]
+    scale = total / (sum(raw) or 1.0)
+    sizes = [max(floor, int(round(r * scale))) for r in raw]
+
+    # Rounding and the floor both push the sum off target. Repair it a unit at a time
+    # from the largest shard down (or into the smallest), which keeps the shape of the
+    # draw while making the total exact.
+    # ponytail: O(drift x n) and drift is bounded by the fleet's size; fine for n < 100.
+    drift = sum(sizes) - total
+    while drift:
+        step = -1 if drift > 0 else 1
+        i = sizes.index(max(sizes)) if drift > 0 else sizes.index(min(sizes))
+        if step < 0 and sizes[i] <= floor:
+            break            # every shard is at the floor: n * floor > total, nothing to give
+        sizes[i] += step
+        drift += step
+    return sizes
+
+
 @dataclass
 class Request:
     """One fleet's worth of parameters. What every partitioner is handed."""
@@ -122,6 +169,25 @@ class Request:
     train_pool: set[str]
     val_pool: set[str]
     alpha: float = 0.5          # dirichlet only: smaller = more skewed
+    #: Per-vehicle image budgets. Empty means every vehicle gets ``per_vehicle``,
+    #: which is what every fleet built before quantity skew existed did.
+    sizes: list[int] = field(default_factory=list)
+
+    def budget(self, i: int) -> int:
+        """How many train images vehicle ``i`` gets. Ask this, never ``per_vehicle``."""
+        return self.sizes[i] if self.sizes else self.per_vehicle
+
+    def val_budget(self, i: int) -> int:
+        """Val scaled with train, so the ratio a vehicle self-evaluates at is constant.
+
+        A vehicle holding a tenth of the fleet's images and the full val split would
+        be evaluated more thoroughly than it was trained, which is not what a smaller
+        vehicle means.
+        """
+        if not self.sizes:
+            return self.val_per_vehicle
+        share = self.sizes[i] / max(1, self.per_vehicle)
+        return max(5, int(round(self.val_per_vehicle * share)))
 
 
 #: name -> partitioner. Registering is the only step needed to make a strategy
@@ -169,8 +235,8 @@ def _by_profile(req: Request, rng, profile_for) -> list[Vehicle]:
     for i in range(req.n_vehicles):
         label, matches = profile_for(i)
         out.append(Vehicle(i + 1, label,
-                           pick(req.train_pool, req.per_vehicle, matches),
-                           pick(req.val_pool, req.val_per_vehicle, matches)))
+                           pick(req.train_pool, req.budget(i), matches),
+                           pick(req.val_pool, req.val_budget(i), matches)))
     return out
 
 
@@ -275,8 +341,8 @@ def _assign_dirichlet(req: Request, rng) -> list[Vehicle]:
 
     for i in range(req.n_vehicles):
         shares = _dirichlet_draw(len(keys), req.alpha, rng)
-        train = take(train_groups, shares, req.per_vehicle)
-        val = take(val_groups, shares, req.val_per_vehicle)
+        train = take(train_groups, shares, req.budget(i))
+        val = take(val_groups, shares, req.val_budget(i))
 
         # Label by what the vehicle actually got, not by what was drawn: a group
         # that ran dry is exactly the case a label must not hide.
@@ -297,19 +363,28 @@ def assign(n_vehicles: int, per_vehicle: int, val_per_vehicle: int = 0,
            seed: int = 0, index: dict | None = None,
            train_pool: set[str] | None = None, val_pool: set[str] | None = None,
            partition: str = "condition", alpha: float = 0.5,
-           exclude: set[str] | None = None) -> list[Vehicle]:
+           exclude: set[str] | None = None, size_skew: float = 0.0) -> list[Vehicle]:
     """Give each vehicle a disjoint slice, by whichever registered strategy is named.
 
     ``exclude`` is removed from both pools before anything is picked -- it is how the
     shared holdout stays held out. Subtracting here rather than inside each
     partitioner means a new strategy cannot forget to do it.
 
+    ``size_skew`` is orthogonal to ``partition``: it decides how *much* each vehicle
+    holds, where the partition decides *what*. Drawn here rather than inside a
+    partitioner so every strategy gets it for free and none can forget it. At the
+    default 0 not a single number is drawn, so every fleet built before skew existed
+    still reproduces from its seed.
+
     ``train_pool``/``val_pool`` are injectable so this is testable without a populated
     repo; they default to the images actually present in my-project's shards.
     """
     if partition not in PARTITIONERS:
         raise ValueError(f"partition must be one of {PARTITIONS}, got {partition!r}")
+    if size_skew < 0:
+        raise ValueError(f"size_skew must be >= 0, got {size_skew}")
 
+    rng = random.Random(seed)
     blocked = set(exclude or ())
     req = Request(
         n_vehicles=n_vehicles,
@@ -319,8 +394,9 @@ def assign(n_vehicles: int, per_vehicle: int, val_per_vehicle: int = 0,
         train_pool=(_available(Path("train")) if train_pool is None else train_pool) - blocked,
         val_pool=(_available(Path("val")) if val_pool is None else val_pool) - blocked,
         alpha=alpha,
+        sizes=skewed_sizes(n_vehicles, per_vehicle, size_skew, rng) if size_skew else [],
     )
-    return PARTITIONERS[partition](req, random.Random(seed))
+    return PARTITIONERS[partition](req, rng)
 
 
 # --------------------------------------------------------------------------
@@ -500,7 +576,13 @@ def demo() -> None:
     assert all(index[n]["timeofday"] == "night" for n in vs[1].train), "bias not applied"
     assert not (set(vs[0].train) & set(vs[1].train)), "slices overlap"
     assert [v.train for v in assign(2, 50, **kw)] == [v.train for v in vs], "not deterministic"
-    print("vehicles self-check OK:", [v.to_summary() for v in vs])
+
+    skewed = assign(4, 50, size_skew=1.0, **kw)
+    sizes = [v.n_train for v in skewed]
+    assert len(set(sizes)) > 1, f"skew produced equal shards: {sizes}"
+    assert sum(sizes) == 200, f"skew changed the fleet's budget: {sizes}"
+    assert min(sizes) >= size_floor(50), f"a shard below the batch size: {sizes}"
+    print("vehicles self-check OK:", [v.to_summary() for v in vs], "skewed sizes:", sizes)
 
 
 if __name__ == "__main__":

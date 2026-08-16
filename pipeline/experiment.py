@@ -33,7 +33,8 @@ RESULTS = paths.STATE / "experiments"
 
 
 def arms_for(preset: str, base: dict, seeds: list[int], strategies: list[str],
-             partitions: list[str], alphas: list[float]) -> list[dict]:
+             partitions: list[str], alphas: list[float],
+             skews: list[float] | None = None) -> list[dict]:
     """Expand a preset into arms that differ in exactly one setting."""
     if preset == "seeds":
         return [{**base, "seed": s, "label": f"seed={s}"} for s in seeds]
@@ -44,7 +45,13 @@ def arms_for(preset: str, base: dict, seeds: list[int], strategies: list[str],
     if preset == "alpha":
         return [{**base, "partition": "dirichlet", "alpha": a, "label": f"alpha={a}"}
                 for a in alphas]
-    raise SystemExit(f"unknown preset {preset!r}; known: seeds, strategies, partitions, alpha")
+    if preset == "skew":
+        # Every arm makes the same image-visits -- skewed_sizes preserves the fleet
+        # total -- so this sweep isolates unequal `num_examples`, which is FedAvg's
+        # aggregation weight, from the amount of data.
+        return [{**base, "size_skew": s, "label": f"skew={s}"} for s in (skews or [])]
+    raise SystemExit(
+        f"unknown preset {preset!r}; known: seeds, strategies, partitions, alpha, skew")
 
 
 def command(arm: dict, confirm: bool) -> list[str]:
@@ -56,6 +63,7 @@ def command(arm: dict, confirm: bool) -> list[str]:
            "--seed", str(arm.get("seed", 0)),
            "--partition", str(arm.get("partition", "condition")),
            "--alpha", str(arm.get("alpha", 0.5)),
+           "--size-skew", str(arm.get("size_skew", 0.0)),
            "--strategy", str(arm.get("strategy", "fedavg"))]
     if arm.get("per_vehicle"):
         cmd += ["--per-vehicle", str(arm["per_vehicle"])]
@@ -115,13 +123,15 @@ def summarise(done: list[dict]) -> str:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--preset", choices=("seeds", "strategies", "partitions", "alpha"),
+    ap.add_argument("--preset", choices=("seeds", "strategies", "partitions", "alpha", "skew"),
                     help="what to vary; every arm changes exactly one setting")
     ap.add_argument("--arms", type=Path, help="a JSON list of arms, for anything else")
     ap.add_argument("--seeds", default="0,1,2")
     ap.add_argument("--strategies", default="fedavg,fedadam,fedavgm")
     ap.add_argument("--partitions", default="condition,random,dirichlet")
     ap.add_argument("--alphas", default="0.05,0.5,100")
+    ap.add_argument("--skews", default="0,0.8,1.5",
+                    help="quantity-skew sweep; every arm keeps the same fleet total")
     ap.add_argument("--profile", default="demo", choices=("demo", "full"))
     ap.add_argument("--vehicles", type=int, default=6)
     ap.add_argument("--rounds", type=int, default=2)
@@ -141,7 +151,8 @@ def main(argv=None) -> int:
                         [int(s) for s in args.seeds.split(",") if s.strip()],
                         [s.strip() for s in args.strategies.split(",") if s.strip()],
                         [s.strip() for s in args.partitions.split(",") if s.strip()],
-                        [float(a) for a in args.alphas.split(",") if a.strip()])
+                        [float(a) for a in args.alphas.split(",") if a.strip()],
+                        [float(s) for s in args.skews.split(",") if s.strip()])
     else:
         ap.error("pass --preset or --arms")
 

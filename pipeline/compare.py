@@ -25,7 +25,7 @@ from . import paths
 
 #: What actually defines a run for comparison purposes.
 KEYS = ("profile", "n_vehicles", "rounds", "local_epochs", "seed", "partition",
-        "alpha", "strategy", "per_vehicle")
+        "alpha", "size_skew", "strategy", "per_vehicle")
 
 
 def load(limit: int = 5, reports_dir: Path | None = None) -> list[dict]:
