@@ -54,6 +54,14 @@ python -m pipeline.compare --last 10              # runs you already have
 **Full instructions, costs, troubleshooting and how to read the numbers:
 [`docs/RUNBOOK.md`](docs/RUNBOOK.md).**
 
+Or without installing anything, on any machine with Docker — the checks only, since
+the container has no GPU and no data:
+
+```bash
+docker build -t federated-yolov8:cpu .
+docker run --rm federated-yolov8:cpu        # 148 passed, 1 skipped
+```
+
 **Latest measured result.** 6 vehicles × 1 400 images, condition-partitioned, 6 rounds
 × 4 local epochs on an RTX 5070 Ti, scored on 1 000 images no vehicle trained on:
 
