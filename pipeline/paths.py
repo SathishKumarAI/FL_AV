@@ -89,9 +89,17 @@ def subprocess_env(ray_address: str | None = None, data_root: Path | None = None
     #   Unable to launch `flower-superlink` for local simulation: [WinError 2]
     # Resolving our own entry points is not enough -- the children we spawn spawn
     # children of their own.
+    # It goes *first*, not merely present. The earlier version skipped the prepend
+    # whenever the directory was already anywhere on PATH, which is a different and
+    # much weaker guarantee: on a GitHub Windows runner `setup-python` puts it on PATH
+    # behind PowerShell's own directory, and "somewhere on PATH" is precisely the
+    # state in which another environment's launcher resolves first. Any existing copy
+    # is dropped rather than left behind, so the entry cannot appear twice.
     scripts = str(Path(sys.executable).parent)
-    if scripts not in env.get("PATH", "").split(os.pathsep):
-        env["PATH"] = scripts + os.pathsep + env.get("PATH", "")
+    same = os.path.normcase(scripts)
+    rest = [p for p in env.get("PATH", "").split(os.pathsep)
+            if p and os.path.normcase(p) != same]
+    env["PATH"] = os.pathsep.join([scripts, *rest])
     env["FL_AV_DATA_ROOT"] = str(data_root or PROJECT)
     env.setdefault("MLFLOW_TRACKING_URI", MLFLOW_STORE.as_uri())
     if ray_address:

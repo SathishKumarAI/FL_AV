@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -210,8 +211,20 @@ def test_vehicle_shards_live_outside_my_project():
 
 
 def test_generated_paths_are_all_gitignored():
-    """Dataset, checkpoints, MLflow store and reports must be uncommittable."""
+    """Dataset, checkpoints, MLflow store and reports must be uncommittable.
+
+    Needs a real git repository, which a source tarball or a container image built
+    without `.git` is not. Skipped there rather than failed: this guards what may be
+    committed, and where nothing can be committed there is nothing to guard.
+    """
     import subprocess
+
+    # Two separate ways to not be able to ask: no repository, and no git. The second
+    # is not hypothetical -- `python:3.12-slim` ships without git, so a bind-mounted
+    # checkout has the `.git` but not the binary, and the test died on FileNotFoundError
+    # from deep inside subprocess rather than saying what was missing.
+    if not (REPO / ".git").exists() or shutil.which("git") is None:
+        pytest.skip("no git repository or no git binary; nothing here can be committed")
     targets = [paths.VEHICLE_ROOT / "batch" / "batch_1" / "images" / "x.jpg",
                paths.MLFLOW_STORE / "0" / "meta.yaml",
                paths.REPORTS / "20260805" / "report.html",
@@ -250,7 +263,20 @@ def test_federate_stage_scans_for_crashes():
     assert stages.BY_NAME["federate"].crash_markers, "federate must not trust its exit code"
 
 
-def test_init_args_are_omitted_when_attaching_to_an_existing_ray_cluster():
+@pytest.fixture
+def _flwr_launcher(monkeypatch):
+    """`_cmd_federate` resolves the flwr launcher, and raises when there is none.
+
+    These two tests are about the *arguments* it builds, not about where the binary
+    lives — `test_the_interpreters_scripts_directory_leads_the_path` covers that. So
+    they failed on any machine without flwr installed, which includes the pipeline CI
+    job by design: it installs pytest and pyyaml only, because the pipeline package
+    imports torch and ultralytics lazily and its tests then run in under a second.
+    """
+    monkeypatch.setattr(stages, "flwr_executable", lambda: "/nonexistent/flwr")
+
+
+def test_init_args_are_omitted_when_attaching_to_an_existing_ray_cluster(_flwr_launcher):
     """Ray: 'When connecting to an existing cluster, num_cpus and num_gpus must not
     be provided.' Passing them anyway crashes the simulation at startup."""
     attached = " ".join(stages._cmd_federate(Config(ray_address="127.0.0.1:6379")))
@@ -259,7 +285,7 @@ def test_init_args_are_omitted_when_attaching_to_an_existing_ray_cluster():
     assert "init-args-num-gpus=1" in standalone
 
 
-def test_supernodes_track_the_vehicle_count():
+def test_supernodes_track_the_vehicle_count(_flwr_launcher):
     """Otherwise the run hangs forever waiting for clients that never arrive."""
     cmd = " ".join(stages._cmd_federate(Config(n_vehicles=6)))
     assert "num-supernodes=6" in cmd and "min_clients=6" in cmd
@@ -701,9 +727,17 @@ def test_fleet_check_catches_a_partition_mismatch(monkeypatch):
 
 def test_the_report_leads_with_the_metric_no_client_could_flatter(monkeypatch):
     """A report that shows only self-evaluated numbers invites the comparison that
-    the holdout exists to prevent."""
+    the holdout exists to prevent.
+
+    The per-client rows are stubbed for the same reason the holdout and baseline are:
+    without them the section simply does not render, so this asserted the caveat was
+    present only on a machine that had already completed a run.
+    """
     from pipeline import baseline as _b, holdout as _h
 
+    monkeypatch.setattr(logparse, "read_metrics_csv", lambda _p: [
+        {"round": 1, "stage": "evaluate", "loss": 0.9, "precision": 0.5,
+         "recall": 0.3, "mAP50": 0.35, "mAP50-95": 0.19}])
     monkeypatch.setattr(_h, "curve", lambda: {
         "holdout": {"size": 1000},
         "rounds": [{"round": 1, "mAP50": 0.35, "mAP50-95": 0.19, "precision": 0.5, "recall": 0.3},
@@ -983,10 +1017,20 @@ def test_the_report_calls_an_over_provisioned_ceiling_what_it_is(monkeypatch):
     assert "lower bound" in md and "1.667" in md
 
 
-def test_the_sanity_stage_does_not_shell_out_to_a_moving_target():
+def test_the_sanity_stage_does_not_shell_out_to_a_moving_target(monkeypatch, tmp_path):
     """`python -m ultralytics.cfg` ran until ultralytics 8.4 made cfg a package with
     no __main__, and the whole chain then halted at the first GPU stage. The sanity
-    stage calls the same API a client calls, which cannot drift from it."""
+    stage calls the same API a client calls, which cannot drift from it.
+
+    The shard is faked rather than assumed present: `_cmd_sanity` refuses without one
+    (the sibling test below asserts that), so this passed only on a machine that had
+    already built a fleet — and failed on every clean clone, which is what CI is.
+    """
+    shards = tmp_path / "batch"
+    (shards / "batch_1").mkdir(parents=True)
+    (shards / "batch_1" / "data.yaml").write_text("nc: 13\n")
+    monkeypatch.setattr(paths, "VEHICLE_BATCHES", shards)
+
     cmd = stages._cmd_sanity(Config(profile="demo"))
     assert cmd[1] == "-c", "invoke the API, not a console script that may not exist"
     body = cmd[2]
@@ -1065,9 +1109,32 @@ def test_the_interpreters_scripts_directory_leads_the_path():
     import sys
 
     env = paths.subprocess_env()
-    first = env["PATH"].split(os.pathsep)[0]
-    assert first == str(Path(sys.executable).parent)
-    assert env["PATH"].count(first) >= 1
+    scripts = str(Path(sys.executable).parent)
+    entries = env["PATH"].split(os.pathsep)
+    assert entries[0] == scripts
+    assert sum(1 for e in entries if os.path.normcase(e) == os.path.normcase(scripts)) == 1
+
+
+def test_the_scripts_directory_is_moved_to_the_front_not_merely_left_on_the_path(
+        monkeypatch):
+    """Present is not first, and only first is the guarantee that matters.
+
+    The prepend used to be skipped whenever the directory was already anywhere on
+    PATH. On a GitHub Windows runner `setup-python` puts it there behind PowerShell's
+    own directory, so CI ran with the ordering this function claims to enforce
+    silently absent — and "somewhere on PATH" is exactly the state in which another
+    environment's `flower-superlink` resolves first.
+    """
+    import os
+    import sys
+
+    scripts = str(Path(sys.executable).parent)
+    monkeypatch.setenv("PATH", os.pathsep.join(["/somewhere/else", scripts, "/later"]))
+
+    entries = paths.subprocess_env()["PATH"].split(os.pathsep)
+    assert entries[0] == scripts, "already-present is not the same as first"
+    assert entries.count(scripts) == 1, "the old entry was left behind as a duplicate"
+    assert "/somewhere/else" in entries and "/later" in entries, "the rest of PATH was dropped"
 
 
 def test_checkpoints_from_a_previous_run_are_not_plotted_as_this_ones(tmp_path, monkeypatch):
