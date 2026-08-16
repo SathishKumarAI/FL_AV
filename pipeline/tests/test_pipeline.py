@@ -365,32 +365,54 @@ def test_every_file_the_dashboard_imports_is_servable():
             assert (server.STATIC / "js" / imported).is_file(), f"{js.name} imports missing {imported}"
 
 
-def test_label_overlay_boxes_land_where_the_label_file_says(tmp_path):
-    """The one piece of geometry in the dashboard, checked by running it.
+def _run_js_check(tmp_path, name: str) -> None:
+    """Run one of `pipeline/tests/js/*.mjs` against the real dashboard modules.
 
-    `cx cy w h` centred becomes `x y w h` cornered, and a box drawn a few percent off
-    is worse than no box: the overlay exists to be believed when it says a shard is
-    mislabelled. Skipped rather than failed without node — the dashboard is served as
-    plain files and this repo has no other JS toolchain.
+    The dashboard is served as plain files with no build step, so there is no JS test
+    runner here and adding one would be a larger change than the code it guards. The
+    modules are copied beside the check with a `type: module` marker, which is all
+    node needs to import them.
+
+    Skipped rather than failed without node — but note that GitHub's runners ship it,
+    so CI does execute these.
     """
     node = shutil.which("node")
     if node is None:
-        pytest.skip("node not installed; the overlay geometry is unchecked here")
+        pytest.skip(f"node not installed; {name} is unchecked here")
 
     from pipeline import server
     work = tmp_path / "js"
     shutil.copytree(server.STATIC / "js", work)
     (work / "package.json").write_text('{"type":"module"}')
-    check = Path(__file__).parent / "js" / "overlay_geometry.mjs"
-    shutil.copy(check, work / check.name)
+    shutil.copy(Path(__file__).parent / "js" / name, work / name)
 
     # console.assert writes to stderr and does NOT set the exit code, so an assertion
     # that fires would otherwise pass silently -- the exact class of bug this repo
-    # keeps shipping. Both conditions are checked.
-    out = subprocess.run([node, str(work / check.name)], capture_output=True, text=True)
+    # keeps shipping. All three conditions are checked.
+    out = subprocess.run([node, str(work / name)], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     assert "Assertion failed" not in out.stderr, out.stderr
     assert "OK" in out.stdout, out.stdout
+
+
+def test_label_overlay_boxes_land_where_the_label_file_says(tmp_path):
+    """`cx cy w h` centred becomes `x y w h` cornered.
+
+    A box drawn a few percent off looks plausible, and the overlay exists to be
+    believed when it says a shard is mislabelled. So the conversion is executed, not
+    read.
+    """
+    _run_js_check(tmp_path, "overlay_geometry.mjs")
+
+
+def test_the_live_feed_says_what_it_is_showing_in_every_state(tmp_path):
+    """Idle, training, started-but-nothing-written, and a vehicle nobody has heard of.
+
+    The failure that matters is the quiet one: without the mtime in the image URL the
+    browser serves round 1's mosaic for the whole run, and the panel looks alive while
+    showing a fossil.
+    """
+    _run_js_check(tmp_path, "live_feed.mjs")
 
 
 def test_train_artifact_route_serves_only_names_on_the_allowlist(tmp_path, monkeypatch):
