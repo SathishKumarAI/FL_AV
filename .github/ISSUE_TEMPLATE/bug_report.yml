@@ -1,0 +1,64 @@
+name: Bug report
+description: Something ran and produced the wrong answer, or would not run at all
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: this project's history is a catalogue of runs that **looked
+        fine**. If a run completed but you doubt it, the single most useful signal is
+        the round-over-round aggregate checksum — equal consecutive values mean
+        nothing was learned, whatever the metrics say. `python -m pipeline.verify`
+        prints it.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: The command you ran
+      description: The exact invocation, including the profile, rounds and epochs.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: >
+        The shortest decisive output — a failing assertion, the four pass criteria, the
+        checksum sequence, or the last twenty lines of the stage that failed. Please do
+        not paste a whole log.
+      render: shell
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options: [Windows, Linux, macOS]
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: Python, torch and ultralytics versions
+      placeholder: "3.12.4 / 2.9.0+cu128 / 8.4.115"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: traps
+    attributes:
+      label: Environment traps ruled out
+      description: Each of these has silently produced a wrong run here before.
+      options:
+        - label: The venv is python.org, not conda (Smart App Control blocks conda-forge's `_bz2.pyd`)
+        - label: "`FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION=1` was set (otherwise every client trains on CPU, silently)"
+        - label: No stale detached SuperLink from an earlier run was still holding a cached CWD

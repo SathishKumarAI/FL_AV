@@ -4,6 +4,19 @@ on:
   push:
     branches: [main]
   pull_request:
+  # `main` is green at merge time and then never checked again, which is how a repo
+  # whose every historical defect was an environment trap discovers a broken
+  # dependency floor from a user rather than from CI. 03:17 UTC, off the hour so it
+  # does not queue behind everyone else's midnight cron.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+# A second push to a PR makes the first run's answer worthless. Never cancel on
+# `main` or on the nightly: those runs are the record.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
