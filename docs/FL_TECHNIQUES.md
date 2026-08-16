@@ -38,11 +38,37 @@ sweep report identical numbers for every value and look like the knob does nothi
 An unregistered name raises at server start rather than falling back to FedAvg.
 
 `strategy = "fedprox"` still selects a **weight-space approximation** of FedProx — the proximal pull is applied on the client after training
-(`w ← w − μ(w − w_global)`) rather than as a per-step loss term, because Ultralytics'
-high-level trainer exposes no per-step hook.
+(`w ← w − μ(w − w_global)`) rather than as a per-step loss term.
 
 That approximation is honest but it is *not* FedProx. A real comparison needs the true
 proximal term or an explicit note that it is an approximation.
+
+### Correction, 2026-08-16: the per-step hook exists
+
+This document previously said the approximation was necessary because Ultralytics'
+high-level trainer exposes no per-step hook. Checked against the installed
+**ultralytics 8.4.115**, that is half wrong, and the wrong half is the useful one:
+
+| Checked | Result |
+|---|---|
+| `"optimizer_step" in ultralytics.utils.callbacks.base.default_callbacks` | **True** |
+| `BaseTrainer.optimizer_step` calls `run_callbacks("optimizer_step")` | **False** — the callback never fires |
+| `BaseTrainer.optimizer_step` is an overridable method called from `_do_train` between `backward()` and `zero_grad()` | **True** |
+| `YOLO.train()` accepts a `trainer=` class | **True** |
+
+Two consequences, and the first one matters more:
+
+1. **Registering an `"optimizer_step"` callback is a silent no-op.** It imports, it
+   registers, it never runs, and the resulting μ sweep would report identical numbers for
+   every μ and read as "the knob does nothing" — the exact failure shape catalogued in
+   `CLAUDE.md`. Do not use the callback.
+2. **True FedProx is about fifteen lines**: a `DetectionTrainer` subclass whose
+   `optimizer_step` adds `μ · (w − w_global)` to `p.grad` and then calls `super()`, with
+   the global weights captured at round start. Passed in as `model.train(trainer=...)`.
+
+Planned in [phase 5](prompts/2026-08-16-phase5-advanced-fl.md) of
+[`docs/PHASED_PLAN.md`](PHASED_PLAN.md), deliberately after the noise floor is known —
+ranking strategies whose deltas sit inside run-to-run variance ranks noise.
 
 ## The design, as built
 

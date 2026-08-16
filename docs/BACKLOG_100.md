@@ -146,6 +146,19 @@ See [`FL_TECHNIQUES.md`](FL_TECHNIQUES.md) — Flower already ships 24 strategie
 | 99 | One-command reproduction of any past run from its report bundle | P2 |
 | 100 | Architecture decision records for the choices already made (assemble-don't-build, isolation rule, partition design) | P2 |
 
+## H. Added after 2026-08-16 (101–105)
+
+Found while writing [`PHASED_PLAN.md`](PHASED_PLAN.md), each checked against the
+installed ultralytics 8.4.115 rather than assumed.
+
+| # | Feature | P |
+|---|---|---|
+| 101 | **Warm-start the 13-class head from the COCO head rows** for the nine classes BDD100K shares with COCO, instead of random init ⚠ | P1 |
+| 102 | **Server-driven LR schedule across rounds** — today `lrf` anneals *within* each round and the next round restarts at `lr0`, so the fleet never anneals globally ⚠ | P1 |
+| 103 | **`cache="ram"` and the Windows dataloader path** — decode currently runs on the training thread (`workers=0`), the prime suspect behind 27 % GPU utilisation ⚠ | P1 |
+| 104 | **True FedProx via a `DetectionTrainer.optimizer_step` override.** Note: the `"optimizer_step"` *callback* is registered but never fired — using it would be a silent no-op ⚠ | P1 |
+| 105 | **Per-round profiling** — where the 73 % of non-training wall clock goes, before optimising any of it | P1 |
+
 ---
 
 ## If you only do ten

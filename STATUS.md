@@ -108,6 +108,32 @@ three runs.
   it demonstrates the machinery: one setting varied, identical data proven by the
   fingerprint, both scored on the same held-out images.
 
+## The plan these tasks now sit inside (added 2026-08-16)
+
+[`docs/PHASED_PLAN.md`](docs/PHASED_PLAN.md) orders everything below into six phases with
+a gate on each: **0 measure → 1 runtime → 2 schedule & head → 3 evidence → 4 data →
+5 advanced FL**, with **G GitHub** running alongside. One prompt per phase in
+`docs/prompts/2026-08-16-*`.
+
+The reordering, and why it differs from the list below: **speed first**, because 27 %
+GPU utilisation and a card at 31 % of its VRAM means every later phase is paid for in
+runs that need not cost what they cost; then **the schedule**, because three of every
+four local epochs are warmup and the LR restarts every round, which is the likeliest
+reason 24 effective epochs stopped at 0.4173; then **the spread**, because a 1.667×-budget
+ceiling scored *lower* than a smaller one and until that variance is measured no ranking
+of strategies means anything. Strategy comparison is last on purpose.
+
+Two things were found while writing it, both checked against the installed ultralytics
+8.4.115 rather than assumed:
+
+- **`"optimizer_step"` is a registered callback that never fires.** So true FedProx is
+  reachable by overriding `BaseTrainer.optimizer_step` and passing `trainer=` — but
+  registering the callback would have been a silent no-op that read as "μ does nothing".
+  `docs/FL_TECHNIQUES.md` said no per-step hook existed; that is now corrected there.
+- **The 13-class head starts random when BDD100K shares nine classes with COCO.**
+  Warm-starting those output channels is a few lines and is the highest expected-value
+  item in `docs/ML_PLAN.md`. It was not in the backlog; it is now (item 101).
+
 ## Next session — carry these forward
 
 Ordered by what they unblock, not by size.

@@ -52,3 +52,23 @@ one per increment.
 | Date | Prompt | Design it came from |
 |---|---|---|
 | 2026-08-05 | [pipeline + observability](2026-08-05-pipeline-observability-build-prompt.md) | [design](../superpowers/specs/2026-08-05-pipeline-observability-design.md) |
+| 2026-08-06 | [vehicle learning visualisation](2026-08-06-vehicle-learning-visualisation-build-prompt.md) | — |
+| 2026-08-06 | [UI premium pass](2026-08-06-ui-premium-pass.md) | — |
+| 2026-08-06 | [Dirichlet partitioning](2026-08-06-dirichlet-partition.md) | — |
+| 2026-08-06 | [holdout + centralised baseline](2026-08-06-holdout-and-baseline.md) | — |
+| 2026-08-06 | [strategy registry ⚠](2026-08-06-strategy-registry.md) | — |
+| 2026-08-06 | [shard validation](2026-08-06-shard-validation.md) | — |
+| 2026-08-06 | [Data and Plan tabs](2026-08-06-data-and-plan-tabs.md) | — |
+| 2026-08-06 | [next-session handoff](2026-08-06-next-session-handoff.md) | — |
+| 2026-08-16 | [phase 1 — runtime and throughput](2026-08-16-phase1-runtime-throughput.md) | [the phased plan](../PHASED_PLAN.md) |
+| 2026-08-16 | [phase 2 — schedule and head ⚠](2026-08-16-phase2-schedule-and-head.md) | [the phased plan](../PHASED_PLAN.md) |
+| 2026-08-16 | [phase 3 — evidence, seeds and spread](2026-08-16-phase3-evidence.md) | [the phased plan](../PHASED_PLAN.md) |
+| 2026-08-16 | [phase 4 — data management](2026-08-16-phase4-data-management.md) | [the phased plan](../PHASED_PLAN.md) |
+| 2026-08-16 | [phase 5 — advanced FL ⚠](2026-08-16-phase5-advanced-fl.md) | [the phased plan](../PHASED_PLAN.md) |
+| 2026-08-16 | [phase G — GitHub management](2026-08-16-github-management.md) | [the phased plan](../PHASED_PLAN.md) |
+
+The 2026-08-16 set is a **plan**, not a record: six prompts written in one sitting,
+before any of the code they describe. Each is a phase gate — do not start phase *n* + 1
+while phase *n*'s definition of done is unmet, and rewrite the later prompts if an
+earlier phase's measurements contradict them. A prompt that survives contact with the
+GPU unchanged was probably not specific enough.

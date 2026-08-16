@@ -12,6 +12,7 @@ whole flow and visualises a simulated vehicle fleet while it runs.
 
 | Question | File |
 |---|---|
+| **What is the order of work, and what gates each phase?** | [`docs/PHASED_PLAN.md`](docs/PHASED_PLAN.md) |
 | How do I branch, commit, merge? | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Why is mAP low, what do I run next? | [`docs/ML_PLAN.md`](docs/ML_PLAN.md) |
 | How do I try another FL algorithm? | [`docs/FL_TECHNIQUES.md`](docs/FL_TECHNIQUES.md) |
@@ -113,6 +114,22 @@ Read these before assuming a green run means a working one.
 
 **The single most useful signal is the round-over-round aggregate checksum.** Equal
 consecutive values mean nothing is being learned, whatever the metrics say.
+
+## Facts about the training stack, measured 2026-08-16
+
+Checked against the installed **ultralytics 8.4.115** in the project venv, not assumed.
+Each of these is a lever the [phased plan](docs/PHASED_PLAN.md) pulls; each is also a way
+to be wrong quietly.
+
+| | Fact | Why it matters |
+|---|---|---|
+| 1 | `warmup_epochs = 3.0` against `local_epochs = 4` | three of every four epochs are warmup; every client ends a round worse than the aggregate it started from |
+| 2 | `lrf = 0.01` decays **within** the round, and each round calls `train()` fresh at `lr0` | six rounds is six independent anneals, never one. The fleet never anneals globally |
+| 3 | `"optimizer_step"` is in `default_callbacks`, but `BaseTrainer.optimizer_step` **never calls `run_callbacks` for it** | registering that callback is a silent no-op that looks like it works. Override the method and pass `trainer=` to `train()` instead |
+| 4 | `cache = False`, and the client passes `workers=0` on Windows | JPEG decode runs on the training thread. Prime suspect for **27 % mean GPU utilisation** |
+| 5 | Peak VRAM at 1 400 images/vehicle is **5 087 MiB of 16 303**, with `num-gpus = 1.0` | clients are serialised on a card that fits three of them |
+| 6 | The 13-class head is **random**; COCO transfers only the backbone | round 1 spends its gradients teaching the head what a car is. BDD100K shares nine classes with COCO — warm-start them |
+| 7 | Observed run-to-run spread is **≥ ±0.016 mAP50** (a 1.667×-budget ceiling scored *lower* than a smaller one) | any delta under that is not a result. Measure the spread before ranking anything |
 
 ## Environment traps
 

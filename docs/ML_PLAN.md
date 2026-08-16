@@ -67,6 +67,42 @@ federated mAP is a number with nothing to compare it to. FedAvg on non-IID data 
 *expected* to trail centralised training; the interesting quantity is the gap, and how
 much each strategy closes it.
 
+## Update 2026-08-16 — where the epochs are actually going
+
+Rungs 1–3 are done and the fleet retains **84.5 %** of a budget-matched centralised
+ceiling (0.4173 vs 0.4936 mAP50 on the shared holdout). The question changed from *"is it
+underfitting?"* to *"why do 24 effective epochs only reach 0.4173?"* Three facts, checked
+against the installed **ultralytics 8.4.115** rather than assumed:
+
+```
+warmup_epochs = 3.0   lr0 = 0.01   lrf = 0.01   cos_lr = False   freeze = None
+close_mosaic  = 10    mosaic = 1.0   patience = 100   nbs = 64   cache = False
+```
+
+| | Fact | Consequence |
+|---|---|---|
+| 1 | `warmup_epochs = 3.0` inside a 4-epoch round | **three of every four epochs are warmup.** The Metrics tab shows box, cls *and* dfl rising across every round: each client ends the round worse than the aggregate it started from |
+| 2 | `lrf = 0.01` decays within the round; the next round calls `train()` fresh at `lr0` | **six independent anneals, never one.** The fleet never gets the low-LR consolidation that makes a centralised run's last epochs count — a structural share of the 15 % gap that has nothing to do with federation |
+| 3 | COCO weights transfer the backbone and discard the head | **round 1 backpropagates random-head noise into good features** |
+
+Fix 1 and 2 together with a **server-driven schedule**: the round number is already
+broadcast, so set `lr0_round = lr0 · f(round / total_rounds)`, `lrf = 1.0` within the
+round, and `warmup_epochs ≈ 0.1` after round 1. One global anneal spread across rounds.
+
+Fix 3 twice, and measure the two separately: `freeze=10` for round 1, **and warm-start
+the 13-class head from the COCO head rows** for the classes BDD100K shares with COCO
+(`person`, `car`, `bus`, `truck`, `train`, `motorcycle`, `bicycle`, `traffic light`,
+`stop sign`). Starting from a detector rather than from noise is the highest
+expected-value item on this page and it is not in the original backlog.
+
+**The precision caveat that governs all of it.** A ceiling trained on 14 000 images for
+24 epochs — 1.667× the budget — scored **0.4771**, *lower* than the 8 400-image ceiling's
+**0.4936**. Run-to-run variance here is at least ±0.016 mAP50. Measure the spread across
+seeds before believing any of the deltas above; that is
+[phase 3](prompts/2026-08-16-phase3-evidence.md).
+
+Full ordering and gates: [`docs/PHASED_PLAN.md`](PHASED_PLAN.md).
+
 ## Hyperparameters worth changing, in order of expected effect
 
 1. **Effective epochs** (`rounds × local_epochs`). Currently the binding constraint.
