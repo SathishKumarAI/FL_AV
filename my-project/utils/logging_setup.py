@@ -8,6 +8,21 @@ _MAX_BYTES = int(os.environ.get("FL_AV_LOG_MAX_BYTES", 10 * 1024 * 1024))  # 10 
 _BACKUP_COUNT = int(os.environ.get("FL_AV_LOG_BACKUP_COUNT", 5))
 _LEVEL = os.environ.get("FL_AV_LOG_LEVEL", "INFO").upper()
 
+#: `my-project/` — this file is `my-project/utils/logging_setup.py`.
+#:
+#: Every caller passes a *relative* path ("logs/server.log"), and every caller does it
+#: at import time, so the log's location was decided by whichever directory the process
+#: happened to start in. That is not a tidiness problem. `pytest my-project/tests` from
+#: the repo root imports `my_project.server_app` during collection and thereby creates
+#: an empty `logs/server.<pid>.log` in the **repo root**; that file then looked newer
+#: than the real federation's log, and `pipeline.verify` reported "need >=2 rounds to
+#: tell, saw 0" immediately after a six-round run had succeeded.
+#:
+#: Anchored here rather than at the five call sites: one resolution in the shared
+#: function is a smaller change than five, and it covers the caller nobody has written
+#: yet. An absolute `log_file` is still honoured unchanged — the tests pass tmp_path.
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 
 def configure_logging(logger_name, log_file=None):
     """
@@ -20,6 +35,8 @@ def configure_logging(logger_name, log_file=None):
     Args:
         logger_name (str): The name of the logger.
         log_file (str, optional): Path to the log file. None -> console logging.
+            A relative path is resolved against `my-project/`, never against the
+            current working directory — see _PROJECT_ROOT above for what that cost.
 
     Returns:
         logging.Logger: Configured logger instance.
@@ -32,6 +49,8 @@ def configure_logging(logger_name, log_file=None):
     if log_file:
         # Ensure the log file's own directory exists (not a hardcoded "logs").
         path = Path(log_file)
+        if not path.is_absolute():
+            path = _PROJECT_ROOT / path
         path.parent.mkdir(parents=True, exist_ok=True)
         # One file per process. In simulation every client runs in its own Ray actor
         # process, and RotatingFileHandler is not multi-process safe: the writes

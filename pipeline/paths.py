@@ -76,11 +76,15 @@ def mlflow_uri() -> str:
 def log_dirs() -> list[Path]:
     """Every directory a run's logs can land in.
 
-    my-project's loggers use CWD-relative paths and are configured at import time.
-    Depending on whether a component runs as a direct subprocess (cwd=my-project) or
-    inside a Ray worker (which inherits the head node's cwd), one run can scatter its
-    logs across both. Looking in only one place made a working federation report as a
-    failure.
+    New logs only ever land in `my-project/logs` now: `utils/logging_setup` resolves a
+    relative path against the package root rather than against the CWD, so importing a
+    module no longer scatters log files wherever the process happened to be standing.
+    Before that fix, whether a component ran as a direct subprocess (cwd=my-project) or
+    inside a Ray worker (which inherits the head node's cwd) decided where its log
+    went, and looking in only one place made a working federation report as a failure.
+
+    `REPO / "logs"` stays in the list because the logs already on disk from before the
+    fix are still readable history. Finding nothing there is the expected state.
     """
     return [d for d in (PROJECT / "logs", REPO / "logs") if d.is_dir()]
 
