@@ -5,8 +5,10 @@
 // table highlight together — one selection, three views.
 import { $, esc, empty, glyph, PALETTE } from "./util.js";
 import { state } from "./state.js";
+import { renderStrip, loadConsumed } from "./consumed.js";
 
-const view = { data: null, shard: null, sort: { key: "vid", dir: 1 }, loading: false };
+const view = { data: null, shard: null, sort: { key: "vid", dir: 1 }, loading: false,
+               labels: true };
 
 export async function loadData(force) {
   if (view.loading) return;
@@ -164,14 +166,24 @@ function render() {
         `<p class="hint">It has to look like the data it measures. A holdout drawn from ` +
         `one condition would answer a different question than the one being asked.</p></div>` +
 
-      `<div class="panel"><h2>What ${sel ? "vehicle " + sel.vid : "the fleet"} sees</h2>` +
+      `<div class="panel"><h2>What ${sel ? "vehicle " + sel.vid : "the fleet"} sees` +
+        `<button class="chip" id="toggleLabels" data-sel="${view.labels}">` +
+        `${view.labels ? "labels on" : "labels off"}</button></h2>` +
         `<div class="strip" id="dataStrip"></div>` +
-        `<p class="hint">Frames from the shard itself. Select a vehicle in the table to ` +
-        `change them.</p></div>` +
-    `</div>`;
+        `<p class="hint">Frames from the shard itself, with the label file drawn over ` +
+        `them — the boxes are what the trainer reads, not a prediction. A frame whose ` +
+        `boxes sit in the wrong place is a broken shard, and no histogram would say so. ` +
+        `Select a vehicle in the table to change them.</p></div>` +
+    `</div>` +
+
+    `<div class="panel"><h2>What YOLO actually consumed` +
+      `<span class="n">drawn by ultralytics, during the run</span></h2>` +
+      `<div id="consumedBody"></div></div>`;
 
   wire();
-  loadStrip(sel ? sel.vid : (d.fleet[0] || {}).vid);
+  const vid = sel ? sel.vid : (d.fleet[0] || {}).vid;
+  loadStrip(vid);
+  loadConsumed(vid);
 }
 
 async function loadStrip(vid) {
@@ -180,10 +192,7 @@ async function loadStrip(vid) {
   host.innerHTML = '<div class="skel-block" style="min-height:80px"></div>';
   try {
     const v = await (await fetch(`/api/vehicle/${encodeURIComponent(vid)}`)).json();
-    host.innerHTML = (v.samples || []).slice(0, 8).map(n =>
-      `<img loading="lazy" src="/api/shard-image/${encodeURIComponent(vid)}/${encodeURIComponent(n)}" ` +
-      `alt="A frame from vehicle ${esc(String(vid))}'s shard">`).join("") ||
-      '<p class="hint">No images materialised in this shard.</p>';
+    await renderStrip(host, vid, v.samples, view.labels);
   } catch {
     host.innerHTML = '<p class="hint">Could not load frames.</p>';
   }
@@ -205,6 +214,15 @@ function wire() {
   });
   const clear = $("clearShard");
   if (clear) clear.onclick = () => { view.shard = null; render(); };
+  const toggle = $("toggleLabels");
+  // Re-renders the strip only. A full render() would refetch nothing but would throw
+  // away the consumed panel's own vehicle/group selection.
+  if (toggle) toggle.onclick = () => {
+    view.labels = !view.labels;
+    toggle.dataset.sel = String(view.labels);
+    toggle.textContent = view.labels ? "labels on" : "labels off";
+    loadStrip(view.shard ?? ((view.data.fleet[0] || {}).vid));
+  };
   const refresh = $("dataRefresh");
   if (refresh) refresh.onclick = () => loadData(true);
 }

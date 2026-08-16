@@ -30,6 +30,8 @@ Open the one file that owns the thing. Do not read the package to find it.
 | Dashboard markup, a new panel, an element id | `pipeline/static/index.html` |
 | Chart axes, ticks, tooltips, sparkline | `pipeline/static/js/chart.js` |
 | The fleet grid / vehicle drawer / live polling / run form | `pipeline/static/js/{fleet,drawer,live,control}.js` |
+| Label boxes drawn over a frame, the trainer's own pictures | `pipeline/static/js/consumed.js` |
+| Which of ultralytics' output pictures are served, and their captions | `pipeline/train_artifacts.py` — `KINDS` |
 | An HTTP route or what `/api/state` returns | `pipeline/server.py` |
 | Which stages exist, what "already done" means, gating | `pipeline/stages.py` |
 | How a stage subprocess is run, env, SuperLink handling | `pipeline/runner.py` |
@@ -166,7 +168,7 @@ branch dies.
 
 ```bash
 python -m pytest my-project/tests -q     # 31 tests
-python -m pytest pipeline/tests -q       # 59 tests
+python -m pytest pipeline/tests -q       # 121 tests
 python -m pipeline.verify                # the four pass criteria against the last run
 python -m pipeline.holdout --evaluate    # the global model on data no vehicle saw
 ```

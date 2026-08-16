@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -362,6 +363,89 @@ def test_every_file_the_dashboard_imports_is_servable():
     for js in (server.STATIC / "js").glob("*.js"):
         for imported in re.findall(r'from "\./([^"]+)"', js.read_text(encoding="utf-8")):
             assert (server.STATIC / "js" / imported).is_file(), f"{js.name} imports missing {imported}"
+
+
+def test_label_overlay_boxes_land_where_the_label_file_says(tmp_path):
+    """The one piece of geometry in the dashboard, checked by running it.
+
+    `cx cy w h` centred becomes `x y w h` cornered, and a box drawn a few percent off
+    is worse than no box: the overlay exists to be believed when it says a shard is
+    mislabelled. Skipped rather than failed without node — the dashboard is served as
+    plain files and this repo has no other JS toolchain.
+    """
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not installed; the overlay geometry is unchecked here")
+
+    from pipeline import server
+    work = tmp_path / "js"
+    shutil.copytree(server.STATIC / "js", work)
+    (work / "package.json").write_text('{"type":"module"}')
+    check = Path(__file__).parent / "js" / "overlay_geometry.mjs"
+    shutil.copy(check, work / check.name)
+
+    # console.assert writes to stderr and does NOT set the exit code, so an assertion
+    # that fires would otherwise pass silently -- the exact class of bug this repo
+    # keeps shipping. Both conditions are checked.
+    out = subprocess.run([node, str(work / check.name)], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert "Assertion failed" not in out.stderr, out.stderr
+    assert "OK" in out.stdout, out.stdout
+
+
+def test_train_artifact_route_serves_only_names_on_the_allowlist(tmp_path, monkeypatch):
+    """The trainer's directory holds weights and a data yaml beside the pictures.
+
+    Names are matched against `KINDS` rather than joined onto the run directory and
+    guarded, so neither `../../CLAUDE.md` nor `weights/best.pt` can be fetched — and a
+    future ultralytics release cannot publish a new file over HTTP by writing it.
+    """
+    from pipeline import train_artifacts
+
+    run = tmp_path / "my-project" / "runs" / "detect" / "runs" / "fl" / "batch3"
+    run.mkdir(parents=True)
+    (run / "args.yaml").write_text("epochs: 1")
+    (run / "labels.jpg").write_bytes(b"\xff\xd8jpeg")
+    (run / "weights").mkdir()
+    (run / "weights" / "best.pt").write_bytes(b"weights")
+    monkeypatch.setattr(train_artifacts.paths, "PROJECT", tmp_path / "my-project")
+
+    assert train_artifacts.run_dir(3) == run
+    assert train_artifacts.artifact(3, "labels.jpg") == run / "labels.jpg"
+    assert train_artifacts.artifact(3, "weights/best.pt") is None
+    assert train_artifacts.artifact(3, "../../../CLAUDE.md") is None
+    assert train_artifacts.artifact(3, "args.yaml") is None
+    assert train_artifacts.artifact(4, "labels.jpg") is None      # no such vehicle
+    # train_batch0.jpg is on the allowlist but was not written: absent, not an error.
+    assert train_artifacts.artifact(3, "train_batch0.jpg") is None
+
+    listed = train_artifacts.for_vehicle(3)
+    assert [f["name"] for f in listed["files"]] == ["labels.jpg"]
+
+
+def test_shard_label_boxes_are_normalised_and_a_bad_row_does_not_lose_the_good_ones(
+        tmp_path, monkeypatch):
+    """A label file with one broken row still has good rows.
+
+    Raising here would blank the overlay for the whole frame, which is exactly the
+    frame someone is looking at *because* they suspect its labels.
+    """
+    from pipeline import dataset_stats
+
+    labels = tmp_path / "batch_7" / "labels" / "train"
+    labels.mkdir(parents=True)
+    (labels / "frame.txt").write_text(
+        "2 0.5 0.5 0.25 0.5\n"        # good
+        "9 0.1 0.2\n"                  # too few fields
+        "car 0.1 0.2 0.3 0.4\n"        # class is not a number
+        "0 0.9 0.9 0.05 0.05\n"        # good, and last
+    )
+    monkeypatch.setattr(dataset_stats.paths, "VEHICLE_BATCHES", tmp_path)
+
+    got = dataset_stats.boxes(7, "frame.jpg")
+    assert [b["cls"] for b in got] == [2, 0]
+    assert got[0] == {"cls": 2, "cx": 0.5, "cy": 0.5, "w": 0.25, "h": 0.5}
+    assert dataset_stats.boxes(7, "no-such-frame.jpg") == []
 
 
 def test_shard_composition_counts_what_the_vehicle_actually_holds(tmp_path, monkeypatch):
