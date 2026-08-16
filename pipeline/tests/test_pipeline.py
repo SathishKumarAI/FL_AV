@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -218,8 +219,12 @@ def test_generated_paths_are_all_gitignored():
     """
     import subprocess
 
-    if not (REPO / ".git").exists():
-        pytest.skip("not a git checkout; nothing here can be committed anyway")
+    # Two separate ways to not be able to ask: no repository, and no git. The second
+    # is not hypothetical -- `python:3.12-slim` ships without git, so a bind-mounted
+    # checkout has the `.git` but not the binary, and the test died on FileNotFoundError
+    # from deep inside subprocess rather than saying what was missing.
+    if not (REPO / ".git").exists() or shutil.which("git") is None:
+        pytest.skip("no git repository or no git binary; nothing here can be committed")
     targets = [paths.VEHICLE_ROOT / "batch" / "batch_1" / "images" / "x.jpg",
                paths.MLFLOW_STORE / "0" / "meta.yaml",
                paths.REPORTS / "20260805" / "report.html",
@@ -258,7 +263,20 @@ def test_federate_stage_scans_for_crashes():
     assert stages.BY_NAME["federate"].crash_markers, "federate must not trust its exit code"
 
 
-def test_init_args_are_omitted_when_attaching_to_an_existing_ray_cluster():
+@pytest.fixture
+def _flwr_launcher(monkeypatch):
+    """`_cmd_federate` resolves the flwr launcher, and raises when there is none.
+
+    These two tests are about the *arguments* it builds, not about where the binary
+    lives — `test_the_interpreters_scripts_directory_leads_the_path` covers that. So
+    they failed on any machine without flwr installed, which includes the pipeline CI
+    job by design: it installs pytest and pyyaml only, because the pipeline package
+    imports torch and ultralytics lazily and its tests then run in under a second.
+    """
+    monkeypatch.setattr(stages, "flwr_executable", lambda: "/nonexistent/flwr")
+
+
+def test_init_args_are_omitted_when_attaching_to_an_existing_ray_cluster(_flwr_launcher):
     """Ray: 'When connecting to an existing cluster, num_cpus and num_gpus must not
     be provided.' Passing them anyway crashes the simulation at startup."""
     attached = " ".join(stages._cmd_federate(Config(ray_address="127.0.0.1:6379")))
@@ -267,7 +285,7 @@ def test_init_args_are_omitted_when_attaching_to_an_existing_ray_cluster():
     assert "init-args-num-gpus=1" in standalone
 
 
-def test_supernodes_track_the_vehicle_count():
+def test_supernodes_track_the_vehicle_count(_flwr_launcher):
     """Otherwise the run hangs forever waiting for clients that never arrive."""
     cmd = " ".join(stages._cmd_federate(Config(n_vehicles=6)))
     assert "num-supernodes=6" in cmd and "min_clients=6" in cmd
@@ -1091,9 +1109,32 @@ def test_the_interpreters_scripts_directory_leads_the_path():
     import sys
 
     env = paths.subprocess_env()
-    first = env["PATH"].split(os.pathsep)[0]
-    assert first == str(Path(sys.executable).parent)
-    assert env["PATH"].count(first) >= 1
+    scripts = str(Path(sys.executable).parent)
+    entries = env["PATH"].split(os.pathsep)
+    assert entries[0] == scripts
+    assert sum(1 for e in entries if os.path.normcase(e) == os.path.normcase(scripts)) == 1
+
+
+def test_the_scripts_directory_is_moved_to_the_front_not_merely_left_on_the_path(
+        monkeypatch):
+    """Present is not first, and only first is the guarantee that matters.
+
+    The prepend used to be skipped whenever the directory was already anywhere on
+    PATH. On a GitHub Windows runner `setup-python` puts it there behind PowerShell's
+    own directory, so CI ran with the ordering this function claims to enforce
+    silently absent — and "somewhere on PATH" is exactly the state in which another
+    environment's `flower-superlink` resolves first.
+    """
+    import os
+    import sys
+
+    scripts = str(Path(sys.executable).parent)
+    monkeypatch.setenv("PATH", os.pathsep.join(["/somewhere/else", scripts, "/later"]))
+
+    entries = paths.subprocess_env()["PATH"].split(os.pathsep)
+    assert entries[0] == scripts, "already-present is not the same as first"
+    assert entries.count(scripts) == 1, "the old entry was left behind as a duplicate"
+    assert "/somewhere/else" in entries and "/later" in entries, "the rest of PATH was dropped"
 
 
 def test_checkpoints_from_a_previous_run_are_not_plotted_as_this_ones(tmp_path, monkeypatch):
