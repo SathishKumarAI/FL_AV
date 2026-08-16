@@ -1,0 +1,44 @@
+# The build context is the one place a "data is never committed" rule can be quietly
+# bypassed: nothing here is committed, and all of it would still end up in the image.
+# So this file is a safety rule, not an optimisation — read it that way.
+
+# -- data, in every form it takes here ---------------------------------------
+**/images/
+**/*.jpg
+**/*.jpeg
+**/*.png
+pipeline/vehicles/
+pipeline/holdout/
+full_data_run/
+json_to_yolo/
+
+# -- weights and checkpoints --------------------------------------------------
+**/*.pt
+**/*.pth
+**/*.onnx
+**/*.torchscript
+**/weights/
+checkpoints/
+models/
+
+# -- generated: runs, logs, trackers, caches ----------------------------------
+**/runs/
+**/logs/
+**/mlruns/
+pipeline/.state/
+pipeline/reports/
+**/*.cache
+**/__pycache__/
+.pytest_cache/
+
+# -- the repo's own plumbing --------------------------------------------------
+# `docs/` and `.github/` deliberately stay: tests assert that the docs index finds
+# real files and that the workflow references real paths. Excluding them made the
+# suite fail inside the image and pass outside it, which is the worst of both.
+.git/
+.vscode/
+Research_docs/
+*.ipynb
+
+# my-project/batch/*/labels and the split lists ARE committed and ARE needed: the
+# pipeline tests assert against real shard layouts. They are text, and they stay.
