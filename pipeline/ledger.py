@@ -25,7 +25,7 @@ from . import paths
 
 #: What distinguishes one approach from another. Two runs with the same signature
 #: are repeats; anything else is a different experiment.
-APPROACH_KEYS = ("strategy", "partition", "alpha", "profile", "n_vehicles",
+APPROACH_KEYS = ("strategy", "partition", "alpha", "size_skew", "profile", "n_vehicles",
                  "rounds", "local_epochs", "per_vehicle", "seed")
 
 
@@ -42,6 +42,8 @@ def approach(cfg: dict) -> str:
     bits = [str(cfg.get("strategy") or "fedavg"), str(cfg.get("partition") or "?")]
     if cfg.get("partition") == "dirichlet":
         bits.append(f"a={cfg.get('alpha')}")
+    if cfg.get("size_skew"):
+        bits.append(f"skew={cfg['size_skew']:g}")
     bits.append(f"{cfg.get('n_vehicles', '?')}v")
     bits.append(f"{cfg.get('rounds', '?')}x{cfg.get('local_epochs', '?')}")
     bits.append(f"{cfg.get('per_vehicle', '?')}img")

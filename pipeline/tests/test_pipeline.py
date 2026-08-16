@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -699,6 +700,105 @@ def test_dirichlet_rejects_an_alpha_that_has_no_meaning():
     with pytest.raises(ValueError):
         vehicles.assign(2, 10, index=idx, train_pool=set(idx), val_pool=set(idx),
                         partition="dirichlet", alpha=0)
+
+
+# ------------------------------------------------------------- quantity skew
+def test_size_skew_gives_unequal_shards_that_still_sum_to_the_budget():
+    """Skew redistributes the fleet's images; it must never change how many there are.
+
+    A skewed run and an unskewed one have to be comparable, and they only are if both
+    made the same number of image-visits. If skew changed the total, every comparison
+    against a skewed arm would be confounded by budget -- which is the failure
+    `compare.py` already refuses to let a config make.
+    """
+    idx = _mixed_index()
+    kw = dict(index=idx, train_pool=set(idx), val_pool=set(idx), val_per_vehicle=10,
+              seed=3, partition="condition")
+
+    flat = vehicles.assign(6, 100, size_skew=0.0, **kw)
+    skewed = vehicles.assign(6, 100, size_skew=0.9, **kw)
+
+    assert {v.n_train for v in flat} == {100}, "skew 0 must leave every shard equal"
+    assert len({v.n_train for v in skewed}) > 1, "skew > 0 must make shards differ"
+    assert sum(v.n_train for v in skewed) == 600, [v.n_train for v in skewed]
+
+
+def test_size_skew_never_shards_below_the_batch_size():
+    """A shard smaller than the batch takes no optimizer step and logs nothing wrong.
+
+    That exact silent no-op is already in this repo's history, so a realism knob is
+    not allowed to produce it however extreme the draw.
+    """
+    idx = _mixed_index(4000)
+    floor = vehicles.size_floor(200)
+    vs = vehicles.assign(6, 200, index=idx, train_pool=set(idx), val_pool=set(idx),
+                         val_per_vehicle=20, seed=7, size_skew=3.0)
+
+    assert floor == 32, floor
+    assert min(v.n_train for v in vs) >= floor, [v.n_train for v in vs]
+    assert all(v.val for v in vs), "a vehicle with no val split cannot self-evaluate"
+
+
+def test_size_skew_is_deterministic_and_keeps_slices_disjoint():
+    idx = _mixed_index()
+    kw = dict(index=idx, train_pool=set(idx), val_pool=set(idx), val_per_vehicle=10,
+              seed=11, size_skew=0.7, partition="dirichlet", alpha=0.4)
+    vs = vehicles.assign(5, 80, **kw)
+
+    seen = [n for v in vs for n in v.train]
+    assert len(seen) == len(set(seen)), "skewed slices must not overlap"
+    assert [v.train for v in vehicles.assign(5, 80, **kw)] == [v.train for v in vs]
+
+
+def test_skew_zero_draws_nothing_so_old_fleets_still_reproduce():
+    """The default path must not touch the rng, or every fleet ever built changes.
+
+    Determinism here is not a nicety: `fleet.meta.json` records a seed, and runs on
+    disk are only comparable to future ones while that seed still means the same
+    images.
+    """
+    idx = _mixed_index()
+    kw = dict(index=idx, train_pool=set(idx), val_pool=set(idx), val_per_vehicle=10,
+              seed=4, partition="condition")
+    assert ([v.train for v in vehicles.assign(4, 50, **kw)]
+            == [v.train for v in vehicles.assign(4, 50, size_skew=0.0, **kw)])
+
+
+def test_the_fleet_stage_expects_skewed_shards_to_be_small():
+    """Without this the rebuild check fires every run -- and rebuilding rmtree's shards.
+
+    The check asks "is any vehicle below per_vehicle images?", which is true by design
+    for every skewed fleet. Left alone it would rmtree and relink the whole fleet on
+    every invocation, including one made while a federation was in flight.
+    """
+    cfg = stages.Config(profile="demo", n_vehicles=2, size_skew=0.8)
+    # A shard for every id the server can pick, sizes spread around per_vehicle=300.
+    fleet = [{"vid": i, "n_train": 480 if i % 2 else 120, "condition": "night"}
+             for i in paths.BATCH_IDS]
+    meta = {"partition": cfg.partition, "seed": cfg.seed,
+            "per_vehicle": cfg.per_vehicle, "holdout": 0, "size_skew": 0.8}
+
+    with patch.object(vehicles, "load_fleet", return_value=fleet), \
+         patch.object(vehicles, "load_fleet_meta", return_value=meta), \
+         patch.object(stages.holdout, "names", return_value=set()):
+        assert stages._check_fleet(cfg).satisfied, stages._check_fleet(cfg).detail
+
+        thin = [*fleet[:-1], {**fleet[-1], "n_train": 4}]
+        with patch.object(vehicles, "load_fleet", return_value=thin):
+            assert not stages._check_fleet(cfg).satisfied, "below the floor is still stale"
+
+
+def test_a_fleet_built_before_skew_existed_is_not_declared_stale():
+    """`fleet.meta.json` files on disk have no size_skew key. Absent must read as 0."""
+    cfg = stages.Config(profile="demo", n_vehicles=2)
+    fleet = [{"vid": i, "n_train": cfg.per_vehicle, "condition": "x"} for i in paths.BATCH_IDS]
+    meta = {"partition": cfg.partition, "seed": cfg.seed,
+            "per_vehicle": cfg.per_vehicle, "holdout": 0}   # no size_skew
+
+    with patch.object(vehicles, "load_fleet", return_value=fleet), \
+         patch.object(vehicles, "load_fleet_meta", return_value=meta), \
+         patch.object(stages.holdout, "names", return_value=set()):
+        assert stages._check_fleet(cfg).satisfied, stages._check_fleet(cfg).detail
 
 
 def test_the_registry_is_what_every_caller_reads():
@@ -1458,6 +1558,32 @@ def test_the_documented_tabs_are_the_tabs_the_page_has():
     in_html = set(re.findall(r'data-view="([a-z]+)"', html))
     documented = {t["name"].lower() for t in _docs.index()["tabs"]}
     assert in_html == documented, (in_html ^ documented)
+
+
+def test_every_element_the_run_form_reaches_for_exists():
+    """`$("skew")` on an id the markup lacks throws, and the whole form stops working.
+
+    control.js reads the form by id and index.html declares them; nothing links the two
+    but this. The failure is silent in the worst way -- the page renders, and the first
+    keystroke kills the estimate handler.
+    """
+    static = REPO / "pipeline" / "static"
+    html = (static / "index.html").read_text(encoding="utf-8")
+    js = (static / "js" / "control.js").read_text(encoding="utf-8")
+
+    ids = re.findall(r'id="([\w-]+)"', html)
+    declared = set(ids)
+    wanted = set(re.findall(r'\$\("([\w-]+)"\)', js))
+    wanted |= set(re.findall(r'"([\w-]+)"(?=[^\n]*\.forEach\(id)', js))
+
+    missing = sorted(wanted - declared)
+    assert not missing, f"control.js reads ids index.html does not declare: {missing}"
+    # A duplicate id is worse than a missing one: getElementById returns the *first*
+    # match and nothing errors. A "Size skew" input added as id="skew" would silently
+    # have read the version-skew banner instead, and the form would have posted 0.
+    dupes = sorted({i for i in ids if ids.count(i) > 1})
+    assert not dupes, f"index.html declares these ids more than once: {dupes}"
+    assert {"sizeSkew", "sizeSkewNote", "alpha", "partition"} <= wanted, "the form lost a control"
 
 
 def test_client_logs_are_scoped_to_the_run_that_is_being_measured(tmp_path):

@@ -42,6 +42,7 @@ class Config:
     proximal_mu: float = 0.0         # FedProx only; >0 turns the proximal term on
     holdout_size: int = 1000         # images no vehicle may train or self-evaluate on
     alpha: float = 0.5               # dirichlet only: smaller = more skewed
+    size_skew: float = 0.0           # 0 = every vehicle the same size; ~1 = 10x spread
     per_vehicle_override: int = 0    # 0 = use the profile default
     ray_address: str | None = None   # set => attach to an existing head node
 
@@ -173,6 +174,11 @@ def _check_fleet(cfg: Config) -> Check:
                                      ("per_vehicle", cfg.per_vehicle)) if meta.get(k) != want]
         if cfg.partition == "dirichlet" and meta.get("alpha") != cfg.alpha:
             differs.append("alpha")
+        # Absent means zero: every fleet.meta.json written before quantity skew
+        # existed lacks the key, and reading that as a difference would rmtree and
+        # rebuild a perfectly good fleet on the first run after this change.
+        if (meta.get("size_skew") or 0.0) != (cfg.size_skew or 0.0):
+            differs.append("size_skew")
         # A fleet built against a different holdout may hold images the global model
         # is about to be scored on. That would make the one honest metric partly
         # self-referential, so it forces a rebuild.
@@ -192,9 +198,14 @@ def _check_fleet(cfg: Config) -> Check:
         if want_random != is_random:
             return Check(False, f"fleet was built with a different partition than {cfg.partition!r}")
 
-    short = [v for v in fleet if v.get("n_train", 0) < cfg.per_vehicle]
+    # Under quantity skew a shard is *meant* to be smaller than per_vehicle, so the
+    # bar becomes the floor skew itself clamps to. Comparing against per_vehicle would
+    # call every skewed fleet stale and rebuild it on every run -- and a rebuild
+    # rmtree's the shard directory, including during a federation.
+    least = vehicles.size_floor(cfg.per_vehicle) if cfg.size_skew else cfg.per_vehicle
+    short = [v for v in fleet if v.get("n_train", 0) < least]
     if short:
-        return Check(False, f"{len(short)} vehicle(s) below {cfg.per_vehicle} images")
+        return Check(False, f"{len(short)} vehicle(s) below {least} images")
     return Check(True, f"{len(fleet)} vehicles: " + ", ".join(v["condition"] for v in fleet))
 
 
@@ -246,7 +257,8 @@ def _cmd_fleet(cfg: Config) -> list[str]:
             "--per-vehicle", str(cfg.per_vehicle),
             "--seed", str(cfg.seed),
             "--partition", cfg.partition,
-            "--alpha", str(cfg.alpha)]
+            "--alpha", str(cfg.alpha),
+            "--size-skew", str(cfg.size_skew)]
 
 
 #: One epoch on one shard, through the Python API rather than a console script.

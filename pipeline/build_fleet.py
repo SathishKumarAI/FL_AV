@@ -31,6 +31,11 @@ def main(argv=None) -> int:
     ap.add_argument("--alpha", type=float, default=0.5,
                     help="dirichlet concentration: 0.05 = one condition per vehicle, "
                          "100 = effectively IID")
+    ap.add_argument("--size-skew", type=float, default=0.0,
+                    help="how unequal the shard SIZES are, on top of any partition. "
+                         "0 = every vehicle the same; 0.5 mild; 1.5 an order of "
+                         "magnitude between busiest and quietest. The fleet total is "
+                         "unchanged either way")
     args = ap.parse_args(argv)
 
     names, nc = class_names()
@@ -53,10 +58,12 @@ def main(argv=None) -> int:
 
     fleet = vehicles.assign(n_shards, args.per_vehicle,
                             val_per_vehicle=args.val_per_vehicle, seed=args.seed, index=index,
-                            partition=args.partition, alpha=args.alpha, exclude=held)
+                            partition=args.partition, alpha=args.alpha, exclude=held,
+                            size_skew=args.size_skew)
     root = vehicles.materialise(fleet, names, nc, meta={
         "partition": args.partition,
         "alpha": args.alpha if args.partition == "dirichlet" else None,
+        "size_skew": args.size_skew,
         "seed": args.seed,
         "per_vehicle": args.per_vehicle,
         "n_shards": n_shards,
@@ -67,6 +74,10 @@ def main(argv=None) -> int:
         used = " (in this run)" if v.vid <= args.vehicles else ""
         print(f"  vehicle {v.vid}: {v.condition:<22} train={v.n_train:<6} val={len(v.val)}{used}")
     print(f"partition: {args.partition}")
+    if args.size_skew:
+        sizes = [v.n_train for v in fleet]
+        print(f"size skew: {args.size_skew} -> {min(sizes)}..{max(sizes)} images, "
+              f"{sum(sizes)} total (floor {vehicles.size_floor(args.per_vehicle)})")
     print(f"fleet root: {root}  (point FL_AV_DATA_ROOT here)")
     print(json.dumps([v.to_summary() for v in fleet]))
     return 0

@@ -71,6 +71,11 @@ python -m pipeline.experiment --preset partitions --partitions condition,random,
 
 # How much does the Dirichlet skew knob move the result?
 python -m pipeline.experiment --preset alpha --alphas 0.05,0.5,100 --yes
+
+# Does it matter that real vehicles hold unequal AMOUNTS of data?
+# Every arm makes the same image-visits; only the distribution across vehicles moves,
+# which is what FedAvg weights by.
+python -m pipeline.experiment --preset skew --skews 0,0.8,1.5 --yes
 ```
 
 Anything else, as JSON:
