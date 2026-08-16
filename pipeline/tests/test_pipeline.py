@@ -210,8 +210,16 @@ def test_vehicle_shards_live_outside_my_project():
 
 
 def test_generated_paths_are_all_gitignored():
-    """Dataset, checkpoints, MLflow store and reports must be uncommittable."""
+    """Dataset, checkpoints, MLflow store and reports must be uncommittable.
+
+    Needs a real git repository, which a source tarball or a container image built
+    without `.git` is not. Skipped there rather than failed: this guards what may be
+    committed, and where nothing can be committed there is nothing to guard.
+    """
     import subprocess
+
+    if not (REPO / ".git").exists():
+        pytest.skip("not a git checkout; nothing here can be committed anyway")
     targets = [paths.VEHICLE_ROOT / "batch" / "batch_1" / "images" / "x.jpg",
                paths.MLFLOW_STORE / "0" / "meta.yaml",
                paths.REPORTS / "20260805" / "report.html",
@@ -701,9 +709,17 @@ def test_fleet_check_catches_a_partition_mismatch(monkeypatch):
 
 def test_the_report_leads_with_the_metric_no_client_could_flatter(monkeypatch):
     """A report that shows only self-evaluated numbers invites the comparison that
-    the holdout exists to prevent."""
+    the holdout exists to prevent.
+
+    The per-client rows are stubbed for the same reason the holdout and baseline are:
+    without them the section simply does not render, so this asserted the caveat was
+    present only on a machine that had already completed a run.
+    """
     from pipeline import baseline as _b, holdout as _h
 
+    monkeypatch.setattr(logparse, "read_metrics_csv", lambda _p: [
+        {"round": 1, "stage": "evaluate", "loss": 0.9, "precision": 0.5,
+         "recall": 0.3, "mAP50": 0.35, "mAP50-95": 0.19}])
     monkeypatch.setattr(_h, "curve", lambda: {
         "holdout": {"size": 1000},
         "rounds": [{"round": 1, "mAP50": 0.35, "mAP50-95": 0.19, "precision": 0.5, "recall": 0.3},
@@ -983,10 +999,20 @@ def test_the_report_calls_an_over_provisioned_ceiling_what_it_is(monkeypatch):
     assert "lower bound" in md and "1.667" in md
 
 
-def test_the_sanity_stage_does_not_shell_out_to_a_moving_target():
+def test_the_sanity_stage_does_not_shell_out_to_a_moving_target(monkeypatch, tmp_path):
     """`python -m ultralytics.cfg` ran until ultralytics 8.4 made cfg a package with
     no __main__, and the whole chain then halted at the first GPU stage. The sanity
-    stage calls the same API a client calls, which cannot drift from it."""
+    stage calls the same API a client calls, which cannot drift from it.
+
+    The shard is faked rather than assumed present: `_cmd_sanity` refuses without one
+    (the sibling test below asserts that), so this passed only on a machine that had
+    already built a fleet — and failed on every clean clone, which is what CI is.
+    """
+    shards = tmp_path / "batch"
+    (shards / "batch_1").mkdir(parents=True)
+    (shards / "batch_1" / "data.yaml").write_text("nc: 13\n")
+    monkeypatch.setattr(paths, "VEHICLE_BATCHES", shards)
+
     cmd = stages._cmd_sanity(Config(profile="demo"))
     assert cmd[1] == "-c", "invoke the API, not a console script that may not exist"
     body = cmd[2]
