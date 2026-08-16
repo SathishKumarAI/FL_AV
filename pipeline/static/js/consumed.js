@@ -59,6 +59,51 @@ export async function renderStrip(host, vid, names, show) {
   host.innerHTML = frames.map((n, i) => figure(vid, n, boxes[i] || [], show)).join("");
 }
 
+// -- the live feed ------------------------------------------------------------
+//
+// Ultralytics rewrites train_batch{0,1,2}.jpg at the start of every `train()`, and a
+// round is one `train()` per vehicle. So the file on disk IS the batch the vehicle
+// currently on the GPU is working through — no instrumentation, no hook, nothing
+// added to the ⚠ client. The mtime is the cache-buster: same URL, new picture.
+
+const feed = { at: 0, data: null, vid: null };
+const FEED_MS = 5000;   // the page polls every 2s; re-globbing ten run dirs that often
+                        // is filesystem work for a picture that changes once a round.
+
+export async function renderNowTraining(host, who, whoLabel, busy) {
+  if (!host) return;
+  if (!busy || who == null) {
+    host.innerHTML = '<p class="hint">Nothing is training. During a run this shows the ' +
+      'batch the vehicle on the GPU is working through — the same file ultralytics ' +
+      'writes for itself, not a re-render.</p>';
+    feed.at = 0;
+    return;
+  }
+  const now = performance.now();
+  if (now - feed.at > FEED_MS || feed.vid !== String(who)) {
+    feed.at = now;
+    feed.vid = String(who);
+    try {
+      feed.data = await (await fetch("/api/train-artifacts")).json();
+    } catch { return; }
+  }
+  const v = ((feed.data || {}).vehicles || []).find(x => String(x.vid) === String(who));
+  const shots = (v ? v.files : []).filter(f => f.group === "consumed" && f.name.startsWith("train_batch"));
+  if (!shots.length) {
+    host.innerHTML = `<p class="hint">${esc(whoLabel)} has started, but has not written its ` +
+      `first batch mosaic yet. It appears within the first epoch.</p>`;
+    return;
+  }
+  host.innerHTML = '<div class="gallery">' + shots.map(f =>
+    `<figure class="shot"><img src="/api/train-artifact/${encodeURIComponent(who)}/` +
+    `${encodeURIComponent(f.name)}?t=${f.mtime}" alt="${esc(f.caption)}">` +
+    `<figcaption>${esc(f.name)}</figcaption></figure>`).join("") + "</div>" +
+    `<p class="hint">Mosaic, scale and colour jitter are already applied: this is the ` +
+    `tensor, not the files on disk. Written by the trainer itself — if these stop ` +
+    `changing between rounds while the run continues, the vehicle is not re-reading ` +
+    `its shard.</p>`;
+}
+
 // -- the trainer's own pictures ------------------------------------------------
 
 const state = { data: null, vid: null, group: "consumed" };
