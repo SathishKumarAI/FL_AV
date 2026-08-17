@@ -158,6 +158,39 @@ scored *lower*), so treat any difference smaller than that as noise until
 | full | 1 400 | ~20 min | ~55 min, 82 Wh |
 | full | 6 308 | hours | hours; peak VRAM 15.9 GB of 16.3 |
 
-Vehicles train **serialised** (`client-resources.num-gpus = 1.0`). At 6 308 images one
-client peaks at 15.9 GB, so concurrency would run out of memory; at 1 400 it peaks at
-5.1 GB and there is real headroom (backlog 89).
+## 8. Packing clients onto the card — `--gpu-fraction`
+
+Vehicles train **serialised** by default (`--gpu-fraction 1.0`). `pipeline.profile`
+measured 72 client episodes of the six-round run never overlapping, with 99.1 % of the
+wall clock inside a client, so this is the lever with the largest ceiling. It changes
+nothing mathematically: clients are independent within a round.
+
+```bash
+python -m pipeline.runner --stages federate --profile demo --gpu-fraction 0.5 --yes
+```
+
+Measured on the RTX 5070 Ti (16 303 MiB), demo profile, 6 vehicles × 2 rounds × 1
+epoch, **same fleet, built once and reused**:
+
+| `--gpu-fraction` | clients at once | federate stage | run wall clock | peak VRAM | energy |
+|---|---|---|---|---|---|
+| 1.0 (default) | 1 | 215.2 s | 176 s | 7 319 MiB | 3.13 Wh |
+| 0.5 | 2 | **148.3 s** | **117 s** | **15 679 MiB** | 2.65 Wh |
+
+**1.45× on the stage, 1.50× on the federation, and the aggregate checksum still moved
+every round** — 630.02 → 616.87, all four criteria green.
+
+**The ceiling is VRAM, and it is closer than it looks.** Two demo clients already take
+15 679 MiB of 16 303: `--gpu-fraction 0.33` does not fit at this profile, and the plan's
+expectation of 2–2.5× was optimistic by exactly that much. The fraction is a *scheduling*
+share — Ray runs ⌊1/fraction⌋ clients and caps none of them — so pick it from measured
+peak VRAM, not from the client count you would like:
+
+| Images/vehicle | Peak VRAM, one client | Safe fraction |
+|---|---|---|
+| 300 (demo, 320 px) | 7 319 MiB | 0.5 |
+| 1 400 (full, 640 px) | 5 087 MiB | 0.5, probably 0.33 — unmeasured |
+| 6 308 (full, 640 px) | 15 900 MiB | 1.0 only |
+
+The 1 400-image row peaks *lower* than the 300-image one because batch size is chosen
+per run, not per image count. Measure before trusting a row you have not run.

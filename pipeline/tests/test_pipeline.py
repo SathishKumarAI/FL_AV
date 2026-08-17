@@ -293,6 +293,42 @@ def test_supernodes_track_the_vehicle_count(_flwr_launcher):
     assert "num-supernodes=6" in cmd and "min_clients=6" in cmd
 
 
+def test_clients_stay_serialised_unless_the_run_asks_for_packing(_flwr_launcher):
+    """Phase 0 measured 72 client episodes never overlapping, so the GPU fraction is
+    the lever with the largest ceiling. It is also the one that can OOM a full-profile
+    run, where a single 6 308-image shard peaks at 15.9 GB of 16.3 -- so the default
+    must stay 1.0 and packing must be something a run asks for."""
+    assert "client-resources-num-gpus=1.0" in " ".join(stages._cmd_federate(Config()))
+    packed = " ".join(stages._cmd_federate(Config(gpu_fraction=0.33)))
+    assert "client-resources-num-gpus=0.33" in packed
+    assert "client-resources-num-gpus=1.0" not in packed, "the old value must not survive"
+
+
+def test_a_gpu_fraction_ray_cannot_schedule_is_refused_rather_than_hung(capsys):
+    """Ray accepts num_gpus > 1 per client and then places no client at all: the
+    federation waits for workers that can never be scheduled, with nothing in any log
+    saying why. Both entry points guard it, because both can set it."""
+    from pipeline import runner
+
+    with pytest.raises(SystemExit):
+        runner.main(["--all", "--yes", "--gpu-fraction", "1.5"])
+    assert "--gpu-fraction must be in (0, 1]" in capsys.readouterr().err
+
+    import io
+
+    from pipeline import server as srv
+
+    handler = object.__new__(srv.Handler)
+    handler.path = "/api/run"
+    body = json.dumps({"gpu_fraction": 0}).encode()
+    handler.headers = {"Content-Length": str(len(body))}
+    handler.rfile = io.BytesIO(body)
+    seen = {}
+    handler._json = lambda payload, code=200: seen.update(payload=payload, code=code)
+    handler.do_POST()
+    assert seen["code"] == 400 and "gpu_fraction must be in (0, 1]" in seen["payload"]["error"]
+
+
 @pytest.fixture(autouse=True)
 def _no_fleet_state_on_disk(monkeypatch):
     """The fleet check consults the holdout and the fleet manifest. A test must
@@ -1814,30 +1850,28 @@ def test_serialised_clients_are_reported_as_serialised_not_averaged_away():
     assert _profile.max_overlap([(0.0, 10.0), (5.0, 15.0), (5.5, 6.0)]) == 3
 
 
-def test_a_past_run_is_profiled_from_its_own_client_logs_not_every_later_one(tmp_path):
-    """`--server-log` profiles a run that is over. A lower time bound alone -- which
-    is all the current-run helpers need -- would sweep in every client log written
-    since, and charge this run with the next six runs' training seconds."""
-    import os
-    import time
-
-    now = time.time()
+def test_two_runs_minutes_apart_are_profiled_apart(tmp_path):
+    """The whole point of the profiler is a before/after comparison, and the arms of
+    one are minutes apart. An mtime window with a minute of slack swallowed the
+    previous arm: 48 episodes instead of 24, a wall clock spanning both runs, and a
+    speed-up reading that was two runs added together. Membership comes from what the
+    logs say, not from when the filesystem last touched them."""
     server = tmp_path / "server.10.log"
-    server.write_text("2026-08-06 00:57:26,281 - INFO - [Server] Aggregating 6 fit results\n"
-                      "2026-08-06 01:05:16,408 - INFO - [Server] Aggregated parameters with checksum: 159.9\n")
-    os.utime(server, (now - 7200, now - 7200))
+    server.write_text(
+        "2026-08-06 00:57:26,281 - INFO - [Server] Aggregating 6 fit results\n"
+        "2026-08-06 01:00:09,408 - INFO - [Server] Aggregated parameters with checksum: 159.9\n")
+    (tmp_path / "client.11.log").write_text(PROFILE_LINES)
 
-    mine = tmp_path / "client.11.log"
-    mine.write_text(PROFILE_LINES)
-    os.utime(mine, (now - 7200, now - 7200))
-
-    later = tmp_path / "client.12.log"          # a run that happened afterwards
-    later.write_text(PROFILE_LINES)
+    # The next arm, four minutes later. Same shape, later clock -- and written last,
+    # so every filesystem timestamp says it is the newest thing in the directory.
+    (tmp_path / "client.12.log").write_text(PROFILE_LINES.replace("00:5", "01:1")
+                                                         .replace("01:00:0", "01:20:0"))
 
     p = _profile.profile(server_log=server, log_dir=tmp_path)
     assert [Path(c).name for c in p["client_logs"]] == ["client.11.log"]
     assert p["episodes"] == 2, "the later run's episodes are not this run's"
     assert p["max_concurrent"] == 1
+    assert p["wall_s"] < 300, "the wall clock must not span both runs"
 
 
 def test_the_profiler_says_which_lever_the_measurement_points_at():

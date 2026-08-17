@@ -237,6 +237,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "fedadagrad, fedavgm, fedmedian, krum, ... (see server_app.STRATEGIES)")
     ap.add_argument("--proximal-mu", type=float, default=0.0,
                     help="FedProx proximal strength; >0 enables the proximal term")
+    ap.add_argument("--gpu-fraction", type=float, default=1.0,
+                    help="GPU share per client; 0.33 runs three at once. 1.0 (default) "
+                         "serialises them, which is required at the full profile where "
+                         "one shard peaks at 15.9 GB of 16.3")
     ap.add_argument("--yes", action="store_true", help="confirm the gated stages up front")
     ap.add_argument("--ray-address", help="attach to an existing Ray head (enables its dashboard)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
@@ -244,13 +248,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     cfg = Config(profile=args.profile, n_vehicles=args.vehicles,
                  rounds=args.rounds, local_epochs=args.epochs, seed=args.seed,
                  partition=args.partition, alpha=args.alpha, size_skew=args.size_skew,
                  strategy=args.strategy, proximal_mu=args.proximal_mu,
                  per_vehicle_override=args.per_vehicle,
+                 gpu_fraction=args.gpu_fraction,
                  ray_address=args.ray_address)
+    if not 0 < cfg.gpu_fraction <= 1:
+        # Ray accepts a fraction above 1 and then schedules nothing, so the run hangs
+        # waiting for clients that can never be placed. Caught here, not there.
+        parser.error(f"--gpu-fraction must be in (0, 1], got {cfg.gpu_fraction}")
 
     if args.list or not (args.stages or args.all):
         rows = stages.snapshot(cfg)
