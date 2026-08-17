@@ -114,7 +114,7 @@ See [`FL_TECHNIQUES.md`](FL_TECHNIQUES.md) — Flower already ships 24 strategie
 
 | # | Feature | P |
 |---|---|---|
-| 80 | MLflow logging wired for real (module exists, nothing calls it in anger) | P1 |
+| 80 | MLflow logging wired for real (module exists, nothing calls it in anger) | ✅ 2026-08-16 — sqlite backend; the sink was never called by anything |
 | 81 | Run comparison report: N runs, one table, deltas | P1 |
 | 82 | Alerting: notify on failure or on a plateau | P2 |
 | 83 | Cost accounting per run — kWh, and money at a configured tariff | P2 |
@@ -128,13 +128,13 @@ See [`FL_TECHNIQUES.md`](FL_TECHNIQUES.md) — Flower already ships 24 strategie
 
 | # | Feature | P |
 |---|---|---|
-| 89 | Measure real per-client VRAM and pack clients concurrently where they fit | P1 |
+| 89 | Measure real per-client VRAM and pack clients concurrently where they fit | ✅ 2026-08-16 — `--gpu-fraction 0.33`, 1.94×, 43 % less energy |
 | 90 | AMP / channels-last / `torch.compile` benchmark at fixed accuracy | P2 |
-| 91 | Cache the dataset scan across rounds — Ultralytics rescans every time | P2 |
+| 91 | Cache the dataset scan across rounds — Ultralytics rescans every time | P2 — but 95 caps all per-round fixed cost at 0.3 % |
 | 92 | Persistent client actors so the model is not reloaded per round | P2 |
 | 93 | Multi-GPU / multi-node once the fleet outgrows one card | P3 |
 | 94 | Mixed-resolution training: small images early, full later | P3 |
-| 95 | Profile the round to find the non-training overhead | P2 |
+| 95 | Profile the round to find the non-training overhead | ✅ 2026-08-16 — `pipeline/profile.py`; 99.1 % of wall clock is inside a client |
 
 ## G. Reliability, process, docs (96–100)
 
@@ -153,11 +153,55 @@ installed ultralytics 8.4.115 rather than assumed.
 
 | # | Feature | P |
 |---|---|---|
-| 101 | **Warm-start the 13-class head from the COCO head rows** for the nine classes BDD100K shares with COCO, instead of random init ⚠ | P1 |
-| 102 | **Server-driven LR schedule across rounds** — today `lrf` anneals *within* each round and the next round restarts at `lr0`, so the fleet never anneals globally ⚠ | P1 |
-| 103 | **`cache="ram"` and the Windows dataloader path** — decode currently runs on the training thread (`workers=0`), the prime suspect behind 27 % GPU utilisation ⚠ | P1 |
+| 101 | **Warm-start the 13-class head from the COCO head rows** for the nine classes BDD100K shares with COCO, instead of random init ⚠ | ✅ 2026-08-16 — untrained holdout mAP50 0.0053 → 0.2582 |
+| 102 | **Server-driven LR schedule across rounds** — today `lrf` anneals *within* each round and the next round restarts at `lr0`, so the fleet never anneals globally ⚠ | ❌ 2026-08-16 — built and measured −0.0079 mAP50, negative at 6 of 6 rounds. Untested at `local_epochs = 4` |
+| 103 | **`cache="ram"` and the Windows dataloader path** — decode currently runs on the training thread (`workers=0`), the prime suspect behind 27 % GPU utilisation ⚠ | ❌ 2026-08-16 — 5.9 % *slower*; decode is not the bottleneck, which makes the dataloader half moot |
 | 104 | **True FedProx via a `DetectionTrainer.optimizer_step` override.** Note: the `"optimizer_step"` *callback* is registered but never fired — using it would be a silent no-op ⚠ | P1 |
-| 105 | **Per-round profiling** — where the 73 % of non-training wall clock goes, before optimising any of it | P1 |
+| 105 | **Per-round profiling** — where the 73 % of non-training wall clock goes, before optimising any of it | ✅ 2026-08-16 — duplicate of 95 |
+
+## I. Added after 2026-08-17 (106)
+
+| # | Feature | P |
+|---|---|---|
+| 106 | **Delete `Research_docs/installations/requirements_history/`** — 832 of the repo's 885 Dependabot alerts come from four *byte-identical* copies of one 2024-06-21 `pip freeze`, none of them installable or referenced | P1 |
+
+### 106, before anyone tries to fix it by upgrading something
+
+GitHub reports **885 open Dependabot alerts, 65 critical**, and the number is
+misleading in a way that matters:
+
+| manifest | alerts |
+|---|---|
+| `Research_docs/installations/requirements_history/requirements_20240621155143_new.txt` | 208 |
+| `…_20240621155143_old.txt` | 208 |
+| `…_20240621161334_old.txt` | 208 |
+| `…_20240621161625_old.txt` | 208 |
+| `Research_docs/installations/cuda_test_file/requirements.txt` | 53 |
+
+```bash
+$ md5sum Research_docs/installations/requirements_history/*.txt
+4611da35399aaf8da2fd6ae9e2009603 *requirements_20240621155143_new.txt
+4611da35399aaf8da2fd6ae9e2009603 *requirements_20240621155143_old.txt
+4611da35399aaf8da2fd6ae9e2009603 *requirements_20240621161334_old.txt
+4611da35399aaf8da2fd6ae9e2009603 *requirements_20240621161625_old.txt
+```
+
+**All four are the same file.** So there are 261 distinct alerts, not 885 — one
+snapshot counted four times, plus a CUDA smoke test's requirements.
+
+They are a `pip freeze` of a conda environment from **2024-06-21**, full of lines like
+`absl-py @ file:///C:/b/abs_5babsu7y5x/croot/absl-py_1666362945682/work`. Those paths
+existed on one machine two years ago; the files cannot be installed anywhere, by
+anyone, and nothing in the repo references them.
+
+**The fix is `git rm`, not an upgrade.** Nothing this project actually installs is
+flagged: `my-project/pyproject.toml` and `pipeline/requirements.txt` have **zero**
+alerts between them. The dependency floors there were raised deliberately and are
+recorded in `docs/ENGINEERING_NOTES.md`.
+
+Worth doing because 885 alerts is 885 alerts: a real one arriving in a manifest that
+matters would land in a list nobody reads. Keep `cuda_test_file/requirements.txt` and
+its 53 alerts — that one is a live file — or pin it, but triage it on its own.
 
 ---
 
@@ -179,8 +223,16 @@ CWD-relative paths configured at import, so importing `server_app` writes an emp
 one looked newer than a real run's, which made `verify` report zero rounds after a
 successful six-round federation. ⚠ own branch. See STATUS.md, next-session item 1.
 
-**Next ten, in order:** 42 (seeds — one run is an anecdote), 31 (rounds × epochs at
-constant product), 27 and 30 (⚠ backbone freeze, LR schedule), 28 (mAP50-95
-everywhere), 32 (per-class), 33 (per-condition matrix), 80 (MLflow actually called),
-89 (pack clients concurrently — peak VRAM at this profile is 5.1 GB of 16.3), 96
-(CI matrix on Windows + Linux).
+**Next ten, in order** (rewritten 2026-08-17, after 80, 89, 95, 101 and 105 landed and
+102 and 103 were measured and rejected): 42 (seeds — one run is an anecdote, and three
+of this session's results sat inside the unmeasured spread), 31 (rounds × epochs at
+constant product), 27 (⚠ backbone freeze — but the head is no longer random, so its
+motivation is weaker than when it was written), 28 (mAP50-95 everywhere), 32
+(per-class), 33 (per-condition matrix), 96 (CI matrix on Windows + Linux), 106 (delete
+the dead requirements snapshots), 66 (leakage gate as a stage failure), 65 (finish the
+content-hash fleet manifest).
+
+**Still open from the phase-2 work, and now the most valuable single item:** the
+learning-rate *level* for a warm-started head. Round 1 costs the warm-started model
+0.066 mAP50 at `lr0 = 0.01`. Item 102 assumed the cause was the schedule *restarting*
+and measured no improvement; the level itself was never varied.
