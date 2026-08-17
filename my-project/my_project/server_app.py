@@ -17,7 +17,8 @@ from flwr.server.client_manager import ClientManager
 os.environ["ULTRALYTICS_HUB"] = "0"
 from ultralytics import YOLO
 from my_project.task import download_model, should_checkpoint, IS_WINDOWS, OS_NAME
-from my_project.get_set_model import NUM_CLASSES_MODEL_YAML, get_weights, set_weights
+from my_project.get_set_model import (NUM_CLASSES_MODEL_YAML, get_weights, set_weights,
+                                      warm_start_head)
 
 from utils.logging_setup import configure_logging
 from utils.metrics_logger import MetricsLogger, aggregate_client_metrics
@@ -522,8 +523,16 @@ def server_fn(context: Context):
         # DetectionModel, not the YOLO wrapper, so both sides key the state_dict
         # identically.
         model = YOLO(NUM_CLASSES_MODEL_YAML).load(MODEL_PATH)
+        # .load() transfers 349 of 355 tensors; the six it cannot are the three
+        # classification convolutions, whose shapes differ between 80 and 13 classes.
+        # Those stay random unless warmed, and this model IS what round 1 broadcasts,
+        # so a random head here is a random head on every client no matter what they
+        # build locally. BDD100K shares most of its road classes with COCO.
+        warmed = warm_start_head(model.model, YOLO(MODEL_PATH))
+        logger.info(f"[Server] Head warm-started from COCO for {len(warmed)} classes: "
+                    f"{', '.join(warmed) if warmed else 'none — head is random'}")
         initial_weights = get_weights(model.model)
-        
+
         # Calculate initial checksum for tracking
         initial_checksum = sum(w.sum() for w in initial_weights if w.size > 0)
         logger.info(f"[Server] Initial model loaded with weights checksum: {initial_checksum}")
