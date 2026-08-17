@@ -367,6 +367,9 @@ class Handler(BaseHTTPRequestHandler):
             # first meant a rejected request still replaced the config the stage table
             # previews, so /api/plan then described a run the server had refused to
             # start -- and the next valid POST hid it by overwriting.
+            # `or 1.0` would read gpu_fraction=0 as "unset" and silently serialise the
+            # run the caller asked to pack -- the guard below would never see the zero.
+            raw_fraction = body.get("gpu_fraction")
             cfg = Config(
                 profile=body.get("profile", "demo"),
                 n_vehicles=int(body.get("vehicles", 6)),
@@ -376,6 +379,7 @@ class Handler(BaseHTTPRequestHandler):
                 partition=body.get("partition", "condition"),
                 alpha=float(body.get("alpha", 0.5) or 0.5),
                 size_skew=float(body.get("size_skew", 0.0) or 0.0),
+                gpu_fraction=float(raw_fraction) if raw_fraction not in (None, "") else 1.0,
                 strategy=body.get("strategy", "fedavg"),
                 proximal_mu=float(body.get("proximal_mu", 0.0) or 0.0),
                 ray_address=body.get("ray_address") or None,
@@ -393,6 +397,11 @@ class Handler(BaseHTTPRequestHandler):
                 # subprocess three stages later.
                 return self._json({"error": "size_skew must be >= 0, "
                                             f"got {cfg.size_skew}"}, 400)
+            if not 0 < cfg.gpu_fraction <= 1:
+                # Ray takes a fraction above 1 and then places no client at all, so the
+                # federation hangs waiting for clients that cannot be scheduled.
+                return self._json({"error": "gpu_fraction must be in (0, 1], "
+                                            f"got {cfg.gpu_fraction}"}, 400)
             try:
                 chain = stages.resolve(body.get("stages"), body.get("skip"))
             except SystemExit as e:

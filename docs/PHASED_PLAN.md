@@ -84,12 +84,25 @@ expected effect on this hardware.
 
 | # | Lever | Where | Why it should work here | Expected |
 |---|---|---|---|---|
-| 1 | **Pack clients concurrently** — `client-resources.num-gpus = 0.33` | `my-project/pyproject.toml` | peak is 5.1 GB of 16.3 at the 1 400-image profile. Serialisation is a full-scale setting applied at demo scale | ~2–2.5× wall clock |
+| 1 ✅ | **Pack clients concurrently** — `--gpu-fraction` | `pipeline/stages.py`, **not** pyproject: the pipeline overrides it on the CLI because flwr migrates the federation config out of pyproject.toml | peak is 5.1 GB of 16.3 at the 1 400-image profile. Serialisation is a full-scale setting applied at demo scale | **measured 1.50×** at 0.5; 0.33 does not fit |
 | 2 | **`cache="ram"`** in the client's `train()` | `client_app.py` ⚠ | 1 400 images at 640 px is ~2–3 GB of RAM. Removes JPEG decode from the step loop — the prime suspect for 27 % utilisation | 1.3–2× per client |
 | 3 | **Windows dataloader** — `workers=0` today | `client_app.py` ⚠ | the comment is right that spawned workers deadlock inside a Ray actor, but `workers=0` means decode happens on the training thread. With `cache="ram"` this stops mattering; without it, it *is* the bottleneck | see 2 |
 | 4 | **Reuse the label cache across rounds** | `pipeline/build_fleet.py`, shard dirs | Ultralytics writes `labels.cache` beside each shard and rescans when it is missing. 6 vehicles × 6 rounds = 36 scans. The cache survives only if the fleet is not rebuilt between rounds — assert that, do not assume it | seconds × 36 |
 | ~~5~~ | ~~**Persistent client actors**~~ | — | **Cut by phase 0.** Model construction is 8.6 s across 72 episodes, 0.3 % of the run. A perfect fix here buys three seconds per round | measured, not worth it |
 | 6 | **Evaluate fewer clients per round** | `my-project/pyproject.toml` ⚠ | phase 0 found `evaluate` at **13.8 %** of wall clock, spent on the self-reported metric the project already calls flattering. `fraction_evaluate < 1.0`, or evaluate only on the final round | up to 1.16× |
+
+**Lever 1, measured.** Demo profile, 6 vehicles × 2 rounds × 1 epoch, one fleet built
+once and reused by both arms:
+
+| `--gpu-fraction` | clients at once | federate stage | peak VRAM | checksums moved |
+|---|---|---|---|---|
+| 1.0 | 1 | 215.2 s | 7 319 MiB | yes |
+| 0.5 | 2 | **148.3 s** | **15 679 MiB of 16 303** | yes |
+
+1.45× on the stage, 1.50× on the federation itself. **The lever is already nearly spent
+at 0.5** — two demo clients take 96 % of the card, so `0.33` does not fit and the
+"~2–2.5×" above was optimistic. VRAM, not client count, sets the fraction. Full table
+in [`docs/RUNBOOK.md`](RUNBOOK.md) §8.
 
 **The trap this phase must not fall into.** Every one of these can make a run finish
 faster *and* train less. Lever 1 changes nothing mathematically — clients are
