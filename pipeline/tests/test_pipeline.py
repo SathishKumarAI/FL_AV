@@ -1731,6 +1731,24 @@ def test_with_no_real_run_at_all_the_checksums_are_empty_not_wrong(tmp_path):
     assert logparse.federation_learned(tmp_path)[0] is False
 
 
+def test_the_mlflow_backend_is_a_database_because_the_filesystem_one_refuses_writes(monkeypatch):
+    """mlflow 3.15 answers a file:// tracking URI with "The filesystem tracking backend
+    (e.g., './mlruns') is in maintenance mode", so the sink logged nothing for an
+    entire six-round run. The URI must also be absolute and POSIX-slashed: a Windows
+    backslash escapes inside a SQLAlchemy URL, and a relative one puts a database
+    wherever the subprocess was standing."""
+    uri = paths.mlflow_uri()
+    assert uri.startswith("sqlite:///"), uri
+    assert "\\" not in uri, uri
+    assert Path(uri.removeprefix("sqlite:///")).is_absolute(), uri
+
+    # Ultralytics' callback reads the env var; the sink calls the function. If those
+    # two disagree, a run's training curves and its federation facts land in different
+    # stores and every chart is half a run.
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    assert paths.subprocess_env()["MLFLOW_TRACKING_URI"] == uri
+
+
 def test_a_refused_run_does_not_become_the_config_the_plan_previews():
     """/api/run validated the config it had already adopted, so a POST the server
     refused with a 400 still replaced the global one -- and /api/plan then previewed
