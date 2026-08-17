@@ -14,6 +14,8 @@ PROJECT = REPO / "my-project"          # invoked, never modified
 HERE = Path(__file__).resolve().parent
 STATE = HERE / ".state"            # markers + attribute cache; gitignored
 MLFLOW_STORE = HERE / "mlruns"     # gitignored
+MLFLOW_DB = MLFLOW_STORE / "mlflow.db"
+MLFLOW_ARTIFACTS = MLFLOW_STORE / "artifacts"
 REPORTS = HERE / "reports"         # gitignored
 # Vehicle shards live here, NOT in my-project. task.get_batch_path() resolves
 # FL_AV_DATA_ROOT/batch/batch_<id>, so pointing that env var at VEHICLE_ROOT is all
@@ -47,6 +49,23 @@ def find_label_jsons() -> list[Path]:
     if not _CACHE.is_dir():
         return []
     return sorted(_CACHE.glob(f"versions/*/{LABELS_DIR_NAME}/**/bdd100k_labels_images_*.json"))
+
+
+def mlflow_uri() -> str:
+    """SQLite, not the filesystem store.
+
+    mlflow 3.15 refuses the file:// backend outright -- "The filesystem tracking
+    backend (e.g., './mlruns') is in maintenance mode and will not receive further
+    updates" -- so the sink this project wired up logged nothing for a whole six-round
+    run and the failure was a line in a stage log.
+
+    Absolute and POSIX-slashed on purpose: SQLAlchemy reads everything after
+    ``sqlite:///`` as a path, a Windows backslash escapes inside it, and a relative one
+    would put a database wherever the subprocess happened to be standing -- which is
+    the trap that has already truncated this project's metrics.csv once.
+    """
+    MLFLOW_STORE.mkdir(parents=True, exist_ok=True)
+    return f"sqlite:///{MLFLOW_DB.as_posix()}"
 
 
 def log_dirs() -> list[Path]:
@@ -101,7 +120,10 @@ def subprocess_env(ray_address: str | None = None, data_root: Path | None = None
             if p and os.path.normcase(p) != same]
     env["PATH"] = os.pathsep.join([scripts, *rest])
     env["FL_AV_DATA_ROOT"] = str(data_root or PROJECT)
-    env.setdefault("MLFLOW_TRACKING_URI", MLFLOW_STORE.as_uri())
+    # Ultralytics' own MLflow callback reads this. It has to name the same backend the
+    # pipeline's sink writes to, or the two halves of a run -- per-vehicle training
+    # curves and federation-level facts -- land in two stores and neither is complete.
+    env.setdefault("MLFLOW_TRACKING_URI", mlflow_uri())
     if ray_address:
         # Makes flwr's ray.init() attach to an already-running head node instead
         # of creating its own with include_dashboard=False hardcoded.

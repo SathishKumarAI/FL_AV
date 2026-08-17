@@ -271,7 +271,9 @@ Prompt: [`docs/prompts/2026-08-16-github-management.md`](prompts/2026-08-16-gith
   broken and the noise floor is unknown produces a comparison that says nothing.
 - **No second dataset** until the first one is hash-addressable.
 - **No new dashboard surface.** Assemble before building: MLflow owns metrics history
-  and is already wired but refused the last run (it needs a SQLite backing store, not
-  the filesystem backend). Fixing that is smaller than any panel that would duplicate it.
+  and is already wired. It refused the last run — mlflow 3.15 answers a `file://`
+  tracking URI with "the filesystem tracking backend is in maintenance mode" — and now
+  writes to `sqlite:///pipeline/mlruns/mlflow.db`, with the artifact location named
+  explicitly rather than left to resolve against whatever CWD a subprocess had.
 - **No hosted tracker.** W&B / Comet / Neptune are rejected on the credentials rule,
   not on quality.
