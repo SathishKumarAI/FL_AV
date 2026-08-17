@@ -42,14 +42,17 @@ class FlowerClient(Client):
                 client_state : RecordSet,
                 local_epochs : int,
                 batch_id_range: tuple = DEFAULT_BATCH_ID_RANGE,  # Using constant
+                cache: str = "",
                 ):
-    
+
         super().__init__()
         self.model_path = model_path
         self.client_state = client_state
         self.local_epochs = local_epochs
         self.batch_id_range = batch_id_range
         self.batch_id = None
+        # "" | "ram" | "disk". Ultralytics wants False, not "", for "no cache".
+        self.cache = cache or False
         
         # Decide GPU/CPU
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -220,7 +223,11 @@ class FlowerClient(Client):
                 verbose=False,
                 # Ultralytics defaults to 8. Inside a Ray actor on Windows that is a
                 # deadlock, not a slowdown — spawned dataloader children never join.
+                # With workers=0 the JPEG decode runs on the training thread, which is
+                # why `cache` exists: it moves the decode out of the step loop instead
+                # of trying to move it onto processes that cannot be spawned here.
                 workers=0 if IS_WINDOWS else 8,
+                cache=self.cache,
                 # Without an explicit name every round writes runs/detect/train, train2,
                 # ... at ~22 MB each, per client, forever.
                 project="runs/fl",
@@ -411,12 +418,18 @@ def client_fn(context: Context):
         local_epochs = context.run_config.get("local_epochs", 1)
         client_state = context.state
         batch_id_range = context.run_config.get("batch_id_range", DEFAULT_BATCH_ID_RANGE)
-        
+        # Read from the run config rather than from a fit instruction: FedAvg shares
+        # one FitIns across every client, so anything per-client sent that way arrives
+        # as the last value written (the B9 bug). The cache setting is per *run*, so
+        # the run config is where it belongs.
+        cache = context.run_config.get("cache", "")
+
         client = FlowerClient(
             model_path=model_path,
             client_state=client_state,
             local_epochs=local_epochs,
             batch_id_range=batch_id_range,
+            cache=cache,
         )
         
         return client

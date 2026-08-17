@@ -304,6 +304,20 @@ def test_clients_stay_serialised_unless_the_run_asks_for_packing(_flwr_launcher)
     assert "client-resources-num-gpus=1.0" not in packed, "the old value must not survive"
 
 
+def test_the_cache_setting_reaches_the_client_and_is_declared_in_pyproject(_flwr_launcher):
+    """flwr validates --run-config keys against [tool.flwr.app.config] and rejects the
+    whole run for an undeclared one, so the key has to exist in pyproject even though
+    the pipeline always overrides it. It is a run-level setting sent through the run
+    config rather than a fit instruction: FedAvg shares one FitIns across all clients,
+    which is how every vehicle once ended up training the same shard."""
+    cmd = " ".join(stages._cmd_federate(Config(cache="ram")))
+    assert 'cache="ram"' in cmd
+    assert 'cache=""' in " ".join(stages._cmd_federate(Config()))
+
+    declared = (paths.PROJECT / "pyproject.toml").read_text(encoding="utf-8")
+    assert re.search(r"^cache = ", declared, re.M), "flwr rejects a run-config key it has never heard of"
+
+
 def test_a_gpu_fraction_ray_cannot_schedule_is_refused_rather_than_hung(capsys):
     """Ray accepts num_gpus > 1 per client and then places no client at all: the
     federation waits for workers that can never be scheduled, with nothing in any log

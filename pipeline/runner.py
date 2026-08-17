@@ -285,6 +285,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="GPU share per client; 0.33 runs three at once. 1.0 (default) "
                          "serialises them, which is required at the full profile where "
                          "one shard peaks at 15.9 GB of 16.3")
+    ap.add_argument("--cache", choices=("", "ram", "disk"), default="",
+                    help="ultralytics dataset cache. 'ram' takes JPEG decode off the "
+                         "training thread; budget images x imgsz^2 x 3 bytes per "
+                         "concurrent client")
     ap.add_argument("--yes", action="store_true", help="confirm the gated stages up front")
     ap.add_argument("--ray-address", help="attach to an existing Ray head (enables its dashboard)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
@@ -299,7 +303,7 @@ def main(argv=None) -> int:
                  partition=args.partition, alpha=args.alpha, size_skew=args.size_skew,
                  strategy=args.strategy, proximal_mu=args.proximal_mu,
                  per_vehicle_override=args.per_vehicle,
-                 gpu_fraction=args.gpu_fraction,
+                 gpu_fraction=args.gpu_fraction, cache=args.cache,
                  ray_address=args.ray_address)
     if not 0 < cfg.gpu_fraction <= 1:
         # Ray accepts a fraction above 1 and then schedules nothing, so the run hangs
