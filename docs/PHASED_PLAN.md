@@ -22,7 +22,7 @@ result is a result.
 | Phase | Question it answers | Gate to the next phase |
 |---|---|---|
 | **0 — Measure** ✅ | Where does the 73 % of non-training wall clock go? | **answered: it does not leave training.** 85.3 % train, 13.8 % evaluate, 0.6 % idle, clients never overlapping |
-| **1 — Runtime** | How many runs per GPU-hour? | wall clock per image-visit down ≥ 2×, holdout mAP unchanged within noise |
+| **1 — Runtime** ✅ | How many runs per GPU-hour? | **1.94× and 43 % less energy** from `--gpu-fraction 0.33`. The cache lever measured *slower* and was dropped; utilisation is still only 30.9 %, so the remaining idle is not what this plan guessed |
 | **2 — Schedule & head** | Why do 24 effective epochs only reach 0.4173? | box/cls/dfl fall *within* a round instead of rising |
 | **3 — Evidence** | Is any difference real? | the seed spread is known and printed beside every comparison |
 | **4 — Data** | Is the input reproducible and clean? | a fleet is addressable by content hash and reproducible from it |
@@ -85,24 +85,44 @@ expected effect on this hardware.
 | # | Lever | Where | Why it should work here | Expected |
 |---|---|---|---|---|
 | 1 ✅ | **Pack clients concurrently** — `--gpu-fraction` | `pipeline/stages.py`, **not** pyproject: the pipeline overrides it on the CLI because flwr migrates the federation config out of pyproject.toml | peak is 5.1 GB of 16.3 at the 1 400-image profile. Serialisation is a full-scale setting applied at demo scale | **measured 1.50×** at 0.5; 0.33 does not fit |
-| 2 | **`cache="ram"`** in the client's `train()` | `client_app.py` ⚠ | 1 400 images at 640 px is ~2–3 GB of RAM. Removes JPEG decode from the step loop — the prime suspect for 27 % utilisation | 1.3–2× per client |
-| 3 | **Windows dataloader** — `workers=0` today | `client_app.py` ⚠ | the comment is right that spawned workers deadlock inside a Ray actor, but `workers=0` means decode happens on the training thread. With `cache="ram"` this stops mattering; without it, it *is* the bottleneck | see 2 |
+| 2 ❌ | **`cache="ram"`** in the client's `train()` | `client_app.py` ⚠ | 1 400 images at 640 px is ~2–3 GB of RAM. Removes JPEG decode from the step loop — the prime suspect for 27 % utilisation | **measured 5.9 % _slower_**; utilisation moved 19.3 → 22.7 % and the wall clock got worse |
+| 3 ❌ | **Windows dataloader** — `workers=0` today | `client_app.py` ⚠ | the comment is right that spawned workers deadlock inside a Ray actor, but `workers=0` means decode happens on the training thread. With `cache="ram"` this stops mattering; without it, it *is* the bottleneck | **moot.** Lever 2 shows decode is not the bottleneck, so moving it off the training thread cannot be the fix |
 | 4 | **Reuse the label cache across rounds** | `pipeline/build_fleet.py`, shard dirs | Ultralytics writes `labels.cache` beside each shard and rescans when it is missing. 6 vehicles × 6 rounds = 36 scans. The cache survives only if the fleet is not rebuilt between rounds — assert that, do not assume it | seconds × 36 |
 | ~~5~~ | ~~**Persistent client actors**~~ | — | **Cut by phase 0.** Model construction is 8.6 s across 72 episodes, 0.3 % of the run. A perfect fix here buys three seconds per round | measured, not worth it |
 | 6 | **Evaluate fewer clients per round** | `my-project/pyproject.toml` ⚠ | phase 0 found `evaluate` at **13.8 %** of wall clock, spent on the self-reported metric the project already calls flattering. `fraction_evaluate < 1.0`, or evaluate only on the final round | up to 1.16× |
 
-**Lever 1, measured.** Demo profile, 6 vehicles × 2 rounds × 1 epoch, one fleet built
-once and reused by both arms:
+### Levers 1 and 2, measured at the profile the 27 % came from
 
-| `--gpu-fraction` | clients at once | federate stage | peak VRAM | checksums moved |
-|---|---|---|---|---|
-| 1.0 | 1 | 215.2 s | 7 319 MiB | yes |
-| 0.5 | 2 | **148.3 s** | **15 679 MiB of 16 303** | yes |
+1 400 images/vehicle at 640 px — the reference run's profile — 6 vehicles × 2 rounds ×
+1 epoch, one fleet built once and reused by every arm:
 
-1.45× on the stage, 1.50× on the federation itself. **The lever is already nearly spent
-at 0.5** — two demo clients take 96 % of the card, so `0.33` does not fit and the
-"~2–2.5×" above was optimistic. VRAM, not client count, sets the fraction. Full table
-in [`docs/RUNBOOK.md`](RUNBOOK.md) §8.
+| `--gpu-fraction` | `--cache` | clients at once | wall | mean util | peak VRAM | energy |
+|---|---|---|---|---|---|---|
+| 1.0 | — | 1 | 562.1 s | 19.3 % | 6 453 MiB | 10.36 Wh |
+| 1.0 | ram | 1 | 595.2 s | 22.7 % | 6 313 MiB | 10.67 Wh |
+| 0.5 | — | 2 | 394.9 s | 29.7 % | 10 474 MiB | 8.37 Wh |
+| **0.33** | — | **3** | **289.2 s** | **30.9 %** | **15 468 MiB (94.9 %)** | **5.92 Wh** |
+
+**Lever 1 is the phase. 1.94× wall clock and 43 % less energy**, and it changes nothing
+mathematically — clients are independent within a round. Checksums moved every round in
+every arm and all four criteria stayed green. Three clients take 94.9 % of the card, so
+0.33 is the floor on this hardware at this profile, not a step on the way to 0.25.
+
+**Lever 2 does not work here. `cache="ram"` was 5.9 % _slower_**, at both profiles —
+the demo arm sat inside its controls' spread, the full arm was outside it in the wrong
+direction. The hypothesis was reasonable and it is wrong: with the shard cached, mean
+utilisation still only reached 22.7 %, so JPEG decode was not what the card was waiting
+for. Default stays `""`.
+
+**What that leaves.** The gate was ≥2× and lever 1 alone gives 1.94×. But utilisation
+at three concurrent clients is **30.9 %**, barely above the 27 % that started this: the
+card is still mostly idle, and neither of the two suspects in this plan explains it.
+Whatever the remaining bottleneck is — step overhead at batch sizes this small, the
+Python train loop, per-round trainer construction inside each actor — it is not
+addressed by anything ranked here, and finding it is a new phase-0-shaped question
+rather than another lever to pull.
+
+Demo-scale table and the VRAM-to-fraction guide: [`docs/RUNBOOK.md`](RUNBOOK.md) §8.
 
 **The trap this phase must not fall into.** Every one of these can make a run finish
 faster *and* train less. Lever 1 changes nothing mathematically — clients are
