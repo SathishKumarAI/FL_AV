@@ -380,6 +380,7 @@ class Handler(BaseHTTPRequestHandler):
                 alpha=float(body.get("alpha", 0.5) or 0.5),
                 size_skew=float(body.get("size_skew", 0.0) or 0.0),
                 gpu_fraction=float(raw_fraction) if raw_fraction not in (None, "") else 1.0,
+                cache=body.get("cache", "") or "",
                 strategy=body.get("strategy", "fedavg"),
                 proximal_mu=float(body.get("proximal_mu", 0.0) or 0.0),
                 ray_address=body.get("ray_address") or None,
@@ -397,6 +398,9 @@ class Handler(BaseHTTPRequestHandler):
                 # subprocess three stages later.
                 return self._json({"error": "size_skew must be >= 0, "
                                             f"got {cfg.size_skew}"}, 400)
+            if cfg.cache not in ("", "ram", "disk"):
+                return self._json({"error": f"unknown cache {cfg.cache!r}; "
+                                            "known: '', 'ram', 'disk'"}, 400)
             if not 0 < cfg.gpu_fraction <= 1:
                 # Ray takes a fraction above 1 and then places no client at all, so the
                 # federation hangs waiting for clients that cannot be scheduled.
