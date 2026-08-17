@@ -150,11 +150,54 @@ warmup_epochs = 3.0   lr0 = 0.01   lrf = 0.01   cos_lr = False
 close_mosaic  = 10    mosaic = 1.0   freeze = None   patience = 100   nbs = 64
 ```
 
-**Fact 1 — three of every four epochs are warmup.** `local_epochs = 4` against
-`warmup_epochs = 3.0` means the LR ramp never finishes. The Metrics tab already shows
+**Fact 1 — warmup is clamped to `epochs - 1`, which is not what "warmup_epochs = 3.0"
+suggests.** Read from `BaseTrainer._get_warmup_iterations` in 8.4.115:
+
+```python
+warmup_epochs = min(self.args.warmup_epochs, max(self.epochs - 1, 0))
+return round(warmup_epochs * num_batches) if warmup_epochs > 0 else 0
+```
+
+So at `local_epochs = 4` the reference run really did spend three of four epochs in
+warmup — the fact below stands for that configuration. But at **`local_epochs = 1`
+there is no warmup at all**, and every measurement in this session ran at 1. The
+round-1 damage recorded under fact 3 is therefore *not* a warmup effect: it is the
+learning-rate **level**, `lr0 = 0.01` applied for a full epoch to a model that already
+detects. Two different problems that the phrase "three of every four epochs are warmup"
+would have merged.
+
+`local_epochs = 4` against `warmup_epochs = 3.0` means the LR ramp never finishes. The Metrics tab already shows
 box, cls **and** dfl rising across the four epochs of every round: each client ends the
 round worse than the aggregate it started from, and FedAvg then averages six models
 that each went slightly backwards.
+
+### Fact 2, measured — and it did not hold
+
+One anneal across the run was implemented (`round_lr()` on
+`feat/one-lr-anneal-across-rounds`): round *r* gets the slice [(r−1)/R, r/R] of a single
+linear decay, so round 1 starts at `lr0` and round 6 runs at 0.00175 instead of 0.01
+again. Both arms: same warm-started head, same fleet, 1 400 images/vehicle, 6 vehicles ×
+6 rounds × 1 epoch, `--gpu-fraction 0.33`.
+
+| round | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| one anneal | 0.1906 | 0.2100 | 0.2413 | 0.2570 | 0.2774 | 0.2906 |
+| restart each round (today) | 0.1943 | 0.2145 | 0.2496 | 0.2718 | 0.2833 | **0.2985** |
+| Δ | −0.0037 | −0.0045 | −0.0083 | −0.0148 | −0.0059 | −0.0079 |
+
+**No measured improvement — and the sign is negative at every one of the six rounds.**
+The final gap, −0.0079, is inside the ±0.016 spread, so the honest reading is "no
+difference"; but six of six negative is not what a real win looks like either.
+
+**Not adopted.** The code and its tests are on the branch, unmerged. It adds a
+server→client config pair and a schedule function to buy nothing measurable, and this
+repo's rule is that machinery needs a reason.
+
+**What the measurement does not cover, stated so nobody re-reads this as settled:** both
+arms ran `local_epochs = 1`. At one epoch ultralytics' `LambdaLR` steps once, so each
+round is a *constant* LR — today's behaviour is a flat 0.01 every round, and the anneal
+made it a decaying staircase. The plan's argument is really about `local_epochs = 4`,
+where a round has internal decay to restart. That test costs 4× and has not been run.
 
 **Fact 2 — the LR schedule restarts every round.** `lrf = 0.01` decays the LR to 1 % of
 `lr0` *within* the round, then the next round starts a fresh `YOLO.train()` at `lr0`

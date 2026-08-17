@@ -541,8 +541,13 @@ def server_fn(context: Context):
         raise RuntimeError("Server cannot start without a valid YOLO model.") from e
 
     # Push local_epochs to every client each round via config callbacks.
+    # `num_rounds` travels too, because the client cannot otherwise know where in the
+    # run it is: without the denominator, "round 3" says nothing about how much of the
+    # learning-rate anneal belongs to this round. Both are per-*run* constants, so
+    # sharing one FitIns across clients is safe here in a way it was not for batch_id.
     def fit_config_fn(server_round: int) -> Dict[str, Scalar]:
-        return {"local_epochs": local_epochs, "server_round": server_round}
+        return {"local_epochs": local_epochs, "server_round": server_round,
+                "num_rounds": num_rounds}
 
     # Build the strategy through the registry: the mixin carries this project's
     # behaviour, the named Flower strategy carries the aggregation.

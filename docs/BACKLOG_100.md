@@ -114,7 +114,7 @@ See [`FL_TECHNIQUES.md`](FL_TECHNIQUES.md) — Flower already ships 24 strategie
 
 | # | Feature | P |
 |---|---|---|
-| 80 | MLflow logging wired for real (module exists, nothing calls it in anger) | P1 |
+| 80 | MLflow logging wired for real (module exists, nothing calls it in anger) | ✅ 2026-08-16 — sqlite backend, one experiment, runner calls the sink |
 | 81 | Run comparison report: N runs, one table, deltas | P1 |
 | 82 | Alerting: notify on failure or on a plateau | P2 |
 | 83 | Cost accounting per run — kWh, and money at a configured tariff | P2 |
@@ -128,13 +128,13 @@ See [`FL_TECHNIQUES.md`](FL_TECHNIQUES.md) — Flower already ships 24 strategie
 
 | # | Feature | P |
 |---|---|---|
-| 89 | Measure real per-client VRAM and pack clients concurrently where they fit | P1 |
+| 89 | Measure real per-client VRAM and pack clients concurrently where they fit | ✅ 2026-08-16 — `--gpu-fraction 0.33`, 1.94x, 43 % less energy |
 | 90 | AMP / channels-last / `torch.compile` benchmark at fixed accuracy | P2 |
-| 91 | Cache the dataset scan across rounds — Ultralytics rescans every time | P2 |
+| 91 | Cache the dataset scan across rounds — Ultralytics rescans every time | P2 — but phase 0 caps the whole per-round fixed cost at 0.3 % |
 | 92 | Persistent client actors so the model is not reloaded per round | P2 |
 | 93 | Multi-GPU / multi-node once the fleet outgrows one card | P3 |
 | 94 | Mixed-resolution training: small images early, full later | P3 |
-| 95 | Profile the round to find the non-training overhead | P2 |
+| 95 | Profile the round to find the non-training overhead | ✅ 2026-08-16 — `pipeline/profile.py`; 99.1 % of wall clock is inside a client |
 
 ## G. Reliability, process, docs (96–100)
 
@@ -153,7 +153,7 @@ installed ultralytics 8.4.115 rather than assumed.
 
 | # | Feature | P |
 |---|---|---|
-| 101 | **Warm-start the 13-class head from the COCO head rows** for the nine classes BDD100K shares with COCO, instead of random init ⚠ | P1 |
+| 101 | **Warm-start the 13-class head from the COCO head rows** for the nine classes BDD100K shares with COCO, instead of random init ⚠ | ✅ 2026-08-16 — untrained holdout mAP50 0.0053 → 0.2582 |
 | 102 | **Server-driven LR schedule across rounds** — today `lrf` anneals *within* each round and the next round restarts at `lr0`, so the fleet never anneals globally ⚠ | P1 |
 | 103 | **`cache="ram"` and the Windows dataloader path** — decode currently runs on the training thread (`workers=0`), the prime suspect behind 27 % GPU utilisation ⚠ | P1 |
 | 104 | **True FedProx via a `DetectionTrainer.optimizer_step` override.** Note: the `"optimizer_step"` *callback* is registered but never fired — using it would be a silent no-op ⚠ | P1 |

@@ -126,8 +126,8 @@ to be wrong quietly.
 
 | | Fact | Why it matters |
 |---|---|---|
-| 1 | `warmup_epochs = 3.0` against `local_epochs = 4` | three of every four epochs are warmup; every client ends a round worse than the aggregate it started from |
-| 2 | `lrf = 0.01` decays **within** the round, and each round calls `train()` fresh at `lr0` | six rounds is six independent anneals, never one. The fleet never anneals globally |
+| 1 | `warmup_epochs = 3.0`, but `_get_warmup_iterations` clamps it to `epochs - 1` | at `local_epochs = 4`, three of every four epochs are warmup. At `local_epochs = 1` there is **no warmup at all** — so a bad round-1 result there is the LR *level*, not warmup. Do not merge the two |
+| 2 | `lrf = 0.01` decays **within** the round, and each round calls `train()` fresh at `lr0` | six rounds is six independent anneals. **Tried and rejected:** one anneal across the run measured −0.0079 mAP50 at 6×1 epoch, negative at all six rounds. Branch `feat/one-lr-anneal-across-rounds`, unmerged. Untested at `local_epochs = 4`, which is what the argument is really about |
 | 3 | `"optimizer_step"` is in `default_callbacks`, but `BaseTrainer.optimizer_step` **never calls `run_callbacks` for it** | registering that callback is a silent no-op that looks like it works. Override the method and pass `trainer=` to `train()` instead |
 | 4 | `cache = False`, and the client passes `workers=0` on Windows | JPEG decode runs on the training thread. Prime suspect for **27 % mean GPU utilisation** |
 | 5 | Peak VRAM at 1 400 images/vehicle is **5 087 MiB of 16 303**, with `num-gpus = 1.0` | clients are serialised on a card that fits three of them |
