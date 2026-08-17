@@ -1731,6 +1731,30 @@ def test_with_no_real_run_at_all_the_checksums_are_empty_not_wrong(tmp_path):
     assert logparse.federation_learned(tmp_path)[0] is False
 
 
+def test_a_refused_run_does_not_become_the_config_the_plan_previews():
+    """/api/run validated the config it had already adopted, so a POST the server
+    refused with a 400 still replaced the global one -- and /api/plan then previewed
+    the stage table for a run that was never allowed to start. Harmless-looking
+    because the next valid POST overwrote it, which is what kept it in the code."""
+    import io
+
+    from pipeline import server as srv
+
+    before = srv.CONFIG
+    handler = object.__new__(srv.Handler)          # do_POST needs no socket
+    handler.path = "/api/run"
+    body = json.dumps({"partition": "no-such-partition", "vehicles": 99}).encode()
+    handler.headers = {"Content-Length": str(len(body))}
+    handler.rfile = io.BytesIO(body)
+    seen = {}
+    handler._json = lambda payload, code=200: seen.update(payload=payload, code=code)
+
+    handler.do_POST()
+
+    assert seen["code"] == 400 and "no-such-partition" in seen["payload"]["error"]
+    assert srv.CONFIG is before, "a refused run must not replace the previewed config"
+
+
 # ------------------------------------------------------------- the round profile
 from pipeline import profile as _profile  # noqa: E402
 
