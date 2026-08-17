@@ -7,8 +7,9 @@ Update this when you STOP working, not when you start.
 ## Where I stopped
 
 Phases 0 and 1 of [`docs/PHASED_PLAN.md`](docs/PHASED_PLAN.md) are **done and measured**,
-and half of phase 2. Eight branches, none merged — `main` is still 60 commits behind and
-that is now the largest single item outstanding.
+and half of phase 2. Ten branches, all pushed, all with PRs open (#44–#53), **none
+merged** — `main` is ~70 commits behind and that is now the largest single item
+outstanding.
 
 The headline: **runs are 1.94× faster on 43 % less energy, and the detector starts from
 COCO instead of from noise.** The second of those turned out to be worth more than
@@ -81,10 +82,36 @@ looks untried.
 
 ## Next action
 
-1. **Merge.** 11 PRs were open at session start and 8 more branches exist now. `main`
-   last moved at PR #29. Everything below is gated on this. The merge command was
-   blocked by a permission classifier this session — it needs a human or an allowlist
-   entry.
+1. **Merge the stack.** `main` last moved at **PR #29**; twenty PRs are open behind it.
+   Everything below is gated on this, and it is the one step nothing here could do —
+   `gh pr merge` was refused by a permission classifier, so it needs a human or an
+   allowlist entry.
+
+   The branches are a **linear stack**, each PR based on its parent, so every diff is
+   reviewable on its own and each merge collapses the next one's. Merge bottom-up:
+
+   ```
+   39 → 43 → 44 → 45 → 46 → 47 → 48 → 49 → 50 → 51 → 52
+   ```
+
+   | PR | What it lands |
+   |---|---|
+   | #39, #43 | the previous session's pipeline, dashboard, holdout and size skew |
+   | **#44** | `pipeline/profile.py` — phase 0 |
+   | **#45** | `/api/run` validates before adopting |
+   | **#46**, **#48** | MLflow: sqlite backend, and a sink that is actually called |
+   | **#47** | `--gpu-fraction` — the 1.94× |
+   | **#49** | `--cache`, measured and rejected; phase 1 settled |
+   | **#50** | the pyproject restore that deleted uncommitted edits |
+   | **#51** | the COCO head warm start |
+   | **#52** | this file |
+   | ~~#53~~ | the LR anneal — **draft, do not merge.** Experiment record only |
+
+   Also open and pre-dating this session: **#36** (CWD-relative loggers — the task this
+   file has carried as item 1 for two sessions), **#35** (licence + nightly), **#40**
+   (CPU container), **#42** (hardening docs). **#31** (DVC) should be *closed*: the plan
+   rejects DVC in favour of a content-hash manifest. **#32** is already contained in
+   history and will auto-close.
 2. **Phase 3 — the noise floor.** `python -m pipeline.experiment --preset seeds
    --seeds 0,1,2 --yes`. Three of this session's results sat inside ±0.016 and had to be
    reported as "no difference" on the strength of a spread nobody has actually measured.
