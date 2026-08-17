@@ -12,7 +12,7 @@ from pathlib import Path
 from . import logparse, paths
 
 
-def _metrics_csv() -> Path:
+def metrics_csv() -> Path:
     """logs/metrics.csv from whichever log dir actually has one."""
     for d in paths.log_dirs():
         if (d / "metrics.csv").exists():
@@ -38,7 +38,7 @@ def check(project: Path = paths.PROJECT) -> tuple[bool, list[str]]:
                    f"({len(recv)} received, {len(sent)} sent)")
     ok &= c2
 
-    rows = logparse.read_metrics_csv(_metrics_csv())
+    rows = logparse.read_metrics_csv(metrics_csv())
     maps = [r.get("mAP50") for r in rows if r.get("mAP50") is not None]
     c3 = len(rows) >= 2 and any(m and m > 0 for m in maps)
     results.append(f"[{'PASS' if c3 else 'FAIL'}] metrics.csv has rows with non-zero mAP50 "

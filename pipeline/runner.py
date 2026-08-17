@@ -129,6 +129,7 @@ class Run:
     def execute(self, chain: list[Stage]) -> bool:
         self.sampler.start()
         self.emit("run_start", config=self.cfg.to_dict(), stages=[s.name for s in chain])
+        self._prepare_mlflow(chain)
         ok = True
         try:
             for stage in chain:
@@ -145,12 +146,55 @@ class Run:
         finally:
             telemetry = self.sampler.stop()
             self._restore_pyproject()
+            self._log_to_mlflow(telemetry.summary())
             report_paths = self._write_report(telemetry.summary())
             self.emit("run_end", ok=ok, seconds=round(time.time() - self.started, 1),
                       gpu=telemetry.summary(),
                       report=[str(p) for p in report_paths],
                       results=[r.__dict__ for r in self.results])
         return ok
+
+    def _federated(self) -> bool:
+        return any(r.name == "federate" and r.status == "ok" for r in self.results)
+
+    def _prepare_mlflow(self, chain: list[Stage]) -> None:
+        """Create the experiment before any stage can, so artifacts land in one store.
+
+        Ultralytics' callback calls set_experiment too, from a subprocess whose CWD is
+        my-project. Whichever call happens first fixes the artifact location for good.
+        """
+        if not any(s.name == "federate" for s in chain):
+            return
+        try:
+            from . import mlflow_sink
+            mlflow_sink.ensure_experiment()
+        except Exception as e:
+            self.emit("log", line=f"mlflow: experiment not prepared ({type(e).__name__}: {e})")
+
+    def _log_to_mlflow(self, telemetry: dict) -> None:
+        """The federation-level facts no single training run can see.
+
+        Ultralytics logs the per-vehicle curves on its own. This logs what only the
+        server knows -- the round-over-round aggregate checksum, which is the one
+        signal that distinguishes a federation that learns from one that averages its
+        own input -- plus what the whole run cost in watt-hours.
+
+        The sink has existed since the observability work and nothing ever called it,
+        so MLflow held training curves and no federation at all.
+        """
+        if not self._federated():
+            return
+        try:
+            from . import mlflow_sink, verify
+            with mlflow_sink.run(f"federation-{int(self.started)}", self.cfg.to_dict()):
+                mlflow_sink.log_federation(None, verify.metrics_csv())
+                mlflow_sink.log_gpu(telemetry)
+        except Exception as e:
+            # Never fail a run over telemetry -- but never swallow it either. The last
+            # time MLflow refused a write, the only trace was one line in a stage log
+            # and six rounds of federation facts were simply not recorded.
+            self.emit("log", line=f"mlflow: run not logged ({type(e).__name__}: {e})")
+            print(f"\n!! mlflow: run not logged ({type(e).__name__}: {e})", file=sys.stderr)
 
     def _write_report(self, telemetry: dict) -> list[Path]:
         """Always write the report, including for a failed run -- that is when the
