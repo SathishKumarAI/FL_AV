@@ -304,6 +304,33 @@ def test_clients_stay_serialised_unless_the_run_asks_for_packing(_flwr_launcher)
     assert "client-resources-num-gpus=1.0" not in packed, "the old value must not survive"
 
 
+def test_restoring_pyproject_keeps_an_uncommitted_edit(tmp_path, monkeypatch):
+    """The restore used `git checkout -- pyproject.toml`, which puts back the
+    *committed* file and so discards any uncommitted edit along with flwr's rewrite.
+    Adding a run-config key and running the pipeline to test it deleted the key, and
+    the next run failed on a value that had been on disk minutes earlier. The snapshot
+    also makes the restore work where there is no git at all -- a source tarball."""
+    from pipeline import runner
+
+    project = tmp_path / "my-project"
+    project.mkdir()
+    pp = project / "pyproject.toml"
+    monkeypatch.setattr(paths, "PROJECT", project)
+
+    pp.write_text('[tool.flwr.app.config]\ncache = ""\n\n[tool.flwr.federations]\ndefault = "x"\n')
+    run = runner.Run(Config())                      # snapshot taken here
+
+    pp.write_text("# CONFIGURATION MIGRATION NOTICE\n# [tool.flwr.federations]\n")
+    run._restore_pyproject()
+    assert 'cache = ""' in pp.read_text(), "the uncommitted key must survive the run"
+    assert "[tool.flwr.federations]" in pp.read_text(), "and flwr's rewrite must not"
+
+    # A file flwr never touched is left exactly as the run found it, edits and all.
+    pp.write_text("edited during the run\n")
+    run._restore_pyproject()
+    assert pp.read_text() == "edited during the run\n"
+
+
 def test_the_cache_setting_reaches_the_client_and_is_declared_in_pyproject(_flwr_launcher):
     """flwr validates --run-config keys against [tool.flwr.app.config] and rejects the
     whole run for an undeclared one, so the key has to exist in pyproject even though
