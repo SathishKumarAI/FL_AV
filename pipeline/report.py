@@ -21,9 +21,9 @@ from . import baseline, gpu, holdout, logparse, paths, vehicle_metrics, vehicles
 def collect(config: dict | None = None, telemetry: dict | None = None,
             results: list[dict] | None = None) -> dict:
     """Gather everything the report shows, from files on disk."""
-    from .verify import _metrics_csv
+    from .verify import metrics_csv
     checksums = logparse.aggregate_checksums()
-    rows = logparse.read_metrics_csv(_metrics_csv())
+    rows = logparse.read_metrics_csv(metrics_csv())
     learned, detail = logparse.federation_learned()
 
     per_vehicle: dict[int, dict] = {}

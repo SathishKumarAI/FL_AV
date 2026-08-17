@@ -555,7 +555,7 @@ def test_live_state_is_derived_from_disk_not_from_the_event_bus(monkeypatch, tmp
         "1,evaluate,6,0.5,0.4,0.3,0.25,0.1,0.1\n")
 
     monkeypatch.setattr(paths, "log_dirs", lambda: [logs])
-    monkeypatch.setattr(_verify, "_metrics_csv", lambda: logs / "metrics.csv")
+    monkeypatch.setattr(_verify, "metrics_csv", lambda: logs / "metrics.csv")
 
     live = server.State().live()
     assert live["rounds_done"] == 2
@@ -1783,6 +1783,49 @@ def test_the_mlflow_backend_is_a_database_because_the_filesystem_one_refuses_wri
     # stores and every chart is half a run.
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     assert paths.subprocess_env()["MLFLOW_TRACKING_URI"] == uri
+
+
+def test_a_federation_that_ran_is_actually_written_to_mlflow(monkeypatch):
+    """pipeline.mlflow_sink has existed since the observability work and nothing ever
+    called it, so MLflow held ultralytics' per-vehicle training curves and no
+    federation at all -- no round-over-round checksum, which is the one signal that
+    tells a federation that learns from one averaging its own input."""
+    import contextlib
+
+    from pipeline import mlflow_sink, runner
+
+    calls = []
+    monkeypatch.setattr(mlflow_sink, "run",
+                        lambda name, params=None, nested=False: (
+                            calls.append(("run", name)) or contextlib.nullcontext()))
+    monkeypatch.setattr(mlflow_sink, "log_federation",
+                        lambda log_dir, csv: calls.append(("federation", str(csv))))
+    monkeypatch.setattr(mlflow_sink, "log_gpu", lambda summary: calls.append(("gpu", summary)))
+
+    run = runner.Run(Config())
+    run.results = [runner.StageResult("fleet", "ok"), runner.StageResult("federate", "ok")]
+    run._log_to_mlflow({"energy_wh": 2.66})
+    assert [c[0] for c in calls] == ["run", "federation", "gpu"]
+
+    # A run that never federated has no federation facts to log, and an empty run in
+    # the store is worse than no run: it looks like a federation that recorded nothing.
+    calls.clear()
+    run.results = [runner.StageResult("fleet", "ok")]
+    run._log_to_mlflow({"energy_wh": 0.04})
+    assert calls == []
+
+
+def test_both_mlflow_writers_are_pointed_at_the_same_experiment(monkeypatch):
+    """Ultralytics' callback falls back to trainer.args.project and creates its own
+    experiment with no artifact location. MLflow then resolves artifacts against the
+    CWD, which for every stage here is my-project -- one federation left 24 run
+    directories under my-project/mlruns/, outside the store the sink reads."""
+    monkeypatch.delenv("MLFLOW_EXPERIMENT_NAME", raising=False)
+    env = paths.subprocess_env()
+    assert env["MLFLOW_EXPERIMENT_NAME"] == paths.MLFLOW_EXPERIMENT
+
+    from pipeline import mlflow_sink
+    assert mlflow_sink.EXPERIMENT == paths.MLFLOW_EXPERIMENT, "one name, defined once"
 
 
 def test_a_refused_run_does_not_become_the_config_the_plan_previews():

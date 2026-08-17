@@ -202,6 +202,9 @@ certs/
 # artifacts, and reports are per-run output.
 pipeline/vehicles/
 pipeline/mlruns/
+# Ultralytics' MLflow callback runs with cwd=my-project. Until it is pointed at the
+# pipeline's experiment it drops artifacts here, and a stray store is still a store.
+my-project/mlruns/
 pipeline/reports/
 pipeline/.state/
 pipeline/**/__pycache__/
