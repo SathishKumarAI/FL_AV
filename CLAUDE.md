@@ -38,6 +38,7 @@ Open the one file that owns the thing. Do not read the package to find it.
 | A path, or an env var a subprocess needs | `pipeline/paths.py` — nowhere else |
 | Shard assignment, conditions, partitioning, quantity skew | `pipeline/vehicles.py` |
 | What a log line means | `pipeline/logparse.py` |
+| Where a round's seconds went | `pipeline/profile.py` |
 | The four pass criteria | `pipeline/verify.py` |
 | The shared holdout, and scoring the global model on it | `pipeline/holdout.py` |
 | The centralised baseline, and the gap to it | `pipeline/baseline.py` |
