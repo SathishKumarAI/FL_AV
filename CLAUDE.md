@@ -131,7 +131,7 @@ to be wrong quietly.
 | 3 | `"optimizer_step"` is in `default_callbacks`, but `BaseTrainer.optimizer_step` **never calls `run_callbacks` for it** | registering that callback is a silent no-op that looks like it works. Override the method and pass `trainer=` to `train()` instead |
 | 4 | `cache = False`, and the client passes `workers=0` on Windows | JPEG decode runs on the training thread. Prime suspect for **27 % mean GPU utilisation** |
 | 5 | Peak VRAM at 1 400 images/vehicle is **5 087 MiB of 16 303**, with `num-gpus = 1.0` | clients are serialised on a card that fits three of them |
-| 6 | The 13-class head is **random**; COCO transfers only the backbone | round 1 spends its gradients teaching the head what a car is. BDD100K shares nine classes with COCO — warm-start them |
+| 6 | The 13-class head **was random**; COCO transfers only the backbone. Now warm-started for 9 of 13 classes (`warm_start_head`) | untrained holdout mAP50 went **0.0053 → 0.2582**. And it exposed the next problem: round 1 *costs* the warm model 0.066 mAP50, because the round is all LR warmup |
 | 7 | Observed run-to-run spread is **≥ ±0.016 mAP50** (a 1.667×-budget ceiling scored *lower* than a smaller one) | any delta under that is not a result. Measure the spread before ranking anything |
 
 ## Environment traps

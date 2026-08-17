@@ -26,6 +26,20 @@ DEFAULT_NUM_CLASSES = 13  # The default number of classes for our model
 # would silently build a nano net to load small weights into.
 NUM_CLASSES_MODEL_YAML = "models/yolov8s-13.yaml"
 
+#: BDD100K's 13 classes, in the order the shards' data.yaml declares them. The order
+#: IS the class index, so this list and that file must not disagree -- a pipeline test
+#: asserts they still match.
+BDD_CLASSES = ["person", "rider", "car", "truck", "bus", "train", "motorcycle",
+               "bicycle", "traffic light", "traffic sign", "trailer",
+               "other person", "other vehicle"]
+
+#: BDD name -> COCO name where the datasets use different words for a thing a detector
+#: sees the same way. Deliberately short: `stop sign` is one *kind* of traffic sign, so
+#: this row is an approximation and is marked as one. `rider` is left out on purpose --
+#: COCO's nearest label is `person`, and seeding rider from person starts the two
+#: classes BDD most often confuses at exactly the same place.
+APPROXIMATE_FROM_COCO = {"traffic sign": "stop sign"}
+
 def get_normalized_path(path):
     """
     Normalize path to the current operating system format.
@@ -40,6 +54,104 @@ def get_normalized_path(path):
         return str(path).replace('/', '\\')
     else:
         return str(path).replace('\\', '/')
+
+def _detect_head(model):
+    """The Detect module, whether given a ``YOLO`` wrapper or a ``DetectionModel``.
+
+    Both spellings are in use here -- the server holds the wrapper, the client passes
+    the inner module to set_weights -- and getting this wrong is silent: indexing the
+    wrong object raises inside a try/except and warm-starting simply does not happen,
+    leaving a random head that looks warmed in every log that does not print a count.
+    """
+    node = model
+    for _ in range(3):
+        if isinstance(node, torch.nn.Sequential):
+            return node[-1]
+        node = getattr(node, "model", None)
+        if node is None:
+            return None
+    return None
+
+
+def _class_convs(detect):
+    """The per-scale 1x1 convolutions whose output channels *are* the classes.
+
+    Found by shape rather than by index. Ultralytics has changed the internals of
+    ``cv3`` between minor versions (plain Convs, then DWConv pairs); what has not
+    changed is that the branch ends in a Conv2d with one output channel per class.
+    """
+    convs = []
+    for branch in getattr(detect, "cv3", []):
+        found = [m for m in branch.modules()
+                 if isinstance(m, torch.nn.Conv2d) and m.out_channels == detect.nc]
+        if not found:
+            return []
+        convs.append(found[-1])
+    return convs
+
+
+def warm_start_head(model13, coco_model, names13=None, coco_names=None) -> List[str]:
+    """Copy COCO's class rows into the matching rows of the 13-class head.
+
+    ``YOLO(yaml).load(coco.pt)`` transfers 349 of 355 tensors: everything but the
+    three classification convolutions, whose shapes cannot match across a different
+    class count. Those six tensors are therefore **random**, and round 1 of every
+    federation has been spent teaching the head what a car is while backpropagating
+    that noise into a backbone that already knew.
+
+    BDD100K and COCO share most of what matters on a road, so the rows for those
+    classes are copied instead of drawn from a distribution. Rows with no counterpart
+    -- trailer, other person, other vehicle, rider -- keep their random initialisation:
+    this warms what it can and lies about nothing.
+
+    Returns the class names it warmed, so the caller can log what actually happened
+    rather than that it was attempted. Empty means nothing was copied, which is a
+    fallback, not a failure: a shape mismatch means the two heads do not correspond
+    and inventing a correspondence would be worse than a random head.
+    """
+    names13 = names13 or BDD_CLASSES
+    try:
+        ours, coco = _detect_head(model13), _detect_head(coco_model)
+        if ours is None or coco is None:
+            logger.warning("[GetSet] head warm start skipped: no Detect head found")
+            return []
+        our_convs, coco_convs = _class_convs(ours), _class_convs(coco)
+        if not our_convs or len(our_convs) != len(coco_convs):
+            logger.warning("[GetSet] head warm start skipped: no matching class convs")
+            return []
+
+        coco_names = coco_names or getattr(coco_model, "names", None) or {}
+        if isinstance(coco_names, dict):
+            coco_names = [coco_names[k] for k in sorted(coco_names)]
+        index_of = {n: i for i, n in enumerate(coco_names)}
+
+        pairs = []
+        for j, name in enumerate(names13):
+            source = name if name in index_of else APPROXIMATE_FROM_COCO.get(name)
+            if source in index_of:
+                pairs.append((j, index_of[source], name))
+        if not pairs:
+            return []
+
+        with torch.no_grad():
+            for our_conv, coco_conv in zip(our_convs, coco_convs):
+                # Same input width or the rows are not comparable at all. Checked per
+                # scale rather than once: a mismatch here would silently copy garbage.
+                if our_conv.weight.shape[1:] != coco_conv.weight.shape[1:]:
+                    logger.warning("[GetSet] head warm start skipped: input width differs")
+                    return []
+                for j, k, _ in pairs:
+                    our_conv.weight[j].copy_(coco_conv.weight[k])
+                    our_conv.bias[j].copy_(coco_conv.bias[k])
+
+        warmed = [n for _, _, n in pairs]
+        logger.info(f"[GetSet] Warm-started {len(warmed)}/{len(names13)} head classes "
+                    f"from COCO: {', '.join(warmed)}")
+        return warmed
+    except Exception as e:
+        logger.error(f"[GetSet] warm_start_head error: {e}", exc_info=True)
+        return []
+
 
 def get_weights(model):
     """

@@ -167,6 +167,34 @@ The fix is a **server-driven schedule**: the round number is already broadcast, 
 client can set `lr0_round = lr0 · f(round / total_rounds)` and `warmup_epochs ≈ 0.1`
 for every round after the first. One global anneal, spread across rounds.
 
+### Fact 3, measured — and what it exposed
+
+The head warm start is done (`warm_start_head` in `get_set_model.py`): 9 of BDD's 13
+classes are copied out of the COCO head instead of drawn from a distribution. All
+numbers below are on the **1 000-image shared holdout**, same fleet, 1 400
+images/vehicle, 6 vehicles × 2 rounds × 1 epoch:
+
+| head | untrained | after round 1 | after round 2 |
+|---|---|---|---|
+| random (what every run so far used) | 0.0053 | 0.1277 | 0.1690 |
+| **warm-started** | **0.2582** | 0.1924 | 0.2073 |
+
+Untrained, the warm-started model scores **0.2582 against 0.0053** — 49× — and that is
+before a single gradient step. It is also **59 % of what six rounds × four epochs of
+federation reached** (0.4334). Round 1 was never spent learning; it was spent
+recovering from an initialisation nobody had looked at.
+
+**And the number that matters more.** The warm-started model is *better untrained than
+after two rounds of federation*: 0.2582 → 0.1924 → 0.2073. **Round 1 costs it 0.066
+mAP50**, and round 2 has not won that back.
+
+This is facts 1 and 2 of this phase, made visible for the first time. With a random
+head, "round 1 damages the model" was unobservable — there was nothing to damage. With
+a head that already detects, the LR schedule's cost shows up as a number: three epochs
+of warmup inside a one-epoch round means the round runs entirely at a ramping LR, and
+every round restarts it. The warm start did not create this problem; it made it
+measurable, and it makes the rest of phase 2 the highest-value work left in the plan.
+
 **Fact 3 — the 13-class head starts random.** COCO weights transfer the backbone and
 discard the head, so round 1 spends its gradients teaching the head what a car is,
 while backpropagating noise into good features. Two independent fixes, cheap, and
