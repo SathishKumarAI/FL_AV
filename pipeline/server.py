@@ -12,14 +12,19 @@ Stdlib only, loopback only, no build step.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import (baseline, dataset_stats, docs_index, gpu, holdout, ledger, logparse, paths,
-               plan, stages, train_artifacts, vehicle_metrics, vehicles, verify)
+from urllib.parse import unquote
+
+from . import (baseline, dataset_stats, docs_index, gpu, holdout, ledger, logparse,
+               nodes, paths, plan, stages, train_artifacts, vehicle_metrics, vehicles,
+               verify)
 from .runner import Run
 from .stages import Config
 
@@ -246,7 +251,51 @@ class Handler(BaseHTTPRequestHandler):
             return self._shard_image()
         if self.path.startswith("/reports/"):
             return self._report_file()
+        if self.path.split("?")[0] == "/api/nodes":
+            return self._json(nodes.listing())
+        if self.path.split("?")[0] == "/api/model":
+            return self._json(nodes.latest_model())
+        if self.path.split("?")[0] == "/api/model-file":
+            got = nodes.model_bytes()
+            if got is None:
+                return self._json({"error": "no global checkpoint yet"}, 404)
+            data, name = got
+            return self._send(200, data, "application/octet-stream")
+        if self.path.startswith("/api/node-frame/"):
+            return self._node_frame()
         self._json({"error": "not found"}, 404)
+
+    def _node_heartbeat(self, body: dict) -> None:
+        """One report from an edge node running the global model on a camera."""
+        node_id = unquote(self.path.split("?")[0].rsplit("/", 1)[-1])
+        frame = None
+        raw = body.pop("frame", None)
+        if raw:
+            try:
+                frame = base64.b64decode(raw, validate=True)
+            except (binascii.Error, ValueError) as e:
+                # Refused, not dropped: a node silently losing its picture while its
+                # telemetry keeps arriving looks like a camera fault on the far end.
+                return self._json({"error": f"frame is not valid base64: {e}"}, 400)
+        try:
+            record = nodes.heartbeat(node_id, body, frame)
+        except ValueError as e:
+            return self._json({"error": str(e)}, 400)
+        return self._json({"ok": True, "id": record["id"], "frames": record["frames"]})
+
+    def _node_frame(self) -> None:
+        node_id = unquote(self.path.split("?")[0].rsplit("/", 1)[-1])
+        data = nodes.frame(node_id)
+        if data is None:
+            return self._json({"error": "no frame for that node"}, 404)
+        # No caching: the whole value of this image is that it is the newest one, and a
+        # browser holding the first frame forever would show a live fleet as frozen.
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     #: Only what the dashboard is made of. An unknown suffix is a 404, not an
     #: octet-stream download, so a stray file here cannot be exfiltrated by URL.
@@ -357,9 +406,25 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode())
         self.wfile.flush()
 
+    #: Ceiling on a request body. Every other POST here is a small JSON config; the
+    #: node heartbeat carries a base64 JPEG, which is the only reason this is not tiny.
+    #: Read bounded rather than trusting Content-Length: this is the one route that
+    #: accepts data from another machine.
+    MAX_BODY = 1024 * 1024
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length") or 0)
-        body = json.loads(self.rfile.read(length) or b"{}")
+        if length > self.MAX_BODY:
+            return self._json({"error": f"body too large ({length} > {self.MAX_BODY})"}, 413)
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            return self._json({"error": f"malformed JSON: {e}"}, 400)
+        if not isinstance(body, dict):
+            return self._json({"error": "body must be a JSON object"}, 400)
+
+        if self.path.startswith("/api/node/"):
+            return self._node_heartbeat(body)
 
         if self.path == "/api/run":
             global CONFIG
@@ -376,7 +441,8 @@ class Handler(BaseHTTPRequestHandler):
                 rounds=int(body.get("rounds", 2)),
                 local_epochs=int(body.get("epochs", 1)),
                 seed=int(body.get("seed", 0)),
-                partition=body.get("partition", "condition"),
+                partition=body.get("partition", Config.partition),
+                local_bn=bool(body.get("local_bn", False)),
                 alpha=float(body.get("alpha", 0.5) or 0.5),
                 size_skew=float(body.get("size_skew", 0.0) or 0.0),
                 gpu_fraction=float(raw_fraction) if raw_fraction not in (None, "") else 1.0,
@@ -424,9 +490,17 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"error": "not found"}, 404)
 
 
-def serve(port: int = 8800) -> None:
-    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)   # loopback only, never 0.0.0.0
-    print(f"control + live dashboards : http://127.0.0.1:{port}")
+def serve(port: int = 8800, host: str = "127.0.0.1") -> None:
+    # Loopback by default, and that default is load-bearing: POST /api/run starts a
+    # subprocess chain from a request body, so anything that can reach this port can
+    # make this machine train. Binding wider is an explicit choice, made per launch,
+    # on a trusted network -- there is no authentication here.
+    srv = ThreadingHTTPServer((host, port), Handler)
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"\n  ! bound to {host}:{port}, not loopback.\n"
+              f"  ! /api/run starts training subprocesses and NOTHING here authenticates.\n"
+              f"  ! Use this only on a network you control.\n")
+    print(f"control + live dashboards : http://{host}:{port}")
     print(f"MLflow (metrics, history) : http://127.0.0.1:5000   [mlflow ui --port 5000]")
     print(f"Ray (actors, GPU internals): http://127.0.0.1:8265  [ray start --head]")
     try:
@@ -440,4 +514,8 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--port", type=int, default=8800)
-    serve(ap.parse_args().port)
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="0.0.0.0 to let edge nodes on other machines report in. "
+                         "Read the warning it prints before you do")
+    args = ap.parse_args()
+    serve(args.port, args.host)

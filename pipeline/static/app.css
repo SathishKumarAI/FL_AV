@@ -187,6 +187,18 @@ body[data-loaded="0"] .skel{color:transparent !important;border-radius:var(--r1)
 /* Per-class AP carries a value AND a signed delta, which does not fit the 46px a
    percentage needs. Same bars, wider right column. */
 .mix.wide .r{grid-template-columns:1fr 116px}
+
+/* Live edge nodes: one card per machine, its latest frame above its telemetry. */
+.edges{display:grid;gap:var(--s3);grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+.edge{margin:0;background:var(--sunk);border-radius:var(--r1);overflow:hidden;
+      border:1px solid var(--line)}
+.edge.off{opacity:.5}
+.edge img,.edge .noframe{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;
+                         background:#000}
+.edge .noframe{display:grid;place-items:center;color:var(--dim);font-size:var(--t-xs)}
+.edge figcaption{padding:var(--s2) var(--s3)}
+.edge figcaption .k{font-family:var(--mono);font-size:var(--t-xs);color:var(--dim);
+                    margin-top:2px}
 .mix .t{position:relative;background:var(--sunk);border-radius:var(--r1);padding:2px 7px;overflow:hidden;
         border:1px solid var(--line-soft)}
 .mix .t>i{position:absolute;inset:0 auto 0 0;background:var(--accent);opacity:.16}

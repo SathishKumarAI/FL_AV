@@ -417,13 +417,18 @@ def test_fleet_check_demands_a_shard_for_every_assignable_id():
     import json as _json
     from pipeline import vehicles as _v
     original = _v.load_fleet
+    # partition is pinned to match the fake shards' 'x' condition rather than left to
+    # the Config default, which moved to 'random' on 2026-09-02. This test is about
+    # the shard COUNT; without the pin it fails on the partition check instead and
+    # says nothing about what it is named for.
+    cfg = Config(n_vehicles=6, partition="condition")
     try:
         _v.load_fleet = lambda: [{"vid": i, "condition": "x", "n_train": 300, "n_val": 60}
                                  for i in range(1, 7)]
-        assert stages._check_fleet(Config(n_vehicles=6)).satisfied is False
+        assert stages._check_fleet(cfg).satisfied is False
         _v.load_fleet = lambda: [{"vid": i, "condition": "x", "n_train": 300, "n_val": 60}
                                  for i in range(1, 11)]
-        assert stages._check_fleet(Config(n_vehicles=6)).satisfied is True
+        assert stages._check_fleet(cfg).satisfied is True
     finally:
         _v.load_fleet = original
 
@@ -1116,6 +1121,95 @@ def test_a_run_scored_before_per_class_existed_still_reports():
     """holdout_metrics.json from an earlier run has no per_class key at all."""
     assert report._per_class_table([{"round": 1, "mAP50": 0.1}]) == []
     assert report._per_class_table([{"round": 1, "mAP50": 0.1, "per_class": []}]) == []
+
+
+# ------------------------------------------------------ live edge nodes
+from pipeline import nodes as _nodes  # noqa: E402
+
+
+@pytest.fixture(autouse=False)
+def _clean_nodes():
+    _nodes.reset()
+    yield
+    _nodes.reset()
+
+
+def test_a_node_id_that_could_escape_a_path_is_refused_not_sanitised(_clean_nodes):
+    """The id names a key and reaches a URL. Refused rather than cleaned: a silently
+    renamed node is two rows in the listing and one confused operator."""
+    for bad in ("../etc/passwd", "a/b", "", "a" * 33, "has space", ";rm -rf"):
+        with pytest.raises(ValueError):
+            _nodes.heartbeat(bad, {})
+    assert _nodes.listing()["total"] == 0
+
+    for good in ("cam-1", "cam.1", "A_9", "x"):
+        _nodes.heartbeat(good, {})
+    assert _nodes.listing()["total"] == 4
+
+
+def test_an_oversized_frame_is_refused_rather_than_stored(_clean_nodes):
+    with pytest.raises(ValueError):
+        _nodes.heartbeat("cam-1", {}, frame=b"x" * (_nodes.MAX_FRAME_BYTES + 1))
+    assert _nodes.frame("cam-1") is None
+
+
+def test_only_the_newest_frame_per_node_is_kept(_clean_nodes):
+    """Frames are held in memory, so an unbounded history would be a slow leak in a
+    process that is meant to run for the length of a federation."""
+    _nodes.heartbeat("cam-1", {}, frame=b"first")
+    _nodes.heartbeat("cam-1", {}, frame=b"second")
+    assert _nodes.frame("cam-1") == b"second"
+    assert _nodes.listing()["total"] == 1
+
+
+def test_a_node_that_stops_reporting_goes_offline_rather_than_disappearing(_clean_nodes):
+    """Disappearing would read as 'never existed'. The dashboard has to be able to say
+    a node was there and stopped, which is the failure an operator cares about."""
+    now = 1000.0
+    _nodes.heartbeat("cam-1", {"fps": 12}, now=now)
+    live = _nodes.listing(now=now + 1)
+    assert live["online"] == 1 and live["fleet_fps"] == 12.0
+
+    gone = _nodes.listing(now=now + _nodes.OFFLINE_AFTER + 1)
+    assert gone["total"] == 1, "the node vanished instead of going offline"
+    assert gone["online"] == 0
+    assert gone["fleet_fps"] == 0.0, "an offline node still counted toward fleet fps"
+
+
+def test_the_registry_is_bounded(_clean_nodes):
+    """Without a cap, a caller generating a fresh id per POST grows it forever."""
+    for i in range(_nodes.MAX_NODES):
+        _nodes.heartbeat(f"cam-{i}", {})
+    with pytest.raises(ValueError):
+        _nodes.heartbeat("one-too-many", {})
+    # An existing node must still be able to report after the cap is reached.
+    assert _nodes.heartbeat("cam-0", {"fps": 5})["fps"] == 5
+
+
+def test_garbage_telemetry_cannot_break_the_dashboard(_clean_nodes):
+    """Every field comes from another machine. A string where a float belongs must not
+    reach the renderer, and open-ended `counts` must not grow without bound."""
+    rec = _nodes.heartbeat("cam-1", {
+        "fps": "not a number", "latency_ms": None, "detections": -5,
+        "label": "L" * 500, "counts": {f"c{i}": i for i in range(200)},
+    })
+    assert rec["fps"] == 0.0 and rec["latency_ms"] == 0.0
+    assert rec["detections"] == 0, "a negative count survived the clamp"
+    assert len(rec["label"]) <= 64
+    assert len(rec["counts"]) <= 32
+
+
+def test_the_model_a_node_caches_on_is_content_addressed():
+    """Re-running a federation rewrites global_round_1.pt with different weights under
+    the same name. A node caching on the name would keep serving the previous run's
+    model and never look stale."""
+    info = _nodes.latest_model()
+    if not info.get("available"):
+        pytest.skip("no global checkpoint on disk")
+    assert len(info["sha256"]) == 16
+    assert info["name"].startswith("global_round_")
+    assert "global_last" not in info["name"], \
+        "global_last duplicates a round under a name that never changes"
 
 
 def test_the_holdout_stage_runs_before_the_fleet_stage():

@@ -17,6 +17,7 @@ whole flow and visualises a simulated vehicle fleet while it runs.
 | Why is mAP low, what do I run next? | [`docs/ML_PLAN.md`](docs/ML_PLAN.md) |
 | How do I try another FL algorithm? | [`docs/FL_TECHNIQUES.md`](docs/FL_TECHNIQUES.md) |
 | **What does Flower × YOLO actually need, measured?** | [`docs/FEDERATED_DETECTION.md`](docs/FEDERATED_DETECTION.md) |
+| How do I run the model live on other machines? | [`docs/REALTIME_NODES.md`](docs/REALTIME_NODES.md) |
 | What should I build? | [`docs/BACKLOG_100.md`](docs/BACKLOG_100.md) |
 | How do I run any of it? | [`pipeline/README.md`](pipeline/README.md) |
 | Where did the last session stop? | [`STATUS.md`](STATUS.md) and `docs/prompts/` |
@@ -34,6 +35,9 @@ Open the one file that owns the thing. Do not read the package to find it.
 | Label boxes drawn over a frame, the trainer's own pictures | `pipeline/static/js/consumed.js` |
 | Which of ultralytics' output pictures are served, and their captions | `pipeline/train_artifacts.py` — `KINDS` |
 | An HTTP route or what `/api/state` returns | `pipeline/server.py` |
+| The live edge fleet: what a node may report, and its bounds | `pipeline/nodes.py` |
+| The edge node itself — camera, inference, heartbeat | `pipeline/edge.py` |
+| The live-nodes panel | `pipeline/static/js/edge.js` |
 | Which stages exist, what "already done" means, gating | `pipeline/stages.py` |
 | How a stage subprocess is run, env, SuperLink handling | `pipeline/runner.py` |
 | A path, or an env var a subprocess needs | `pipeline/paths.py` — nowhere else |
