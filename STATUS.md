@@ -2,144 +2,157 @@
 
 Update this when you STOP working, not when you start.
 
-- **Last touched:** 2026-08-16
+- **Last touched:** 2026-09-02
 
 ## Where I stopped
 
-Phases 0 and 1 of [`docs/PHASED_PLAN.md`](docs/PHASED_PLAN.md) are **done and measured**,
-and half of phase 2. Ten branches, all pushed, all with PRs open (#44–#53), **none
-merged** — `main` is ~70 commits behind and that is now the largest single item
-outstanding.
+Six commits on a new stack above the previous session's, none merged. `main` is
+**unchanged since PR #29** and is now ~76 commits behind; merging that stack is still
+the largest single item outstanding and still the one step nothing here can do.
 
-The headline: **runs are 1.94× faster on 43 % less energy, and the detector starts from
-COCO instead of from noise.** The second of those turned out to be worth more than
-everything else in the session put together.
+This session did not move mAP. It moved what the numbers *mean*: two of the beliefs
+the phased plan is built on turned out to be false, and the one that mattered most had
+been silently true since the first run.
 
-## The head was random, and nobody had looked
+## `lr0` has never been the learning rate
 
-`YOLO(yolov8s-13.yaml).load(yolov8s.pt)` prints `Transferred 349/355 items`. The six it
-cannot transfer are the three classification convolutions — 80 classes against 13 — so
-they were **randomly initialised in every run this project has ever done**.
+`optimizer="auto"` is the Ultralytics default and the client never overrode it. `auto`
+**replaces `lr0`** with `0.002·5/(4+nc)` = **5.88e-4** and says so:
 
-Nine of BDD100K's thirteen classes are COCO classes. Copying those rows
-(`warm_start_head` in `get_set_model.py`), measured on the 1 000-image holdout, same
-fleet, 1 400 images/vehicle:
-
-| head | untrained | round 1 | round 2 |
-|---|---|---|---|
-| random | 0.0053 | 0.1277 | 0.1690 |
-| **warm-started** | **0.2582** | 0.1924 | 0.2073 |
-
-**0.2582 before a single gradient step** — 59 % of what six rounds × four epochs
-previously reached, for free.
-
-**And the thing it exposed.** The warm-started model is better *untrained* than after
-two rounds. Round 1 costs it 0.066 mAP50. With a random head there was nothing to
-damage, so that cost had always been invisible.
-
-## Phase 1: the card was empty, not slow
-
-`pipeline/profile.py` (new) answers where a round's seconds go, from timestamps the logs
-already carried — so the 3 296 s reference run was profiled after the fact:
-
-**85.3 % train, 13.8 % evaluate, 0.6 % idle, 72 client episodes never overlapping.**
-
-Orchestration was never the problem. Clients were serialised on a card they used a third
-of. Four arms at 1 400 images/vehicle, 6 × 2 rounds × 1 epoch, one fleet:
-
-| `--gpu-fraction` | `--cache` | wall | util | peak VRAM | energy |
-|---|---|---|---|---|---|
-| 1.0 | — | 562.1 s | 19.3 % | 6 453 MiB | 10.36 Wh |
-| 1.0 | ram | 595.2 s | 22.7 % | 6 313 MiB | 10.67 Wh |
-| 0.5 | — | 394.9 s | 29.7 % | 10 474 MiB | 8.37 Wh |
-| **0.33** | — | **289.2 s** | 30.9 % | 15 468 MiB (94.9 %) | **5.92 Wh** |
-
-```bash
-python -m pipeline.runner --all --yes --gpu-fraction 0.33      # the new default to use
+```
+optimizer: 'optimizer=auto' found, ignoring 'lr0=0.01' and 'momentum=0.937' and
+           determining best 'optimizer', 'lr0' and 'momentum' automatically...
+optimizer: AdamW(lr=0.000588, momentum=0.9)
 ```
 
-Three clients hold 94.9 % of the card, so 0.33 is the floor on this hardware.
+Every run this project has ever done trained with **AdamW at 5.88e-4**, not SGD at
+0.01. `lrf` and `warmup_epochs` are *not* overridden, so the "six independent anneals"
+fact survives; only its `lr0` framing falls.
 
-## Three things that were tried and did not work
+**This strikes PR #53.** That branch computes `lr0_round` per round and passes it
+without setting `optimizer`, so every value was discarded and only its `lrf_round`
+applied. Its "−0.0079 mAP50, negative at six of six rounds" is currently the reason
+this project believes a global anneal does not help, and **it did not test one.**
+Rebase with `optimizer` set explicitly and re-run at `local_epochs = 4`.
 
-Written down because a lever that was tried and failed is more useful than one that
-looks untried.
+The client now warns loudly when handed `lr0` with `optimizer="auto"`, because that
+combination is a silent no-op that reads as a learning-rate experiment.
 
-| | Result |
+**Checked and clean, but only by luck.** `auto` also picks AdamW vs MuSGD by
+`iterations = ceil(len(dataset)/max(batch, nbs)) * epochs`, divisor 64 not 16. Client
+1400×4 = 88, centralised ceiling 8400×24 = 3168, both under the 10 000 threshold, so
+both arms got the same optimiser at the same LR and **the 84.5 % headline is not
+contaminated.** At *full* scale the ceiling is 14 208 iterations, crosses it, and would
+train with MuSGD at lr0 = 0.01 against clients on AdamW at 5.88e-4 — a 17× gap, in the
+one run this project exists to produce, with nothing warning. Set `optimizer` on both
+sides before running that.
+
+## The 27 % utilisation was the dataloader, and it was never decode
+
+Phase 1 closed with "neither of the two suspects in this plan explains it" and three
+guesses. It was none of them. Measured on the dataset alone — no model, no GPU:
+
+| | ms/sample |
 |---|---|
-| `cache="ram"` | **5.9 % slower.** Utilisation with the whole shard in RAM still only reached 22.7 %, so JPEG decode was never what the card waited for. That also makes the dataloader-workers lever moot |
-| Persistent client actors | **cut without running it.** Phase 0 caps all per-round fixed cost at 8.6 s of 3 266 s |
-| One LR anneal across the run | **−0.0079 mAP50, negative at six of six rounds.** Inside the ±0.016 spread, so "no difference" — but not what a win looks like. Implemented and tested on `feat/one-lr-anneal-across-rounds`, **not for merge** |
+| stock (`mosaic=1.0`, `erasing=0.4`) | **7.93** |
+| `mosaic=0.0` | 5.56 |
 
-## Four bugs, three found by running the thing
+At batch 16 that is ~127 ms of CPU per batch on the training thread, the same order as
+the GPU step. That also explains `cache="ram"` measuring *slower*: caching removes the
+JPEG decode and leaves the mosaic assembly and the warps. And `close_mosaic = 10` fires
+at `epoch == epochs − close_mosaic`, negative for a 1–4 epoch round, so **mosaic never
+closes inside a federated round.**
 
-| | |
-|---|---|
-| `pipeline/mlflow_sink.py` **was never called by anything** | MLflow held ultralytics' training curves and no federation at all — no aggregate checksum, no energy. Wired into the runner |
-| MLflow refused every write | mlflow 3.15 rejects the `file://` backend outright. Now `sqlite:///pipeline/mlruns/mlflow.db`, one experiment for both writers |
-| The runner's pyproject restore ran `git checkout --` | which discards *uncommitted* edits too. It deleted a run-config key mid-session and the next run failed on a value that had been there minutes earlier. Snapshot-based now |
-| `/api/run` adopted the config before validating it | a refused run still replaced the config the stage table previews |
+`workers > 0` is now measured rather than deduced-moot, same conclusion, different
+reason: `workers=0` 36.2 s, `workers=4` 34.3 s, `workers=8` **40.1 s**. Windows has no
+`fork`. The recorded "deadlock inside a Ray actor" did not reproduce.
+
+## What shipped: 1.19×, free
+
+`plots=True` is the default and the client never overrode it, so every round drew
+`labels.jpg`, `train_batch*.jpg` and the confusion matrix / PR curves — **into a
+directory the next round overwrote.** `exist_ok=True` means only the last round's
+pictures ever survived, and `train_artifacts.py` says so in its own docstring. Five
+rounds of six paid GPU time for files destroyed unread.
+
+The server now sends `plots` and sets it True on the final round only.
+
+| arm (1 epoch, batch_1, 3 interleaved repeats) | median | spread | util | |
+|---|---|---|---|---|
+| baseline | 27.2 s | 7.6 | 25.4 % | 1.00× |
+| `plots=False` | 22.9 s | 0.3 | 31.2 % | **1.19×** |
+| `plots=False save=False` | 22.8 s | 0.4 | 29.9 % | 1.20× |
+| `plots=False save=False mosaic=0` | 20.4 s | 0.9 | 32.4 % | 1.34× |
+
+**Read that table twice.** One run per arm said `plots=False` was worth **1.52×**. It
+is worth **1.19×**. The difference is one cold start — the baseline's repeats were
+34.6 / 27.1 / 27.2 s, and the first `train()` in a process pays CUDA context, cuDNN
+autotune and the AMP check. Arms run in a fixed order, so the first arm of the first
+repeat always eats it. Interleave, repeat, quote the median.
+
+`save=False` buys nothing, so `final_eval`'s second validation pass is not where the
+time goes and the EMA-versus-raw-weights question it would have raised does not need
+answering. `mosaic=0` is worth a further 1.12× but changes the data path, so it stays a
+run-config key at its default until the holdout clears it.
+
+## FedBN is the missing technique, and it should be phase 5 item 0
+
+`get_weights` sends the full `state_dict` — deliberately, and its docstring explains
+why: dropping BatchNorm buffers would make the federated model wrong. Correct for IID
+clients.
+
+This fleet is partitioned by **condition**. That is *feature* shift, which is exactly
+what BN running statistics encode, so FedAvg is averaging a night vehicle's
+`running_mean` with a clear-daylight vehicle's and producing statistics that describe
+no vehicle's data. FedBN — keep BN local, share the rest — targets that axis directly,
+costs a filter on which tensors travel, and was absent from the phase-5 table where
+every other entry addresses *parameter*-space drift.
+
+Design note, with the mechanism for true per-step FedProx and the `num_examples`
+images-vs-objects question: [`docs/FEDERATED_DETECTION.md`](docs/FEDERATED_DETECTION.md).
+
+## Also landed
+
+- **Per-class AP** on the holdout — scorer, run report, and a dashboard panel. `car` is
+  ~90 % of the objects in a 1 000-image holdout, so one averaged mAP is close to a car
+  detector's report card. Two Ultralytics traps guarded by tests: `box.ap50` is indexed
+  by position in `ap_class_index`, not by class id, and `box.maps` pre-fills absent
+  classes with the overall `map` — `train`, 29 instances fleet-wide, would have been
+  reported as scoring the fleet average.
+- **Holdout fingerprint.** `size` and `seed` describe how the slice was requested; the
+  same pair drawn from a val pool that has since grown gives different images and
+  identical metadata. (The *fleet* was already content-hashed — `Vehicle.fingerprint`
+  and `fleet.meta.json` — despite the phased plan listing it as missing. The leakage
+  gate was already a halting stage too.)
+- **`fraction_evaluate`** is a run-config key. It was never set, so FedAvg's 1.0
+  applied and every client re-scored itself every round: phase 0's 13.8 %. Still 1.0.
+- The view-id test now covers every dashboard module, not just `control.js`.
 
 ## Next action
 
-1. **Merge the stack.** `main` last moved at **PR #29**; twenty PRs are open behind it.
-   Everything below is gated on this, and it is the one step nothing here could do —
-   `gh pr merge` was refused by a permission classifier, so it needs a human or an
-   allowlist entry.
-
-   The branches are a **linear stack**, each PR based on its parent, so every diff is
-   reviewable on its own and each merge collapses the next one's. Merge bottom-up:
-
-   ```
-   39 → 43 → 44 → 45 → 46 → 47 → 48 → 49 → 50 → 51 → 52
-   ```
-
-   | PR | What it lands |
-   |---|---|
-   | #39, #43 | the previous session's pipeline, dashboard, holdout and size skew |
-   | **#44** | `pipeline/profile.py` — phase 0 |
-   | **#45** | `/api/run` validates before adopting |
-   | **#46**, **#48** | MLflow: sqlite backend, and a sink that is actually called |
-   | **#47** | `--gpu-fraction` — the 1.94× |
-   | **#49** | `--cache`, measured and rejected; phase 1 settled |
-   | **#50** | the pyproject restore that deleted uncommitted edits |
-   | **#51** | the COCO head warm start |
-   | **#52** | this file |
-   | ~~#53~~ | the LR anneal — **draft, do not merge.** Experiment record only |
-
-   Also open and pre-dating this session: **#36** (CWD-relative loggers — the task this
-   file has carried as item 1 for two sessions), **#35** (licence + nightly), **#40**
-   (CPU container), **#42** (hardening docs). **#31** (DVC) should be *closed*: the plan
-   rejects DVC in favour of a content-hash manifest. **#32** is already contained in
-   history and will auto-close.
-2. **Phase 3 — the noise floor.** `python -m pipeline.experiment --preset seeds
-   --seeds 0,1,2 --yes`. Three of this session's results sat inside ±0.016 and had to be
-   reported as "no difference" on the strength of a spread nobody has actually measured.
-   This is now the blocking item for every comparison.
-3. **The LR *level*, not the schedule.** Round 1 costs a warm-started model 0.066 mAP50
-   at `lr0 = 0.01`. The anneal did not fix it because at `local_epochs = 1` there is no
-   within-round decay to spread — ultralytics' `LambdaLR` steps once. Try a lower `lr0`
-   for a warm-started head, and re-test the anneal at `local_epochs = 4`, which is the
-   configuration its argument is actually about.
-4. **Phase 1 lever 6** — `evaluate` is 13.8 % of every run, spent on the self-scored
-   metric this project already calls the flattering one. `fraction_evaluate < 1.0`.
-
-## A correction worth carrying
-
-`BaseTrainer._get_warmup_iterations` **clamps warmup to `epochs - 1`**. At
-`local_epochs = 4` the reference run really did spend three of four epochs in warmup —
-but at `local_epochs = 1` there is **no warmup at all**, and every measurement in this
-session ran at 1. "Three of every four epochs are warmup" merges two different problems;
-the round-1 damage above is the learning-rate *level*.
+1. **Merge the stack.** Unchanged and still blocking everything. `gh pr merge` is
+   refused by a permission classifier here, so it needs a human or an allowlist entry.
+   Bottom-up: `39 → 43 → 44 → 45 → 46 → 47 → 48 → 49 → 50 → 51 → 52`, then this
+   session's six. **#53 must not merge and its result must not be carried forward.**
+2. **Phase 3, the seed spread.** `python -m pipeline.experiment --preset seeds --seeds
+   0,1,2 --yes`. Still the blocking item for every comparison, and this session added
+   two more results (mosaic, plots) that want a spread beside them.
+3. **Set `optimizer` explicitly, then redo phase 2.** Nothing about learning rate is
+   testable until this lands. Then: a lower `lr0` for the warm-started head, and #53's
+   anneal re-run at `local_epochs = 4`, which is the configuration its argument is
+   about.
+4. **FedBN.** Cheapest entry in phase 5 and the only one aimed at this fleet's actual
+   non-IID axis. Note it removes the single global model, so the leaderboard must say
+   whether it reports per-vehicle BN or BN re-estimated on the holdout.
+5. **Re-run the headline at 6 × 4 with the warm-started head**, once 2 and 3 are done.
 
 ## Verification
 
 ```bash
-python -m pytest pipeline/tests -q       # 141
-python -m pytest my-project/tests -q     # 36 (40 with the unmerged schedule branch)
-python -m pipeline.profile               # where the last run's seconds went
-python -m pipeline.verify                # the four pass criteria
-python -m pipeline.holdout --evaluate    # the global model on data no vehicle saw
+python -m pytest my-project/tests -q     # 45
+python -m pytest pipeline/tests -q       # 148
+python -m pipeline.verify                # the four pass criteria against the last run
+python -m pipeline.holdout --evaluate    # now prints a per-class table too
 ```
 
 ## Environment (the part that costs an hour if you forget it)
@@ -149,8 +162,17 @@ App Control blocks conda-forge's `_bz2.pyd`. See [`docs/ENV_WINDOWS.md`](docs/EN
 Export `FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION=1` before `flwr run`, or every
 client trains on CPU at 5.5× the wall clock with no error anywhere.
 
-**Data: done.** All ten shards hold real BDD100K, hardlinked onto the kagglehub cache.
-The fleet on disk is currently **1 400 images/vehicle, condition-partitioned, seed 0**.
+**`--gpu-fraction 0.33` has no headroom, and it bit this session.** It is the fastest
+setting and it fills 94.9–96.6 % of VRAM with three concurrent Ray actors. A 2-round run
+died mid-round-2 on a **host** allocation — `numpy ... _ArrayMemoryError: Unable to
+allocate 11.8 MiB` — with peak VRAM at 15 751 of 16 303 MiB. Use **0.5** (two clients,
+still 1.50×) if anything else is running on the machine. The pipeline halted correctly:
+**Ray exits 0 after an actor dies**, and the runner's output inspection is the only
+thing standing between that and a short run reported as a finished one. The
+snapshot-based `pyproject.toml` restore also survived the crash.
+
+**Data: unchanged.** All ten shards hold real BDD100K, hardlinked onto the kagglehub
+cache. The fleet on disk is **1 400 images/vehicle, condition-partitioned, seed 0**.
 The attribute index (79 863 images) is cached at `pipeline/.state/attributes.json`.
 
 ## The result this project exists to produce, unchanged
@@ -163,6 +185,6 @@ centralised ceiling on the same 201 600 image-visits:
 | mAP50 | 0.4173 | 0.4936 | **84.5 %** |
 | mAP50-95 | 0.2313 | 0.2770 | 83.5 % |
 
-Nothing this session changed that number — every run here was 1 or 2 local epochs, for
-speed of iteration. Re-running it at 6 × 4 with the warm-started head is the first thing
-worth doing once the seed spread is known.
+Nothing this session changed that number. It is now known to be a fair comparison —
+both arms got the same optimiser at the same learning rate — which was worth checking
+and was not guaranteed.
