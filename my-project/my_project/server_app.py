@@ -551,11 +551,24 @@ def server_fn(context: Context):
     # "mosaic off" rather than "not specified" -- a default silently changed to its
     # opposite is exactly the failure this project keeps shipping.
     mosaic = float(run_config.get("mosaic", -1.0))
+    # FedBN is a client-side filter -- the server still receives and averages every
+    # tensor, clients simply decline the BatchNorm ones. Recorded here so the run log
+    # says which federation this was, and so the caveat below is on the record.
+    local_bn = bool(run_config.get("local_bn", False))
     logger.info(
         f"[Server] run_config -> num_rounds={num_rounds}, fraction_fit={fraction_fit}, "
-        f"local_epochs={local_epochs}, min_clients={min_clients}, "
-        f"strategy={strategy_name}, proximal_mu={proximal_mu}"
+        f"fraction_evaluate={fraction_evaluate}, local_epochs={local_epochs}, "
+        f"min_clients={min_clients}, strategy={strategy_name}, "
+        f"proximal_mu={proximal_mu}, local_bn={local_bn}"
     )
+    if local_bn:
+        logger.warning(
+            "[Server] FedBN is ON. Each vehicle keeps its own BatchNorm, so there is "
+            "no single global model: the checkpoint saved each round carries the "
+            "AVERAGED BatchNorm, which is no vehicle's. A holdout score on it measures "
+            "a model that never existed. Compare per-vehicle numbers, or re-estimate "
+            "BatchNorm on the holdout, and say which."
+        )
 
     # Check if model exists, otherwise download
     if not os.path.exists(MODEL_PATH):

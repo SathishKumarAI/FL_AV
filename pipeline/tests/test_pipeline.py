@@ -345,6 +345,36 @@ def test_the_cache_setting_reaches_the_client_and_is_declared_in_pyproject(_flwr
     assert re.search(r"^cache = ", declared, re.M), "flwr rejects a run-config key it has never heard of"
 
 
+def test_every_run_config_key_the_pipeline_sends_is_declared_in_pyproject(_flwr_launcher):
+    """flwr validates --run-config against [tool.flwr.app.config] and rejects the WHOLE
+    run for a key it has never heard of. So adding a key to the command without adding
+    it to pyproject does not fall back to a default -- it kills every run, before the
+    first round, for a reason that reads as a TOML error.
+
+    Generic rather than one assertion per key, so the next lever added to the federate
+    command is covered by this test on the day it is written.
+    """
+    cmd = stages._cmd_federate(Config())
+    run_config = cmd[cmd.index("--run-config") + 1]
+    sent = set(re.findall(r"(\w+)=", run_config))
+
+    declared = (paths.PROJECT / "pyproject.toml").read_text(encoding="utf-8")
+    body = declared.split("[tool.flwr.app.config]", 1)[1].split("[tool.flwr", 1)[0]
+    known = set(re.findall(r"^(\w+) *=", body, re.M))
+
+    assert sent <= known, (
+        f"the federate command sends run-config keys pyproject does not declare: "
+        f"{sorted(sent - known)}. flwr will refuse the run.")
+
+
+def test_fedbn_reaches_the_client_as_a_toml_boolean(_flwr_launcher):
+    """Python's `True` is a bare word to a TOML parser, not a boolean, and flwr parses
+    run-config values as TOML. `local_bn=True` would kill the run at parse."""
+    on = " ".join(stages._cmd_federate(Config(local_bn=True)))
+    assert "local_bn=true" in on and "local_bn=True" not in on
+    assert "local_bn=false" in " ".join(stages._cmd_federate(Config()))
+
+
 def test_a_gpu_fraction_ray_cannot_schedule_is_refused_rather_than_hung(capsys):
     """Ray accepts num_gpus > 1 per client and then places no client at all: the
     federation waits for workers that can never be scheduled, with nothing in any log

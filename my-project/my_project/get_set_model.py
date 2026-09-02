@@ -153,6 +153,35 @@ def warm_start_head(model13, coco_model, names13=None, coco_names=None) -> List[
         return []
 
 
+def batchnorm_keys(model) -> set:
+    """The ``state_dict`` keys that belong to BatchNorm layers.
+
+    Found by module **type**, never by name. Ultralytics names its modules
+    positionally (``model.0.bn.weight``), and a substring match on "bn" would both
+    miss a renamed layer and catch anything that happens to contain those letters --
+    the failure would be a silently partial FedBN, which looks exactly like a working
+    one.
+
+    Both parameters (``weight``, ``bias``) and buffers (``running_mean``,
+    ``running_var``, ``num_batches_tracked``) are included: FedBN keeps the whole
+    normalisation layer local, not only its statistics.
+    """
+    keys = set()
+    try:
+        for mod_name, module in model.named_modules():
+            if not isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+                continue
+            prefix = f"{mod_name}." if mod_name else ""
+            for name, _ in module.named_parameters(recurse=False):
+                keys.add(prefix + name)
+            for name, _ in module.named_buffers(recurse=False):
+                keys.add(prefix + name)
+    except Exception as e:
+        logger.error(f"[GetSet] batchnorm_keys failed: {e}", exc_info=True)
+        return set()
+    return keys
+
+
 def get_weights(model):
     """
     Extract the FULL model state as a list of NumPy arrays, in ``state_dict`` order.
@@ -193,9 +222,18 @@ def get_weights(model):
         return []
 
 
-def set_weights(model, parameters: List[np.ndarray]) -> bool:
+def set_weights(model, parameters: List[np.ndarray], keep_local: set | None = None) -> bool:
     """
     Apply a full ``state_dict`` (params + buffers) received as ordered NumPy arrays.
+
+    ``keep_local`` -- a set of state_dict keys to leave at the model's CURRENT value
+    instead of overwriting from ``parameters``. This is how FedBN is implemented:
+    pass ``batchnorm_keys(model)`` and every normalisation layer stays this vehicle's
+    own while the rest of the network is the aggregate.
+
+    The arrays for skipped keys still arrive and are still counted -- the positional
+    zip against ``state_dict().keys()`` is what makes this whole transfer work, so
+    the wire format must not change. They are discarded on receipt, not on send.
 
     The incoming list is zipped, in order, against ``model.state_dict().keys()``
     recomputed locally, rebuilt into an ``OrderedDict``, and loaded with
@@ -235,9 +273,18 @@ def set_weights(model, parameters: List[np.ndarray]) -> bool:
             )
             return False
 
+        keep_local = keep_local or set()
         new_state = OrderedDict()
+        kept = 0
         for key, arr in zip(keys, parameters):
             ref = ref_state[key]
+            if key in keep_local:
+                # FedBN: this layer stays this vehicle's own. Clone, because
+                # load_state_dict copies into the live tensors and aliasing the
+                # source would make the assignment a no-op that reads as a success.
+                new_state[key] = ref.detach().clone()
+                kept += 1
+                continue
             tensor = torch.as_tensor(arr).to(dtype=ref.dtype, device=ref.device)
             if tensor.shape != ref.shape:
                 logger.error(
@@ -248,6 +295,9 @@ def set_weights(model, parameters: List[np.ndarray]) -> bool:
             new_state[key] = tensor
 
         model.load_state_dict(new_state, strict=True)
+        if kept:
+            logger.info(f"[GetSet] FedBN: kept {kept} local tensors, "
+                        f"applied {len(keys) - kept} from the aggregate.")
         logger.debug("[GetSet] Model state_dict updated successfully.")
         return True
     except Exception as e:

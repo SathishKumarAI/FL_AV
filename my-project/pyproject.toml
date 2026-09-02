@@ -56,7 +56,29 @@ save_every = 1                  # save a global checkpoint every N rounds (alway
 # images x imgsz^2 x 3 bytes per *concurrent* client. The pipeline sets it per run.
 cache = ""
 
+# FedBN: every vehicle keeps its own BatchNorm layers and takes the rest of the
+# network from the aggregate. Aimed at CONDITION partitioning, where the non-IID axis
+# is feature shift and BN buffers are exactly what encodes it. On a random (IID) fleet
+# expect little -- every client sees the same distribution, so there is no shift to
+# keep local. In YOLOv8s-13 this is 285 of 355 state tensors (80.3 %) but only 0.36 %
+# of the values.
+#
+# It leaves NO single global model: the checkpoint still carries the averaged
+# BatchNorm, which is no vehicle's, so a holdout score on it measures a model that
+# never existed. Compare per-vehicle, or re-estimate BN on the holdout, and say which.
+local_bn = false
 
+# Every key below is read by server_app but never sent by the pipeline. They are
+# declared because flwr validates --run-config against this section and rejects the
+# whole run for a key it has never heard of -- so an undeclared key is not a default,
+# it is a crash at parse time for anyone who passes it by hand.
+fraction_evaluate = 1.0   # <1.0 skips clients' self-evaluation: phase 0 measured 13.8 % of wall clock
+plots_every_round = false # true restores drawing ultralytics' pictures every round (~1.19x slower)
+# optimizer="auto" DISCARDS lr0 and substitutes 0.002*5/(4+nc). Set this to a real
+# name ("AdamW", "SGD") or lr0 below is inert and the client will say so.
+optimizer = "auto"
+lr0 = 0.0                 # 0.0 = leave ultralytics alone
+mosaic = -1.0             # negative = leave the default; 0.0 legitimately means "mosaic off"
 
 # NOTE: `flwr run` rewrites this section in place on first use — it migrates the
 # federations to ~/.flwr/config.toml and comments out everything below, leaving a
