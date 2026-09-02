@@ -1721,6 +1721,40 @@ def test_every_element_the_run_form_reaches_for_exists():
     assert {"sizeSkew", "sizeSkewNote", "alpha", "partition"} <= wanted, "the form lost a control"
 
 
+def test_no_view_module_reaches_for_an_element_the_markup_lacks():
+    """The same failure as the test above, for every other view.
+
+    `$("x")` on a missing id returns null and the next property access throws, which
+    kills the whole render pass -- so one typo in a panel added to live.js takes the
+    heartbeat, the GPU readouts and the criteria down with it, and the page just stops
+    updating. Widened from control.js only, after a per-class panel added ids read by
+    live.js that nothing was checking.
+    """
+    static = REPO / "pipeline" / "static"
+    sources = {p.name: p.read_text(encoding="utf-8") for p in sorted((static / "js").glob("*.js"))}
+    declared = set(re.findall(r'id="([\w-]+)"', (static / "index.html").read_text(encoding="utf-8")))
+    # Panels are rendered into the page by other modules, so an id can be perfectly
+    # valid without appearing in index.html -- `consumedBody` is written by consumed.js
+    # itself. Anything a module emits counts as declared; what this catches is an id
+    # that NOTHING anywhere produces, which is always a typo or a deleted element.
+    for src in sources.values():
+        declared |= set(re.findall(r'id="([\w-]+)"', src))
+
+    problems = {}
+    for name, src in sources.items():
+        # Only the literal `$("id")` form. Ids built at runtime (`$("v" + vid)`) are
+        # the drawer's business and cannot be checked from here.
+        wanted = set(re.findall(r'\$\("([\w-]+)"\)', src))
+        missing = sorted(wanted - declared)
+        if missing:
+            problems[name] = missing
+    assert not problems, f"view modules read ids nothing produces: {problems}"
+
+    # Guard the guard: if the regex above ever stops matching, the test passes
+    # vacuously and protects nothing.
+    assert "perClass" in declared and "holdoutNote" in declared
+
+
 def test_client_logs_are_scoped_to_the_run_that_is_being_measured(tmp_path):
     """`client.<pid>.log` accumulates across runs. Reading all of them made a
     six-vehicle run look like a nine-vehicle one, and the centralised ceiling was
