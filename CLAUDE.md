@@ -219,7 +219,7 @@ a host. This is the path off the simulation engine and onto real machines.
 | version | change | why it matters here |
 |---|---|---|
 | **8.4.130** | tuning's default optimizer changed to **AdamW**, explicitly *"to ensure tuning parameters such as learning rate and momentum actually affect training"* | **upstream hit fact 1 and fixed it in their tuner.** Independent confirmation that `optimizer="auto"` silently discarding `lr0` is a real trap and not a misreading. The trainer default is unchanged, so this repo still must pass `optimizer` explicitly |
-| **8.4.137** | channels-last CUDA training auto-enabled on torch ≥1.11 | a free speed lever. 8.4.115's argument dump shows `channels_last=False`, so this repo is not getting it |
+| **8.4.137** | channels-last CUDA training auto-enabled on torch ≥1.11 | **no upgrade needed to try it.** 8.4.115 already has the `channels_last` argument, defaulting to `False`; 8.4.137 only flips the default. So it is reachable today as `channels_last=True`. Untested here, and it is not free of risk: it changes tensor memory format, and `get_weights` serialises the whole `state_dict` — the transport that produced the B4 bug. Measure the aggregate checksum, not just the wall clock. Ultralytics does serialise checkpoints as NCHW regardless, so saved weights are unaffected |
 | **8.4.129** | BF16 mixed precision (`amp="bf16"`) | Blackwell has the hardware; untested here |
 | **8.4.131** | validation forced onto the **unaugmented** pipeline when `split=train` | a correctness fix in the evaluation path this project reports from |
 | **8.4.135** | `max_det` auto-matched to dataset object counts | BDD frames are crowded — `max_det=300` is a live ceiling at this scale, worth checking before it silently truncates |
