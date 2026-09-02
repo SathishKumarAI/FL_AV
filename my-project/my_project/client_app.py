@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import warnings
 import torch
@@ -13,11 +14,12 @@ from my_project.task import (
     get_data_yaml_path,
     materialize_data_yaml,
     count_shard_examples,
+    get_optimal_batch_size,
     IS_WINDOWS,
     OS_NAME
 )  # Import OS detection
 import urllib
-from my_project.get_set_model import get_weights, load_yolo_model, set_weights
+from my_project.get_set_model import NUM_CLASSES_MODEL_YAML, get_weights, set_weights
 from utils.logging_setup import configure_logging
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -28,6 +30,9 @@ logger.info(f"[Client] Detected operating system: {OS_NAME}, IS_WINDOWS={IS_WIND
 
 # Constants
 DEFAULT_BATCH_ID_RANGE = (1, 10)
+# Ultralytics' nominal batch size: it accumulates gradients up to this many
+# images before stepping the optimizer (ultralytics default `nbs`).
+NOMINAL_BATCH_SIZE = 64
 DEFAULT_IMAGE_SIZE = 640
 
 class FlowerClient(Client):
@@ -56,20 +61,33 @@ class FlowerClient(Client):
                 logger.warning("[Client] Model weights not found. Downloading default YOLOv8 weights.")
                 download_model()  # Ensure we have some valid weights to avoid shape mismatch
             
-            self.yolo = YOLO(self.model_path)
-            self.model = self.yolo.model
-            
-            # Set number of classes if needed
-            self.model.nc = 13
-            if hasattr(self.model, 'head'):
-                self.model.head.nc = 13
-                
+            # Build the 13-class architecture from the yaml, then load the COCO
+            # weights into it. Constructing from the .pt alone gives an 80-class
+            # head; `model.nc = 13` only renames an attribute, it does not rebuild
+            # the head, so the server and client end up with different archs the
+            # moment Ultralytics rebuilds the head from data.yaml during train().
+            # The server builds the same arch (server_app.py) — set_weights'
+            # strict=True is what enforces that they agree.
+            self.yolo = YOLO(NUM_CLASSES_MODEL_YAML).load(self.model_path)
+
             logger.info("[Client] YOLO model loaded successfully.")
         except Exception as e:
             logger.error("[Client] Failed to load YOLO model!", exc_info=True)
-            self.model = None
             self.yolo = None
-        
+
+    @property
+    def model(self):
+        """The live DetectionModel.
+
+        Ultralytics rebinds ``yolo.model`` to the trained checkpoint at the end of
+        ``train()``. Caching it in ``__init__`` left an orphan: the client returned
+        the weights it was *sent*, never the ones it *trained*, so FedAvg averaged
+        identical inputs and the federation learned nothing. Reading through means
+        every call site sees the current module, including ones added later.
+        """
+        return self.yolo.model if self.yolo is not None else None
+
+
     def _validate_batch_id(self, batch_id: int) -> bool:
         """Validate that batch_id is within the acceptable range."""
         if not isinstance(batch_id, int):
@@ -119,7 +137,11 @@ class FlowerClient(Client):
         logger.info(f"[Client] Received weights with checksum: {weights_checksum}")
         
         try:
-            set_weights(self.model, weights_list)
+            # set_weights returns False on a count/shape mismatch instead of raising.
+            # Ignoring it made a failed load look like a successful round: the client
+            # trained from its own stale weights and the server averaged them in.
+            if not set_weights(self.model, weights_list):
+                raise ValueError("set_weights returned False - mismatch or error.")
             logger.info("[Client] Successfully applied received weights to model")
         except Exception as e:
             logger.error(f"[Client] set_weights failed: {e}", exc_info=True)
@@ -172,12 +194,38 @@ class FlowerClient(Client):
         # 4) Train the model
         try:
             logger.info(f"[Client] Training with data config: {data_yaml_path}")
+
+            # Ultralytics accumulates gradients up to a nominal batch of 64, so it
+            # only calls optimizer.step() every round(64/batch) batches. On a small
+            # shard an entire round can finish without a single step: training
+            # "succeeds", metrics are logged, and the returned weights are bit-for-bit
+            # what the server sent. Warn rather than fail — a caller may want this.
+            batch = get_optimal_batch_size()
+            n_train = count_shard_examples(self.batch_id, "train")
+            steps = math.ceil(n_train / batch) * int(local_epochs)
+            accumulate = max(round(NOMINAL_BATCH_SIZE / batch), 1)
+            if steps < accumulate:
+                logger.warning(
+                    f"[Client] batch={batch} over {n_train} images x {local_epochs} epoch(s) "
+                    f"gives {steps} batch(es), fewer than the {accumulate} needed for one "
+                    f"optimizer step. This round will not change the weights. Raise "
+                    f"local_epochs or lower the batch size."
+                )
             results = self.yolo.train(
                 data=data_yaml_path,
                 epochs=local_epochs,
                 imgsz=DEFAULT_IMAGE_SIZE,
                 device=self.device,
-                verbose=False
+                batch=batch,
+                verbose=False,
+                # Ultralytics defaults to 8. Inside a Ray actor on Windows that is a
+                # deadlock, not a slowdown — spawned dataloader children never join.
+                workers=0 if IS_WINDOWS else 8,
+                # Without an explicit name every round writes runs/detect/train, train2,
+                # ... at ~22 MB each, per client, forever.
+                project="runs/fl",
+                name=f"batch{self.batch_id}",
+                exist_ok=True,
             )
             
             # 5) Process results

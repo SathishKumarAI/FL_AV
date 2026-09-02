@@ -24,10 +24,16 @@ def _fresh_task(monkeypatch, data_root=None):
     return importlib.import_module("my_project.task")
 
 
+FOREIGN_ROOTS = ("Users\\sathish", "Users/sathish", "Users\\devil", "Users/devil")
+
+
 def test_base_data_path_defaults_to_package_parent(monkeypatch):
     task = _fresh_task(monkeypatch)
-    # Default base path must contain the batch dirs and never be a Windows path.
-    assert "C:\\" not in task.BASE_DATA_PATH and "C:/" not in task.BASE_DATA_PATH
+    # Default base path must contain the batch dirs and be derived from this
+    # checkout. The old assertion was `"C:\\" not in ...`, which fails on Windows
+    # for a perfectly correct path — the invariant is "not the previous machine's
+    # hardcoded root", not "not Windows".
+    assert not any(r in task.BASE_DATA_PATH for r in FOREIGN_ROOTS)
     assert os.path.isdir(os.path.join(task.BASE_DATA_PATH, "batch"))
 
 
@@ -55,7 +61,7 @@ def test_materialize_writes_runtime_not_source(monkeypatch):
     # path is now an absolute, machine-correct directory for batch_1.
     assert os.path.isabs(data["path"])
     assert data["path"].endswith(os.path.join("batch", "batch_1"))
-    assert "C:\\" not in data["path"]
+    assert not any(r in data["path"] for r in FOREIGN_ROOTS)
 
     runtime.unlink()  # cleanup gitignored artifact
 

@@ -89,8 +89,11 @@ traffic sign, trailer, other person, other vehicle` — the BDD100K detection se
 
 ## Known constraints
 
-- Client `num_examples` is a placeholder (`10`); FedAvg weighting is therefore
-  uniform across clients regardless of true shard size.
-- `num-gpus` defaults to `0` (CPU-safe). Set to `1` per client only on a CUDA host.
-- `data.yaml` `path:` is rewritten to the local absolute path at runtime by
-  `task.update_data_yaml_paths` (handles the committed Windows path).
+- Client `num_examples` comes from `task.count_shard_examples` (the split list), so
+  FedAvg weighting is proportional to real shard size.
+- `num-gpus` is `1.0` per client, which serialises clients on a single card. Drop it
+  to `0.5`/`0.33` only once you know one client's real VRAM footprint, or to `0` for
+  a CPU-only host.
+- `data.yaml` `path:` is not mutated. `task.materialize_data_yaml` writes a
+  gitignored `data.runtime.yaml` sibling with the local absolute path, and training
+  and validation point at that.

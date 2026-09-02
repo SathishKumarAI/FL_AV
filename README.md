@@ -11,14 +11,12 @@
 - [⚙️ Tech Stack](#️-tech-stack)  
 - [📥 Installation](#-installation)  
   - [1. Prerequisites](#1-prerequisites)  
-  - [2. Set Up Conda Environment](#2-set-up-conda-environment)  
-  - [3. Install Dependencies](#3-install-dependencies)  
+  - [2. Create the environment](#2-create-the-environment)  
+  - [3. Install dependencies](#3-install-dependencies)  
 - [📂 Dataset Preparation](#-dataset-preparation)  
-  - [1. Download Preprocessed Data](#1-download-preprocessed-data)  
-  - [2. Partition Data for Federated Clients](#2-partition-data-for-federated-clients)  
 - [🚀 Quick Start](#-quick-start)  
-  - [1. Launch the Flower Server](#1-launch-the-flower-server)  
-  - [2. Start Federated Clients](#2-start-federated-clients)  
+  - [1. Install](#1-install)  
+  - [2. Run the federation](#2-run-the-federation)  
   - [3. Monitor Training](#3-monitor-training)  
 - [🎛️ Simulation Setup](#️-simulation-setup)  
   - [1. Set Up a Flower Simulation Project](#1-set-up-a-flower-simulation-project)  
@@ -27,6 +25,46 @@
 - [🛠️ Troubleshooting](#️-troubleshooting)  
 - [📚 References](#-references)  
 - [🗺️ Future Roadmap](#️-future-roadmap)  
+
+---
+
+## ▶️ Run it — one command
+
+```powershell
+.\scripts\run_pipeline.ps1                 # Windows, demo profile, ~10 min on a 5070 Ti
+```
+```bash
+./scripts/run_pipeline.sh                   # Linux/macOS
+```
+
+Tests → shared holdout → dataset → shards → fleet → validation → federated run →
+holdout evaluation → pass criteria → comparison. It stops at the first failure
+instead of continuing, and prints where the report is.
+
+Compare runs, one command per question:
+
+```bash
+python -m pipeline.experiment --preset seeds      --seeds 0,1,2 --yes
+python -m pipeline.experiment --preset strategies --strategies fedavg,fedadam --yes
+python -m pipeline.experiment --preset partitions --partitions condition,random,dirichlet --yes
+python -m pipeline.experiment --preset alpha      --alphas 0.05,0.5,100 --yes
+python -m pipeline.compare --last 10              # runs you already have
+```
+
+**Full instructions, costs, troubleshooting and how to read the numbers:
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md).**
+
+**Latest measured result.** 6 vehicles × 1 400 images, condition-partitioned, 6 rounds
+× 4 local epochs on an RTX 5070 Ti, scored on 1 000 images no vehicle trained on:
+
+| | federated | centralised, same budget | retained |
+|---|---|---|---|
+| mAP50 | 0.4173 | 0.4936 | **84.5 %** |
+| mAP50-95 | 0.2313 | 0.2770 | 83.5 % |
+
+Both sides made exactly 201 600 image-visits, so the gap measures the method rather
+than the budget. Federation costs about 15 % of the achievable accuracy here, in
+exchange for never pooling the data. 3 296 s, 82.2 Wh.
 
 ---
 
@@ -48,68 +86,73 @@
 
 ## ⚙️ Tech Stack  
 - **Frameworks**: [Flower](https://flower.dev) (FL), [Ultralytics YOLOv8](https://ultralytics.com)  
-- **Dataset**: [BDD100K](https://bdd-data.berkeley.edu/) (preprocessed and hosted on Google Drive)  
-- **GPU Support**: CUDA 11.x, NVIDIA Drivers  
-- **Tools**: Conda, Git, WSL2 (optional)  
+- **Dataset**: [BDD100K](https://bdd-data.berkeley.edu/) (labels committed, images downloaded separately)  
+- **GPU Support**: CUDA matched to the card — cu128 for Blackwell (`sm_120`)  
+- **Tools**: venv, Git  
 
 ---
 
 ## 📥 Installation  
 
 ### 1. Prerequisites  
-- **Python 3.10+**  
-- **NVIDIA GPU** with CUDA 11.8+  
-- **Git** and **Conda**  
+- **Python 3.12** — not 3.13: `flwr[simulation]` pulls `ray`, whose Windows
+  dependency marker is `python>=3.11,<3.13`.
+- **NVIDIA GPU.** Match the CUDA build to the card. Blackwell (RTX 50-series,
+  `sm_120`) needs **cu128**; a cu118 wheel has no kernel for it and you get either a
+  CUDA error or a silent fall back to CPU.
+- **Git**
 
-### 2. Set Up Conda Environment  
+### 2. Create the environment  
 ```bash  
-conda create -n fl_yolov8 python=3.10 -y  
-conda activate fl_yolov8  
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate  
 ```  
 
-### 3. Install Dependencies  
+On Windows, build the venv from a **python.org** interpreter — Smart App Control
+blocks conda-forge's unsigned stdlib DLLs. See [`docs/ENV_WINDOWS.md`](docs/ENV_WINDOWS.md).
+
+### 3. Install dependencies  
 ```bash  
-# PyTorch with CUDA  
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118  
+# PyTorch FIRST, or ultralytics pulls a default-CUDA (CPU-only on Windows) build.  
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128  
 
-# YOLOv8 and Flower  
-pip install ultralytics flwr[simulation]  
+# Confirm the card is actually usable before going further.  
+python -c "import torch; print(torch.__version__, torch.cuda.get_device_capability())"  
 
-# Additional utilities  
-pip install opencv-python numpy tqdm pyyaml  
+# Everything else comes from pyproject.toml.  
+cd my-project && pip install -e ".[dev]"  
 ```  
 
 ---
 
-## 📂 Dataset Preparation  
+## 📂 Dataset Preparation
 
-### 1. Download Preprocessed Data  
-The BDD100K dataset (already in YOLOv8 format) is hosted on Google Drive:  
-🔗 [Download Dataset](https://drive.google.com/drive/folders/1R-lelZR3LBgeHfMlRR_OhOIzfUuxPBcZ?usp=sharing)  
+Full detail — including the download links that are **dead**, so you do not go
+looking — is in [`docs/DATASET.md`](docs/DATASET.md).
 
-```bash  
-mkdir -p federated_yolov8/data  
-mv ~/Downloads/bdd100k_yolov8.zip federated_yolov8/data/  
-cd federated_yolov8/data  
-unzip bdd100k_yolov8.zip  
-```  
+The repo already ships every shard's labels and split lists
+(`my-project/batch/batch_1..10/`, 6 308 train + 1 010 val each). Only the BDD100K
+JPEGs are missing. No Kaggle account or token is required:
 
-### 2. Partition Data for Federated Clients  
-Split the dataset into client-specific subsets using `split_clients.py`:  
-```bash  
-python split_clients.py \  
-    --source="data" \  
-    --output="data_clients" \  
-    --num_clients=10  
-```  
+```bash
+pip install kagglehub
+python -c "import kagglehub; print(kagglehub.dataset_download('solesensei/solesensei_bdd100k'))"
 
-Each client directory requires a `data.yaml` file. Example for `client_0`:  
-```yaml  
-train: ../client_0/train/images  
-val: ../client_0/val/images  
-nc: 13  # Number of classes  
-names: ["car", "person", "bus", "traffic light", ...]  
-```  
+cd my-project
+python scripts/populate_images.py --pool <printed-path>/bdd100k/bdd100k/images/100k
+```
+
+`populate_images.py` hardlinks (no extra disk; pool and repo must share a volume, else
+`--copy`), is idempotent, and clears the stale Ultralytics `labels/*.cache` files.
+Testing? `--batches 1,2 --limit 200` is plenty.
+
+> The Google Drive link this README used to advertise is **gone** — the folder no
+> longer resolves. Don't restore it. See the dead-ends table in
+> [`docs/DATASET.md`](docs/DATASET.md).
+
+Partitioning is already done: the ten `batch_N/` directories **are** the client
+shards, and the server hands each client its own via `CustomBatchStrategy`. Each
+shard carries its own `data.yaml` (`nc: 13`); its `path:` is never edited in place —
+`task.materialize_data_yaml` writes a gitignored `data.runtime.yaml` beside it.
 
 ---
 
@@ -132,9 +175,11 @@ flwr run . --run-config "num_server_rounds=5 local_epochs=2"
 ```  
 
 ### 3. Monitor Training  
-Per-module logs land in `my-project/logs/` (`server.log`, `client.log`, `task.log`,
-`get_set.log`): round setup, batch-id assignment, weight checksums, and aggregated
-metrics (precision, recall, mAP).  
+Per-module logs land in `my-project/logs/`, one file per process
+(`server.<pid>.log`, `client.<pid>.log`, ...) — every simulated client runs in its
+own Ray actor and `RotatingFileHandler` is not multi-process safe. They record round
+setup, batch-id assignment, weight checksums, and aggregated metrics. Aggregated
+per-round metrics also go to `logs/metrics.csv`.  
 
 ---
 
@@ -166,7 +211,7 @@ Use **Ctrl+C** in each terminal to stop the processes.
 | `my-project/pyproject.toml` | Flower app + federation config and hyperparameters (`[tool.flwr.app.config]`). |  
 | `my-project/my_project/server_app.py` | `ServerApp` + `CustomBatchStrategy` (FedAvg, batch-id assignment, aggregation). |  
 | `my-project/my_project/client_app.py` | `ClientApp` + `FlowerClient` that trains/evaluates YOLOv8 locally. |  
-| `my-project/my_project/task.py` | OS detection, model download, data.yaml path handling, dataset validation. |  
+| `my-project/my_project/task.py` | OS detection, model download, runtime `data.yaml` materialization, shard sizing. |  
 | `my-project/my_project/get_set_model.py` | Converts weights between the YOLO model and NumPy arrays. |  
 | `my-project/utils/logging_setup.py` | Per-module file loggers under `logs/`. |  
 | `json_to_yolo/` | BDD100K JSON → YOLO label conversion. |  
@@ -180,7 +225,8 @@ Use **Ctrl+C** in each terminal to stop the processes.
 | **CUDA Out of Memory** | Reduce `BATCH_SIZE` or use `yolov8n`. |  
 | **No GPU Detected** | Verify `torch.cuda.is_available()` and reinstall PyTorch with CUDA. |  
 | **Dataset Path Errors** | Ensure `data.yaml` paths match the client directory structure. |  
-| **Dependency Conflicts** | Use a fresh Conda environment. |  
+| **Dependency Conflicts** | Use a fresh venv. |  
+| **Clients silently train on CPU** | flwr ≥ 1.31 builds its own runtime env and installs the CPU-only torch wheel. Set `FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION=1`. |  
 
 ---
 

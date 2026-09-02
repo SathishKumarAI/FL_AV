@@ -11,10 +11,16 @@ dependencies = [
     # Flower upgraded 1.13.1 -> 1.31.0 (latest). The legacy ServerApp(server_fn=...)
     # + Strategy(configure_fit/aggregate_fit) API the project uses still imports and
     # constructs under 1.31 (verified). See docs/ENGINEERING_NOTES.md.
-    "flwr[simulation]>=1.31.0,<2.0.0",
+    # Floor raised 1.31.0 -> 1.33.0 (latest on PyPI, 2026-08-05). 1.33 is what the
+    # GPU bring-up and the CI simulation-smoke job were verified against; it is also
+    # the version whose runtime-env behaviour docs/GPU_TESTPLAN.md §6 documents.
+    "flwr[simulation]>=1.33.0,<2.0.0",
     # flwr-datasets dropped: it was unused in source and pinned an old version that
     # blocked the flwr upgrade. The project partitions its own BDD100K batch shards.
-    "ultralytics>=8.0.0",
+    # Floor raised 8.0.0 -> 8.4.115 (latest on PyPI, 2026-08-05): 8.4 is where the
+    # AMP check fetches yolo26n.pt and where the MLflow callback used by the
+    # pipeline component lives.
+    "ultralytics>=8.4.115",
     "numpy>=1.26.0",
     "scipy>=1.7.0",
     "pandas>=1.3.0",
@@ -37,26 +43,38 @@ clientapp = "my_project.client_app:app"
 
 [tool.flwr.app.config]
 num_server_rounds = 2
-fraction_fit = 0.75
-local_epochs = 4
+fraction_fit = 1.0
+local_epochs = 1
 # Must be <= num-supernodes below, otherwise FL never starts (waits forever for clients).
-min_clients = 3
+min_clients = 2
 strategy = "fedavg"   # "fedavg" or "fedprox"
 proximal_mu = 0.0     # FedProx proximal strength; >0 enables FedProx (default 0.1 if strategy=fedprox)
 checkpoint_dir = "checkpoints"  # where the aggregated global model is saved
 save_every = 1                  # save a global checkpoint every N rounds (always on final round)
 
 
+
+# NOTE: `flwr run` rewrites this section in place on first use — it migrates the
+# federations to ~/.flwr/config.toml and comments out everything below, leaving a
+# "CONFIGURATION MIGRATION NOTICE" banner. That is a local artifact: do NOT commit
+# the commented-out version, or a fresh clone has no federation to run at all.
+# `git checkout -- pyproject.toml` after a run, and change live settings with
+# `flwr run . --federation-config "..."` or in ~/.flwr/config.toml.
+
 [tool.flwr.federations]
 default = "local-simulation"
 
 [tool.flwr.federations.local-simulation]
-options.num-supernodes = 3
-options.backend.client-resources.num-cpus = 2
-# Set num-gpus = 1 only on a CUDA machine; 0 lets the simulation run on CPU-only hosts.
-options.backend.client-resources.num-gpus = 0
-options.backend.init_args.num_cpus = 2
-options.backend.init_args.num_gpus = 0
+options.num-supernodes = 2
+options.backend.client-resources.num-cpus = 4
+# num-gpus = 1.0 on a single-card host makes Ray schedule clients ONE AT A TIME on
+# the GPU: slower, but no OOM. Drop to 0.5/0.33 only once you know one client's real
+# footprint. Set to 0 to fall back to CPU-only hosts.
+options.backend.client-resources.num-gpus = 1.0
+# flwr >= 1.31 reads `init-args` with dashes; the old `init_args.num_cpus` spelling
+# is parsed as an unknown key and silently ignored.
+options.backend.init-args.num-cpus = 8
+options.backend.init-args.num-gpus = 1
 
 # Real distributed deployment (Flower Deployment Engine): one SuperLink + N
 # SuperNodes over gRPC+TLS. Point `address` at the SuperLink Exec API (9093) and

@@ -28,9 +28,10 @@ batch/batch_1/
 ├── train.txt val.txt test.txt
 ```
 
-`data.yaml` ships with a placeholder `path:`; `task.update_data_yaml_paths()`
-rewrites it to the correct local absolute path at runtime, so no manual edit is
-needed when moving machines.
+`data.yaml` ships with a placeholder `path:`; `task.materialize_data_yaml()` writes
+a sibling `data.runtime.yaml` (gitignored) carrying the correct local absolute
+path, so no manual edit is needed when moving machines and the tracked file is
+never mutated.
 
 > Default `batch_id_range` is `(1, 10)` → expects `batch_1` … `batch_10`.
 

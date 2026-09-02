@@ -1,0 +1,273 @@
+<!doctype html>
+<!--
+  Markup only. Styling lives in app.css, behaviour in js/ — see static/README.md
+  for which file owns what, so a change means opening one file, not this one.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Federated YOLOv8 — fleet control</title>
+<link rel="stylesheet" href="/static/app.css">
+<!-- Inline so the tab icon costs no request and the console stays free of a 404. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%235ad1e6' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%235ad1e6'/%3E%3C/svg%3E">
+</head>
+<body data-loaded="0">
+<header>
+  <h1 class="brand">Federated&nbsp;YOLOv8 <em>fleet control</em></h1>
+  <div class="tabs" role="tablist" aria-label="Views">
+    <button class="tab" role="tab" aria-selected="true"  aria-controls="view-control" data-view="control">Control</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-live" data-view="live">Live</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-data" data-view="data">Data</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-metrics" data-view="metrics">Metrics</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-plan" data-view="plan">Plan</button>
+    <button class="tab" role="tab" aria-selected="false" aria-controls="view-docs" data-view="docs">Docs</button>
+  </div>
+  <div class="spacer"></div>
+  <span class="lamp l-idle" id="runState">idle</span>
+  <a class="ext" id="mlflowLink" href="http://127.0.0.1:5000" target="_blank" rel="noopener">MLflow ↗</a>
+  <a class="ext" id="rayLink" href="http://127.0.0.1:8265" target="_blank" rel="noopener">Ray ↗</a>
+</header>
+
+<div id="skew" hidden role="alert" style="margin:var(--s3) var(--s5);padding:10px 14px;
+     border-radius:var(--r2);border:1px solid var(--bad);color:var(--bad);font-size:var(--t-md)">
+  <b>This page is newer than the server it is talking to.</b>
+  The HTML is read from disk on every request, but the running process still has the old
+  Python loaded, so the live panels have no data to show. Restart it:
+  <code>python -m pipeline.server</code>
+</div>
+
+<main>
+<!-- ===================================================================== CONTROL -->
+<section id="view-control" class="grid two" role="tabpanel" aria-label="Control"
+         style="grid-template-columns:minmax(300px,400px) 1fr">
+  <div class="panel">
+    <h2>Run configuration</h2>
+    <div class="row">
+      <div><label for="profile">Profile</label>
+        <select id="profile">
+          <option value="demo">demo — 300 img, 320px</option>
+          <option value="full">full — 6308 img, 640px</option>
+        </select></div>
+      <div><label for="vehicles">Vehicles</label><input id="vehicles" type="number" min="2" max="8" value="6"></div>
+    </div>
+    <div class="row" style="margin-top:var(--s3)">
+      <div><label for="rounds">Rounds</label><input id="rounds" type="number" min="1" value="2"></div>
+      <div><label for="epochs">Local epochs</label><input id="epochs" type="number" min="1" value="1"></div>
+      <div><label for="seed">Seed</label><input id="seed" type="number" value="0"></div>
+      <div><label for="partition">Partition</label>
+        <select id="partition">
+          <option value="condition">condition — non-IID</option>
+          <option value="random">random — IID control</option>
+          <option value="mixed">mixed — both</option>
+          <option value="dirichlet">dirichlet — tunable α</option>
+        </select></div>
+      <div id="alphaWrap" hidden><label for="alpha">Dirichlet α</label>
+        <input id="alpha" type="number" min="0.01" step="0.05" value="0.5"></div>
+      <div><label for="strategy">Strategy</label>
+        <select id="strategy"><option value="fedavg">fedavg</option></select></div>
+      <div id="muWrap" hidden><label for="mu">FedProx μ</label>
+        <input id="mu" type="number" min="0" step="0.01" value="0.1"></div>
+    </div>
+    <p class="hint" id="alphaNote" hidden>α → 0 gives each vehicle a single condition;
+      α → ∞ gives them all the same mixture, which is IID.</p>
+    <div style="margin-top:var(--s4)">
+      <label class="check"><input type="checkbox" id="confirm">
+        <span>Confirm the gated stages — download, GPU sanity, federated run.</span></label>
+    </div>
+    <div style="margin-top:var(--s4);display:flex;gap:var(--s2)">
+      <button class="primary" id="launch">Launch run</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+    <p class="hint" id="estimate"></p>
+    <p class="hint warn">Vehicles train <b>serialised</b>. One client peaks at 15.9 GB of
+      16.3 GB, so running them together would run out of memory. Wall clock scales with
+      vehicle count.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Stages <span class="n" id="stageCount"></span></h2>
+    <table><thead><tr><th scope="col">Stage</th><th scope="col">State</th>
+      <th scope="col">Cost</th><th scope="col">Detail</th></tr></thead>
+      <tbody id="stageTable"></tbody></table>
+    <p class="hint"><b>skip</b> means the stage found its work already done.
+      <b>gated</b> means it needs the confirm box before it will run.</p>
+  </div>
+</section>
+
+<!-- ======================================================================== LIVE -->
+<section id="view-live" class="grid" hidden role="tabpanel" aria-label="Live">
+
+  <!-- The signature panel: the one number this project's history says is worth
+       more than all the others, given the size and position that says so. -->
+  <div class="panel">
+    <h2>Aggregate checksum — the heartbeat <span class="n">round over round</span></h2>
+    <div class="heart">
+      <div class="stat">
+        <span class="lamp l-idle" id="heartLamp">waiting</span>
+        <div class="big skel" id="heartValue">—</div>
+        <div class="sub" id="heartSub">No aggregate yet.</div>
+      </div>
+      <figure>
+        <svg class="chart" id="heartChart" viewBox="0 0 900 130" role="img" tabindex="0"
+             aria-label="Aggregate weight checksum by round"></svg>
+      </figure>
+    </div>
+    <p class="hint">Equal consecutive values mean the global model is not moving — either
+      the clients returned the weights they were sent, or no optimizer step happened.
+      Every other metric on this page can look healthy while that is true.</p>
+  </div>
+
+  <div class="grid two" style="grid-template-columns:1fr 1fr">
+    <div class="panel">
+      <h2>Round progress</h2>
+      <div class="readouts">
+        <div class="readout"><span class="v skel" id="rRound">—</span><div class="k">round</div></div>
+        <div class="readout"><span class="v skel" id="rVehicles">—</span><div class="k">vehicles seen</div></div>
+        <div class="readout"><span class="v skel" id="rMap">—</span><div class="k">latest mAP50</div></div>
+        <div class="readout"><span class="v skel" id="rLoss">—</span><div class="k">latest loss</div></div>
+        <div class="readout"><span class="v skel" id="rCkpt">—</span><div class="k">checkpoints</div></div>
+      </div>
+      <div class="bar"><i id="rBar" style="width:0"></i></div>
+    </div>
+
+    <div class="panel">
+      <h2>GPU</h2>
+      <div class="readouts">
+        <div class="readout"><span class="v skel" id="gUtil">—</span><span class="u">%</span>
+          <div class="k">utilisation</div><div class="scale"><i id="gUtilBar" style="width:0"></i></div></div>
+        <div class="readout"><span class="v skel" id="gMem">—</span><span class="u">MiB</span>
+          <div class="k">VRAM of 16303</div><div class="scale"><i id="gMemBar" style="width:0"></i></div></div>
+        <div class="readout"><span class="v skel" id="gPower">—</span><span class="u">W</span>
+          <div class="k">power</div></div>
+        <div class="readout"><span class="v skel" id="gEnergy">—</span><span class="u">Wh</span>
+          <div class="k">energy this run</div></div>
+        <div class="readout"><span class="v skel" id="gTemp">—</span><span class="u">°C</span>
+          <div class="k">temperature</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Fleet <span class="n" id="fleetCount"></span></h2>
+    <div class="fleet" id="fleet"></div>
+    <p class="hint">One card per vehicle: the mAP50 it reaches on its own slice, and how far
+      that is from where it started. Open a card for its curves, its weight movement, and
+      what its shard actually contains.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Honest global metric <span class="n">measured on data no vehicle trained on</span></h2>
+    <div class="grid two" style="grid-template-columns:minmax(220px,300px) 1fr;align-items:center">
+      <div class="readouts">
+        <div class="readout"><span class="v skel" id="hMap">—</span>
+          <div class="k">holdout mAP50</div></div>
+        <div class="readout"><span class="v skel" id="hCeiling">—</span>
+          <div class="k">of the centralised ceiling</div></div>
+      </div>
+      <figure><svg class="chart" id="holdoutChart" viewBox="0 0 900 190" role="img" tabindex="0"
+                   aria-label="Global model mAP50 on the shared holdout, by round"></svg></figure>
+    </div>
+    <p class="hint" id="holdoutNote"></p>
+  </div>
+
+  <div class="grid two" style="grid-template-columns:1fr 1fr">
+    <div class="panel">
+      <h2>Per-client self-evaluation <span class="n">each on its own split</span></h2>
+      <figure><svg class="chart" id="mapChart" viewBox="0 0 900 220" role="img" tabindex="0"
+                   aria-label="Evaluated mAP50 by round"></svg></figure>
+      <p class="hint" id="mapNote">Waiting for the first evaluation.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Pass criteria — live</h2>
+      <ul class="plain" id="criteria"></ul>
+      <p class="hint">The same four checks <code>python -m pipeline.verify</code> runs. They
+        read the logs on disk, so a run launched from the CLI lights them up too.</p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Fleet comparison <span class="n">divergence is the point</span></h2>
+    <figure><svg class="chart" id="fleetChart" viewBox="0 0 900 260" role="img" tabindex="0"
+                 aria-label="mAP50 by round for every vehicle"></svg></figure>
+    <div class="legend" id="fleetLegend"></div>
+    <p class="hint">Every vehicle trains a different slice of the world. If these curves
+      overlapped exactly, the fleet would be learning nothing that pooling the data would
+      not have taught it.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Divergence from the fleet mean</h2>
+    <figure><svg class="chart" id="divChart" viewBox="0 0 900 190" role="img"
+                 aria-label="Signed distance from the fleet mean, per vehicle"></svg></figure>
+    <p class="hint" id="divNote"></p>
+  </div>
+
+  <div class="grid two" style="grid-template-columns:1fr 1fr">
+    <div class="panel">
+      <h2>Stage timeline</h2>
+      <table><thead><tr><th scope="col">Stage</th><th scope="col">Status</th>
+        <th scope="col">Seconds</th><th scope="col">Wh</th><th scope="col">Detail</th></tr></thead>
+        <tbody id="timeline"></tbody></table>
+      <p class="hint" id="timelineEmpty">Stages appear here as they run.</p>
+    </div>
+    <div class="panel">
+      <h2>GPU history</h2>
+      <figure><svg class="chart" id="gpuChart" viewBox="0 0 900 190" role="img"
+                   aria-label="GPU utilisation and power over time"></svg></figure>
+      <div class="legend">
+        <span><i style="background:var(--accent)"></i>utilisation %</span>
+        <span><i style="background:var(--warn)"></i>power W</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid two" style="grid-template-columns:minmax(260px,340px) 1fr">
+    <div class="panel">
+      <h2>Reports</h2>
+      <ul class="plain" id="reports"></ul>
+      <p class="hint">Every run writes HTML, Markdown and JSON. Newest first.</p>
+    </div>
+    <div class="panel">
+      <h2>Log
+        <span class="n"><label class="check" style="display:inline-flex"><input type="checkbox"
+          id="onlySignals"> <span>signals only</span></label></span></h2>
+      <pre id="log" tabindex="0" aria-label="Run log"></pre>
+    </div>
+  </div>
+</section>
+<!-- ======================================================================== DATA -->
+<section id="view-data" class="grid" hidden role="tabpanel" aria-label="Data">
+  <div class="panel" style="display:flex;align-items:center;gap:var(--s3)">
+    <div>
+      <h2 style="margin:0">The dataset behind every number on this page</h2>
+      <p class="hint" style="margin-top:4px">Counted from the shards and their label
+        files, not from a table someone typed. Computed once and cached against the
+        fleet fingerprint, so a rebuilt fleet recounts itself.</p>
+    </div>
+    <button id="dataRefresh" style="margin-left:auto">Recount</button>
+  </div>
+  <div id="dataBody" class="grid"></div>
+</section>
+
+<!-- ===================================================================== METRICS -->
+<section id="view-metrics" class="grid" hidden role="tabpanel" aria-label="Metrics">
+  <div id="metricsBody" class="grid"></div>
+</section>
+
+<!-- ======================================================================== DOCS -->
+<section id="view-docs" class="grid" hidden role="tabpanel" aria-label="Docs">
+  <div id="docsBody" class="grid"></div>
+</section>
+
+<!-- ======================================================================== PLAN -->
+<section id="view-plan" class="grid" hidden role="tabpanel" aria-label="Plan">
+  <div id="planBody" class="grid"></div>
+</section>
+</main>
+
+<div id="tip" hidden></div>
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

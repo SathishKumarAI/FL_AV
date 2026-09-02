@@ -17,7 +17,7 @@ from flwr.server.client_manager import ClientManager
 os.environ["ULTRALYTICS_HUB"] = "0"
 from ultralytics import YOLO
 from my_project.task import download_model, should_checkpoint, IS_WINDOWS, OS_NAME
-from my_project.get_set_model import get_weights, set_weights
+from my_project.get_set_model import NUM_CLASSES_MODEL_YAML, get_weights, set_weights
 
 from utils.logging_setup import configure_logging
 from utils.metrics_logger import MetricsLogger, aggregate_client_metrics
@@ -34,55 +34,43 @@ MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolo
 DEFAULT_BATCH_ID_RANGE = (1, 10)
 DEFAULT_NUM_ROUNDS = 3
 
-class CustomBatchStrategy(FedAvg):
-    """
-    A FedAvg-based strategy that dynamically assigns each client a unique 'batch_id'
-    in configure_fit() and configure_evaluate(), ensuring each client uses a different data.yaml.
-    
+class BatchAssignmentMixin:
+    """Everything this project needs from a strategy, independent of how it aggregates.
+
+    Mixed in *before* a Flower strategy, so `type("X", (BatchAssignmentMixin, FedAdam), {})`
+    gives FedAdam's aggregation with this project's shard assignment, checksum
+    logging, checkpointing and metrics rows. Every override calls super(), which is
+    what makes it compose rather than replace.
+
+    Written as a mixin because these four behaviours were welded to FedAvg by
+    inheritance, and copying the class to try another aggregator would have meant two
+    copies of the shard-assignment logic -- which has already produced two silent
+    failures in this repo (B9: one shared FitIns mutated for every client; B7:
+    checkpointing skipped every round).
+
     Attributes:
         batch_id_range (tuple): Min and max range for batch IDs (inclusive)
-        used_batch_ids (set): Tracks batch IDs used in the current round
-        client_to_batch_id (dict): Maps client IDs to their assigned batch IDs
+        client_to_batch_id (dict): Maps each client to its shard, for the whole run
+            (FL data locality: a client keeps the same shard every round)
     """
 
     def __init__(
         self,
         *,
-        fraction_fit: float = 1.0,
-        fraction_evaluate: float = 1.0,
-        min_fit_clients: int = 2,
-        min_evaluate_clients: int = 2,
-        min_available_clients: int = 2,
-        evaluate_fn: Optional[Any] = None,
-        on_fit_config_fn: Optional[Any] = None,
-        on_evaluate_config_fn: Optional[Any] = None,
-        accept_failures: bool = True,
-        initial_parameters: Optional[Parameters] = None,
-        fit_metrics_aggregation_fn: Optional[Any] = None,
-        evaluate_metrics_aggregation_fn: Optional[Any] = None,
         batch_id_range: tuple = DEFAULT_BATCH_ID_RANGE,
         proximal_mu: float = 0.0,
         num_rounds: int = DEFAULT_NUM_ROUNDS,
         checkpoint_dir: str = "checkpoints",
         save_every: int = 1,
+        **kwargs: Any,
     ):
-        super().__init__(
-            fraction_fit=fraction_fit,
-            fraction_evaluate=fraction_evaluate,
-            min_fit_clients=min_fit_clients,
-            min_evaluate_clients=min_evaluate_clients,
-            min_available_clients=min_available_clients,
-            evaluate_fn=evaluate_fn,
-            on_fit_config_fn=on_fit_config_fn,
-            on_evaluate_config_fn=on_evaluate_config_fn,
-            accept_failures=accept_failures,
-            initial_parameters=initial_parameters,
-            fit_metrics_aggregation_fn=fit_metrics_aggregation_fn,
-            evaluate_metrics_aggregation_fn=evaluate_metrics_aggregation_fn,
-        )
-        
+        # Everything else belongs to whichever strategy is mixed in underneath, and
+        # they do not agree on a signature: FedAdam takes eta and tau, FedAvgM takes
+        # server_momentum, FedAvg takes neither. Passing the rest through is what
+        # lets one __init__ serve all of them.
+        super().__init__(**kwargs)
+
         self.batch_id_range = batch_id_range
-        self.used_batch_ids = set()
         self.client_to_batch_id: Dict[str, int] = {}
         self.client_os_info: Dict[str, str] = {}  # Track client OS information
         self.num_rounds = num_rounds
@@ -97,21 +85,23 @@ class CustomBatchStrategy(FedAvg):
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         # proximal_mu > 0 turns on FedProx-style proximal regularization on clients.
         self.proximal_mu = float(proximal_mu)
-        strategy_name = "FedProx" if self.proximal_mu > 0 else "FedAvg"
         logger.info(
-            f"[Server] CustomBatchStrategy initialized with batch_id_range={batch_id_range}, "
-            f"strategy={strategy_name} (proximal_mu={self.proximal_mu})"
+            f"[Server] {type(self).__name__} initialized with batch_id_range={batch_id_range}, "
+            f"aggregation={type(self).__mro__[2].__name__} (proximal_mu={self.proximal_mu})"
         )
     
     def _get_unused_batch_id(self, client_id: str) -> int:
         """
-        Get a batch_id that hasn't been used yet in the current round.
-        
+        Return this client's shard, assigning a free one on first sight.
+
+        A client keeps the same shard for the whole run — that is the FL data
+        locality premise, not an optimisation.
+
         Args:
             client_id: The client's identifier
-            
+
         Returns:
-            int: A unique batch ID for this client
+            int: The batch ID this client owns
         """
         # Check if client already has a batch_id assigned
         if client_id in self.client_to_batch_id:
@@ -119,25 +109,25 @@ class CustomBatchStrategy(FedAvg):
             return self.client_to_batch_id[client_id]
             
         min_id, max_id = self.batch_id_range
-        available_ids = set(range(min_id, max_id + 1)) - self.used_batch_ids
-        
+        # Derive what is taken from what clients actually hold. A separate
+        # used_batch_ids set was cleared every round while client_to_batch_id was
+        # not, so a client joining in a later round could be handed a shard another
+        # client was already training.
+        taken = set(self.client_to_batch_id.values())
+        available_ids = set(range(min_id, max_id + 1)) - taken
+
         if not available_ids:
-            # If all batches have been used, log warning and reset tracking
-            logger.warning(f"[Server] All batch_ids in range {min_id}-{max_id} have been used. Resetting usage tracking.")
-            self.used_batch_ids = set()  # Reset used batches
+            logger.warning(
+                f"[Server] More clients than shards in range {min_id}-{max_id}; "
+                f"{client_id} will share a shard with another client."
+            )
             available_ids = set(range(min_id, max_id + 1))
-            
-        batch_id = random.choice(list(available_ids))
-        self.used_batch_ids.add(batch_id)
+
+        batch_id = random.choice(sorted(available_ids))
         self.client_to_batch_id[client_id] = batch_id
         logger.debug(f"[Server] Assigned new batch_id={batch_id} to client {client_id}")
         return batch_id
     
-    def _clear_round_state(self) -> None:
-        """Clear state that should be reset between rounds."""
-        logger.debug(f"[Server] Clearing round state, resetting {len(self.used_batch_ids)} used batch IDs")
-        self.used_batch_ids = set()
-
     def _save_global_model(self, weights, server_round: int) -> None:
         """
         Save the aggregated global weights as a self-contained YOLO checkpoint.
@@ -149,7 +139,7 @@ class CustomBatchStrategy(FedAvg):
         """
         try:
             if self._save_model is None:
-                self._save_model = YOLO(MODEL_PATH)
+                self._save_model = YOLO(NUM_CLASSES_MODEL_YAML).load(MODEL_PATH)
             if not set_weights(self._save_model.model, weights):
                 logger.error(f"[Server] Round {server_round}: set_weights failed; skipping checkpoint.")
                 return
@@ -179,7 +169,6 @@ class CustomBatchStrategy(FedAvg):
             List of tuples containing client proxies and their fit instructions
         """
         logger.info(f"[Server] configure_fit: Round={server_round}. Assigning batch IDs to clients...")
-        self._clear_round_state()  # Reset state for new round
 
         # Log parameter information for debugging
         weights = parameters_to_ndarrays(parameters)
@@ -192,7 +181,11 @@ class CustomBatchStrategy(FedAvg):
 
         updated_instructions = []
         for (client_proxy, fit_ins) in instructions:
-            fit_config = fit_ins.config
+            # COPY, do not mutate. FedAvg.configure_fit builds ONE FitIns and hands
+            # the same object to every client, so writing batch_id into fit_ins.config
+            # in this loop overwrote it for all of them — last client won and the whole
+            # federation trained a single shard while the log claimed otherwise.
+            fit_config = dict(fit_ins.config)
             try:
                 # Assign a unique batch_id for this client
                 batch_id = self._get_unused_batch_id(client_proxy.cid)
@@ -252,7 +245,7 @@ class CustomBatchStrategy(FedAvg):
 
         updated_instructions = []
         for (client_proxy, eval_ins) in instructions:
-            eval_config = eval_ins.config
+            eval_config = dict(eval_ins.config)  # shared EvaluateIns — copy, see configure_fit
             try:
                 # Use the same batch_id assignment logic
                 batch_id = self._get_unused_batch_id(client_proxy.cid)
@@ -392,6 +385,90 @@ class CustomBatchStrategy(FedAvg):
         return loss, metrics
 
 
+class CustomBatchStrategy(BatchAssignmentMixin, FedAvg):
+    """FedAvg with this project's shard assignment. The name three docs, the README
+    and tests/test_batch_assignment.py refer to, kept so they keep meaning."""
+
+
+# --------------------------------------------------------------------------
+# Strategy registry
+# --------------------------------------------------------------------------
+#: name -> the Flower strategy it aggregates with. Probed rather than imported
+#: directly, because which strategies exist varies by Flower version and an
+#: ImportError at server start is a worse failure than an absent option.
+_CANDIDATES = {
+    "fedavg": "FedAvg",
+    "fedprox": "FedAvg",          # FedAvg plus proximal_mu shipped to the clients
+    "fedadam": "FedAdam",
+    "fedyogi": "FedYogi",
+    "fedadagrad": "FedAdagrad",
+    "fedavgm": "FedAvgM",
+    "fedmedian": "FedMedian",
+    "fedtrimmedavg": "FedTrimmedAvg",
+    "krum": "Krum",
+    "bulyan": "Bulyan",
+    "qfedavg": "QFedAvg",
+    "faulttolerantfedavg": "FaultTolerantFedAvg",
+}
+
+
+def _available_strategies() -> Dict[str, type]:
+    import flwr.server.strategy as flwr_strategies
+
+    found = {}
+    for name, attr in _CANDIDATES.items():
+        base = getattr(flwr_strategies, attr, None)
+        if base is not None:
+            found[name] = base
+    return found
+
+
+STRATEGIES: Dict[str, type] = _available_strategies()
+
+
+def _accepted_kwargs(cls: type) -> set:
+    """Which keyword arguments a strategy's __init__ will actually take."""
+    import inspect
+
+    try:
+        params = inspect.signature(cls.__init__).parameters
+    except (TypeError, ValueError):
+        return set()
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return set(params) | {"__var_keyword__"}
+    return {n for n in params if n != "self"}
+
+
+def build_strategy(name: str, *, project_kwargs: Dict[str, Any],
+                   common_kwargs: Dict[str, Any],
+                   tuning_kwargs: Optional[Dict[str, Any]] = None):
+    """Compose BatchAssignmentMixin with the named Flower strategy and instantiate it.
+
+    An unknown name raises. Falling back to FedAvg would produce a run labelled
+    FedAdam that is not one, and this repo's history is a catalogue of exactly that
+    kind of quiet substitution.
+    """
+    key = (name or "fedavg").lower()
+    if key not in STRATEGIES:
+        raise ValueError(
+            f"unknown strategy {name!r}. Available in this Flower build: "
+            f"{', '.join(sorted(STRATEGIES))}"
+        )
+    base = STRATEGIES[key]
+    composed = type(f"{base.__name__}WithBatchAssignment", (BatchAssignmentMixin, base), {})
+
+    accepted = _accepted_kwargs(base)
+    takes_anything = "__var_keyword__" in accepted
+    passed = {k: v for k, v in {**common_kwargs, **(tuning_kwargs or {})}.items()
+              if takes_anything or k in accepted}
+    dropped = sorted(set({**common_kwargs, **(tuning_kwargs or {})}) - set(passed))
+    if dropped:
+        # Said out loud: a silently dropped eta would make an FedAdam sweep report
+        # identical numbers for every value and look like the knob does nothing.
+        logger.info(f"[Server] {base.__name__} does not accept {dropped}; not passed")
+    return composed(**project_kwargs, **passed)
+
+
 def server_fn(context: Context):
     """
     Initialize the Flower server with a YOLO model and custom federated learning strategy.
@@ -411,13 +488,18 @@ def server_fn(context: Context):
     fraction_fit = float(run_config.get("fraction_fit", 1.0))
     local_epochs = int(run_config.get("local_epochs", 1))
     min_clients = int(run_config.get("min_clients", 2))
-    # Strategy selection from run_config: strategy = "fedavg" | "fedprox".
+    # Strategy selection from run_config: any name in STRATEGIES.
     strategy_name = str(run_config.get("strategy", "fedavg")).lower()
     proximal_mu = float(run_config.get("proximal_mu", 0.0))
     if strategy_name == "fedprox" and proximal_mu <= 0:
         proximal_mu = 0.1  # sensible default when FedProx is requested without a mu
     if strategy_name != "fedprox":
-        proximal_mu = 0.0  # force plain FedAvg
+        proximal_mu = 0.0  # the proximal term is FedProx's, not everyone's
+    # Server-side optimiser knobs. Each is passed only to a strategy whose __init__
+    # accepts it, so setting eta with FedAvg selected is reported, not silently lost.
+    tuning = {k: float(run_config[k]) for k in
+              ("eta", "eta_l", "beta_1", "beta_2", "tau", "server_momentum", "q_param")
+              if k in run_config}
     checkpoint_dir = str(run_config.get("checkpoint_dir", "checkpoints"))
     save_every = int(run_config.get("save_every", 1))
     logger.info(
@@ -434,8 +516,13 @@ def server_fn(context: Context):
 
     # Load YOLO's initial model
     try:
-        model = YOLO(MODEL_PATH)
-        initial_weights = get_weights(model)
+        # Same 13-class arch the clients build (client_app.py). Building from the
+        # .pt alone gives an 80-class COCO head, which stops matching the moment a
+        # client's train() rebuilds its head from data.yaml (nc=13). Pass the inner
+        # DetectionModel, not the YOLO wrapper, so both sides key the state_dict
+        # identically.
+        model = YOLO(NUM_CLASSES_MODEL_YAML).load(MODEL_PATH)
+        initial_weights = get_weights(model.model)
         
         # Calculate initial checksum for tracking
         initial_checksum = sum(w.sum() for w in initial_weights if w.size > 0)
@@ -448,26 +535,35 @@ def server_fn(context: Context):
     def fit_config_fn(server_round: int) -> Dict[str, Scalar]:
         return {"local_epochs": local_epochs, "server_round": server_round}
 
-    # Build custom strategy
-    strategy = CustomBatchStrategy(
-        fraction_fit=fraction_fit,            # From run_config
-        min_fit_clients=min_clients,          # From run_config
-        min_evaluate_clients=min_clients,
-        min_available_clients=min_clients,    # Minimum clients needed to start FL
-        on_fit_config_fn=fit_config_fn,
-        on_evaluate_config_fn=fit_config_fn,
-        initial_parameters=fl.common.ndarrays_to_parameters(initial_weights),
-        batch_id_range=DEFAULT_BATCH_ID_RANGE,
-        proximal_mu=proximal_mu,
-        num_rounds=num_rounds,
-        checkpoint_dir=checkpoint_dir,
-        save_every=save_every,
+    # Build the strategy through the registry: the mixin carries this project's
+    # behaviour, the named Flower strategy carries the aggregation.
+    strategy = build_strategy(
+        strategy_name,
+        project_kwargs=dict(
+            batch_id_range=DEFAULT_BATCH_ID_RANGE,
+            proximal_mu=proximal_mu,
+            num_rounds=num_rounds,
+            checkpoint_dir=checkpoint_dir,
+            save_every=save_every,
+        ),
+        common_kwargs=dict(
+            fraction_fit=fraction_fit,            # From run_config
+            min_fit_clients=min_clients,          # From run_config
+            min_evaluate_clients=min_clients,
+            min_available_clients=min_clients,    # Minimum clients needed to start FL
+            on_fit_config_fn=fit_config_fn,
+            on_evaluate_config_fn=fit_config_fn,
+            initial_parameters=fl.common.ndarrays_to_parameters(initial_weights),
+        ),
+        tuning_kwargs=tuning,
     )
 
     # Configure server
     server_config = ServerConfig(num_rounds=num_rounds)
 
-    logger.info(f"[Server] FedAvg-based strategy configured for {num_rounds} rounds")
+    logger.info(f"[Server] strategy={strategy_name} ({type(strategy).__name__}) "
+                f"configured for {num_rounds} rounds; "
+                f"available: {', '.join(sorted(STRATEGIES))}")
     logger.info(f"[Server] Server running on {OS_NAME} is ready for clients")
     
     return ServerAppComponents(
