@@ -363,7 +363,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/api/run":
             global CONFIG
-            CONFIG = Config(
+            # Built locally and only adopted once every check has passed. Assigning
+            # first meant a rejected request still replaced the config the stage table
+            # previews, so /api/plan then described a run the server had refused to
+            # start -- and the next valid POST hid it by overwriting.
+            cfg = Config(
                 profile=body.get("profile", "demo"),
                 n_vehicles=int(body.get("vehicles", 6)),
                 rounds=int(body.get("rounds", 2)),
@@ -376,23 +380,24 @@ class Handler(BaseHTTPRequestHandler):
                 proximal_mu=float(body.get("proximal_mu", 0.0) or 0.0),
                 ray_address=body.get("ray_address") or None,
             )
-            if CONFIG.strategy not in stages.STRATEGIES:
-                return self._json({"error": f"unknown strategy {CONFIG.strategy!r}; "
+            if cfg.strategy not in stages.STRATEGIES:
+                return self._json({"error": f"unknown strategy {cfg.strategy!r}; "
                                             f"known: {', '.join(stages.STRATEGIES)}"}, 400)
-            if CONFIG.partition not in vehicles.PARTITIONS:
+            if cfg.partition not in vehicles.PARTITIONS:
                 # Rejected here rather than three subprocesses later, where it would
                 # surface as a stage failure with the real cause buried in a log.
-                return self._json({"error": f"unknown partition {CONFIG.partition!r}; "
+                return self._json({"error": f"unknown partition {cfg.partition!r}; "
                                             f"known: {', '.join(vehicles.PARTITIONS)}"}, 400)
-            if CONFIG.size_skew < 0:
+            if cfg.size_skew < 0:
                 # Same reason: caught here, not as a ValueError inside build_fleet's
                 # subprocess three stages later.
                 return self._json({"error": "size_skew must be >= 0, "
-                                            f"got {CONFIG.size_skew}"}, 400)
+                                            f"got {cfg.size_skew}"}, 400)
             try:
                 chain = stages.resolve(body.get("stages"), body.get("skip"))
             except SystemExit as e:
                 return self._json({"error": str(e)}, 400)
+            CONFIG = cfg
             started = STATE.start(CONFIG, chain, bool(body.get("confirm")),
                                   body.get("ray_address") or None)
             return self._json({"started": started, "busy": STATE.busy},
