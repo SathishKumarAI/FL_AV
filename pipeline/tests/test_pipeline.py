@@ -1212,6 +1212,41 @@ def test_the_model_a_node_caches_on_is_content_addressed():
         "global_last duplicates a round under a name that never changes"
 
 
+def test_the_holdout_does_not_move_when_the_run_seed_does():
+    """The holdout is the ruler; the run seed is what is being measured. They were the
+    same field, so `--preset seeds` -- the one experiment whose whole job is to hold
+    everything but the seed constant -- rebuilt the holdout for every arm and compared
+    three scores taken on three different sets of images."""
+    cmds = [" ".join(stages._cmd_holdout(Config(seed=s))) for s in (0, 1, 2)]
+    assert len(set(cmds)) == 1, f"the holdout command varies with the run seed: {cmds}"
+    assert "--seed 0" in cmds[0]
+
+    # And it still moves when explicitly asked to.
+    assert "--seed 7" in " ".join(stages._cmd_holdout(Config(holdout_seed=7)))
+
+
+def test_the_experiment_driver_passes_through_the_levers_the_runner_has():
+    """experiment.py builds runner command lines by hand, so a lever added to the
+    runner is invisible here until someone adds it twice. Each of these was missing:
+    partition was hardcoded 'condition' (which would have rebuilt an IID fleet as
+    non-IID), gpu_fraction was never passed (every arm ran ~1.9x slower than the same
+    run by hand), and `--all` retrained the centralised ceiling once per arm."""
+    from pipeline import experiment
+
+    cmd = " ".join(experiment.command({"seed": 3}, confirm=True))
+    assert f"--partition {Config.partition}" in cmd, "partition is not the Config default"
+    assert "--gpu-fraction" in cmd
+    assert "--seed 3" in cmd
+
+    swept = " ".join(experiment.command({"partition": "condition"}, confirm=False))
+    assert "--partition condition" in swept, "an explicit arm setting was overridden"
+
+    skipped = " ".join(experiment.command({"skip": "baseline"}, confirm=True))
+    assert "--skip baseline" in skipped
+    assert "--local-bn" in " ".join(experiment.command({"local_bn": True}, confirm=False))
+    assert "--local-bn" not in " ".join(experiment.command({}, confirm=False))
+
+
 def test_the_holdout_stage_runs_before_the_fleet_stage():
     """Order is load-bearing: a holdout carved afterwards is already in someone's
     val split."""
