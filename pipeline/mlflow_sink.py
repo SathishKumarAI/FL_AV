@@ -20,7 +20,13 @@ EXPERIMENT = "federated-yolov8"
 
 def _mlflow():
     import mlflow  # lazy: importing mlflow costs ~2s, and --list should stay instant
-    mlflow.set_tracking_uri(paths.MLFLOW_STORE.as_uri())
+    mlflow.set_tracking_uri(paths.mlflow_uri())
+    if mlflow.get_experiment_by_name(EXPERIMENT) is None:
+        # Named explicitly. A database backend does not imply where artifacts go, and
+        # the default is `./mlartifacts` relative to the CWD -- which for this project
+        # means one directory per place a subprocess was launched from.
+        paths.MLFLOW_ARTIFACTS.mkdir(parents=True, exist_ok=True)
+        mlflow.create_experiment(EXPERIMENT, artifact_location=paths.MLFLOW_ARTIFACTS.as_uri())
     mlflow.set_experiment(EXPERIMENT)
     return mlflow
 
