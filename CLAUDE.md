@@ -30,12 +30,15 @@ Open the one file that owns the thing. Do not read the package to find it.
 | Dashboard markup, a new panel, an element id | `pipeline/static/index.html` |
 | Chart axes, ticks, tooltips, sparkline | `pipeline/static/js/chart.js` |
 | The fleet grid / vehicle drawer / live polling / run form | `pipeline/static/js/{fleet,drawer,live,control}.js` |
+| Label boxes drawn over a frame, the trainer's own pictures | `pipeline/static/js/consumed.js` |
+| Which of ultralytics' output pictures are served, and their captions | `pipeline/train_artifacts.py` — `KINDS` |
 | An HTTP route or what `/api/state` returns | `pipeline/server.py` |
 | Which stages exist, what "already done" means, gating | `pipeline/stages.py` |
 | How a stage subprocess is run, env, SuperLink handling | `pipeline/runner.py` |
 | A path, or an env var a subprocess needs | `pipeline/paths.py` — nowhere else |
-| Shard assignment, conditions, partitioning | `pipeline/vehicles.py` |
+| Shard assignment, conditions, partitioning, quantity skew | `pipeline/vehicles.py` |
 | What a log line means | `pipeline/logparse.py` |
+| Where a round's seconds went | `pipeline/profile.py` |
 | The four pass criteria | `pipeline/verify.py` |
 | The shared holdout, and scoring the global model on it | `pipeline/holdout.py` |
 | The centralised baseline, and the gap to it | `pipeline/baseline.py` |
@@ -149,7 +152,9 @@ to be wrong quietly.
   started it. The pipeline kills it before every federation for that reason.
 - Condition partitioning is only real while the condition has images: `overcast
   residential` has 1 419 in all of BDD100K. Asking for more per vehicle silently tops up
-  with random images and turns a non-IID run into a nearly-IID one.
+  with random images and turns a non-IID run into a nearly-IID one. `--size-skew`
+  sharpens this: the fleet total is preserved, so a large skew hands one vehicle several
+  times `per_vehicle` and that vehicle is the one whose condition runs dry first.
 
 ## Agile, in the way that actually matters here
 
@@ -166,7 +171,7 @@ branch dies.
 
 ```bash
 python -m pytest my-project/tests -q     # 31 tests
-python -m pytest pipeline/tests -q       # 59 tests
+python -m pytest pipeline/tests -q       # 130 tests
 python -m pipeline.verify                # the four pass criteria against the last run
 python -m pipeline.holdout --evaluate    # the global model on data no vehicle saw
 ```

@@ -130,6 +130,14 @@ ROLES: dict[str, dict] = {
                        "run's cost is measured rather than estimated.",
         "tab": "Live, Plan",
     },
+    "profile": {
+        "command": "python -m pipeline.profile --json",
+        "contributes": "Where a round's seconds went, from the timestamps already in "
+                       "the logs. A mean utilisation figure cannot distinguish "
+                       "serialised clients from a starved dataloader; the overlap "
+                       "count and the share spent inside train() can.",
+        "tab": "—",
+    },
     "paths": {
         "command": "—",
         "contributes": "One place that knows the layout and the environment every "

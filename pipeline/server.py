@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import (baseline, dataset_stats, docs_index, gpu, holdout, ledger, logparse, paths,
-               plan, stages, vehicle_metrics, vehicles, verify)
+               plan, stages, train_artifacts, vehicle_metrics, vehicles, verify)
 from .runner import Run
 from .stages import Config
 
@@ -236,6 +236,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(plan.plan(CONFIG))
         if self.path.startswith("/api/vehicle/"):
             return self._vehicle()
+        if self.path.split("?")[0] == "/api/train-artifacts":
+            return self._json(train_artifacts.listing())
+        if self.path.startswith("/api/train-artifact/"):
+            return self._train_artifact()
+        if self.path.startswith("/api/shard-labels/"):
+            return self._shard_labels()
         if self.path.startswith("/api/shard-image/"):
             return self._shard_image()
         if self.path.startswith("/reports/"):
@@ -278,6 +284,37 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "vehicle id must be an integer"}, 400)
         root = paths.VEHICLE_BATCHES / f"batch_{int(vid)}" / "images" / "train"
         target = safe_child(root, name)
+        if target is None:
+            return self._json({"error": "not found"}, 404)
+        ctype = "image/png" if target.suffix.lower() == ".png" else "image/jpeg"
+        self._send(200, target.read_bytes(), ctype)
+
+    def _shard_labels(self) -> None:
+        """The label rows for one shard image, so the browser can draw them on it.
+
+        Sent as normalised numbers rather than as a rendered image: the overlay is an
+        SVG over the same `<img>`, so there is no second copy of the frame on the wire
+        and no server-side image library in the dependency list.
+        """
+        rel = self.path[len("/api/shard-labels/"):].split("?")[0]
+        vid, _, name = rel.partition("/")
+        if not vid.isdigit():
+            return self._json({"error": "vehicle id must be an integer"}, 400)
+        self._json({"boxes": dataset_stats.boxes(int(vid), name),
+                    "class_names": dataset_stats.class_names()})
+
+    def _train_artifact(self) -> None:
+        """One picture ultralytics drew during this vehicle's last round.
+
+        The filename is checked against `train_artifacts.KINDS` rather than joined and
+        guarded: an allowlist cannot be traversed out of, and it also means a future
+        ultralytics release cannot quietly publish a new file over HTTP.
+        """
+        rel = self.path[len("/api/train-artifact/"):].split("?")[0]
+        vid, _, name = rel.partition("/")
+        if not vid.isdigit():
+            return self._json({"error": "vehicle id must be an integer"}, 400)
+        target = train_artifacts.artifact(int(vid), name)
         if target is None:
             return self._json({"error": "not found"}, 404)
         ctype = "image/png" if target.suffix.lower() == ".png" else "image/jpeg"
@@ -334,6 +371,7 @@ class Handler(BaseHTTPRequestHandler):
                 seed=int(body.get("seed", 0)),
                 partition=body.get("partition", "condition"),
                 alpha=float(body.get("alpha", 0.5) or 0.5),
+                size_skew=float(body.get("size_skew", 0.0) or 0.0),
                 strategy=body.get("strategy", "fedavg"),
                 proximal_mu=float(body.get("proximal_mu", 0.0) or 0.0),
                 ray_address=body.get("ray_address") or None,
@@ -346,6 +384,11 @@ class Handler(BaseHTTPRequestHandler):
                 # surface as a stage failure with the real cause buried in a log.
                 return self._json({"error": f"unknown partition {CONFIG.partition!r}; "
                                             f"known: {', '.join(vehicles.PARTITIONS)}"}, 400)
+            if CONFIG.size_skew < 0:
+                # Same reason: caught here, not as a ValueError inside build_fleet's
+                # subprocess three stages later.
+                return self._json({"error": "size_skew must be >= 0, "
+                                            f"got {CONFIG.size_skew}"}, 400)
             try:
                 chain = stages.resolve(body.get("stages"), body.get("skip"))
             except SystemExit as e:

@@ -2,7 +2,62 @@
 
 Update this when you STOP working, not when you start.
 
-- **Last touched:** 2026-08-06
+- **Last touched:** 2026-08-16
+
+## Latest increment — quantity skew (`feat/fleet-size-skew`)
+
+Vehicles can now hold **different amounts** of data, not only different conditions.
+`--size-skew` is orthogonal to `--partition`: the partition decides *what* a vehicle
+sees, skew decides *how much*, and they compose.
+
+```bash
+python -m pipeline.runner --all --partition condition --size-skew 1.0
+python -m pipeline.experiment --preset skew --skews 0,0.8,1.5 --yes
+```
+
+Measured against the real attribute index (79 863 images), 6 vehicles × 1 400, no
+materialisation:
+
+| skew | shard sizes | total |
+|---|---|---|
+| 0.0 | 1400 ×6 | 8 400 |
+| 0.5 | 2409, 749, 1072, 1812, 906, 1452 | 8 400 |
+| 1.5 | 4629, 140, 407, 1966, 246, 1012 | 8 400 |
+
+Three properties, each asserted rather than claimed:
+
+- **The fleet total never moves.** Sizes are renormalised, so a skewed arm and an
+  unskewed one made identical image-visits and the sweep isolates one variable.
+- **No shard below `max(32, per_vehicle // 10)`.** Under the batch size no optimizer
+  step happens and the round still logs clean — already in this repo's catalogue.
+- **`size_skew = 0` draws nothing from the rng**, so every fleet built before this
+  still reproduces from its seed, and a `fleet.meta.json` with no `size_skew` key reads
+  as 0 rather than as a difference that would rmtree a good fleet.
+
+Why it is worth a branch: `num_examples` is FedAvg's aggregation weight, and equal
+shard sizes are the one configuration in which a wrong `num_examples` cannot be seen.
+Two of this project's shipped silent failures were exactly that.
+
+**Found while building it, fixed:** the dashboard already had `id="skew"` — the
+version-skew banner. A "Size skew" input under that name would have read the banner
+div, and the form would have posted 0 forever with nothing erroring. The control is
+`sizeSkew`, and a test now fails on any duplicate id in `index.html`.
+
+**Found while building it, filed not fixed:** `server.py`'s `/api/run` assigns the
+global `CONFIG` *before* validating it, so a rejected request still leaves the bad
+value in the config the stage table previews. Pre-existing — the partition and strategy
+guards have always done this — and harmless in that the next valid POST overwrites it.
+Own branch.
+
+Not built, deliberately: per-round streaming shards and condition drift. Both need the
+fleet rebuilt *between* rounds, and `build_fleet` rmtree's the shard directory. Phase 4
+item 3 (incremental populate) is the prerequisite.
+
+Prompt: [`docs/prompts/2026-08-16-fleet-size-skew.md`](docs/prompts/2026-08-16-fleet-size-skew.md).
+Verification: 161 tests green in the venv (31 my-project + 130 pipeline).
+
+---
+
 
 - **Where I stopped:** the federation has a **scale** for the first time. A shared
   holdout exists, the global model is scored on it out of band, and a centralised

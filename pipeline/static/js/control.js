@@ -10,6 +10,7 @@ export function config() {
     seed: +$("seed").value,
     partition: $("partition").value,
     alpha: +$("alpha").value,
+    size_skew: +$("sizeSkew").value,
     strategy: $("strategy").value,
     proximal_mu: +$("mu").value,
     confirm: $("confirm").checked,
@@ -28,6 +29,7 @@ export function estimate() {
   const dirichlet = c.partition === "dirichlet";
   $("alphaWrap").hidden = !dirichlet;
   $("alphaNote").hidden = !dirichlet;
+  $("sizeSkewNote").hidden = !c.size_skew;
   $("muWrap").hidden = c.strategy !== "fedprox";
 }
 
@@ -62,7 +64,7 @@ export function renderStages(rows) {
 }
 
 export function wireControl(onLaunched) {
-  ["profile", "vehicles", "rounds", "epochs", "partition", "strategy"].forEach(id => {
+  ["profile", "vehicles", "rounds", "epochs", "partition", "sizeSkew", "strategy"].forEach(id => {
     $(id).oninput = estimate;
     $(id).onchange = estimate;
   });

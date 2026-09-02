@@ -4,6 +4,7 @@ import { lineChart } from "./chart.js";
 import { state } from "./state.js";
 import { renderStages, renderOptions } from "./control.js";
 import { renderFleet } from "./fleet.js";
+import { renderNowTraining } from "./consumed.js";
 
 const POLL_MS = 2000;
 
@@ -18,6 +19,8 @@ export async function poll() {
     renderOptions(s.options);
     renderGpu(s.gpu);
     renderLive(s.live, s.config);
+    renderNowTraining($("nowTraining"), s.live && s.live.training_now,
+                      nowLabel(s), s.busy);
     renderReports(s.reports);
     renderFleet();
     document.body.dataset.loaded = "1";
@@ -31,6 +34,16 @@ export async function poll() {
     /* the server is restarting; the next tick catches up */
   }
   setTimeout(poll, POLL_MS);
+}
+
+/** "vehicle 3 · rain / fog", and the same string into the panel's own subtitle. */
+function nowLabel(s) {
+  const who = s.live && s.live.training_now;
+  const v = who == null ? null : (s.fleet || []).find(x => String(x.vid) === String(who));
+  const label = who == null ? (s.busy ? "between vehicles" : "idle")
+    : `vehicle ${who}${v && v.condition ? " · " + v.condition : ""}`;
+  $("nowTrainingWho").textContent = label;
+  return label;
 }
 
 function renderLive(L, cfg) {

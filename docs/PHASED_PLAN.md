@@ -21,7 +21,7 @@ result is a result.
 
 | Phase | Question it answers | Gate to the next phase |
 |---|---|---|
-| **0 — Measure** | Where does the 73 % of non-training wall clock go? | a per-round timing breakdown exists on disk |
+| **0 — Measure** ✅ | Where does the 73 % of non-training wall clock go? | **answered: it does not leave training.** 85.3 % train, 13.8 % evaluate, 0.6 % idle, clients never overlapping |
 | **1 — Runtime** | How many runs per GPU-hour? | wall clock per image-visit down ≥ 2×, holdout mAP unchanged within noise |
 | **2 — Schedule & head** | Why do 24 effective epochs only reach 0.4173? | box/cls/dfl fall *within* a round instead of rising |
 | **3 — Evidence** | Is any difference real? | the seed spread is known and printed beside every comparison |
@@ -35,19 +35,44 @@ badly-scheduled trainer measures the trainer.
 
 ---
 
-## Phase 0 — measure the round before optimising it
+## Phase 0 — measure the round before optimising it — **done**
 
-Backlog 95. One run of the demo profile, instrumented, producing a table of where the
-seconds go: shard scan, model construction, AMP check, warmup, steady-state training,
-validation, checkpoint write, weight serialisation, server aggregation, idle.
+Backlog 95. `pipeline/profile.py` pairs markers the logs already carry into per-phase
+intervals, so the 3 296 s reference run could be profiled after the fact rather than
+re-run:
 
-**Why it comes first.** The 27 % utilisation figure is a mean over the whole run. It
-does not distinguish "the dataloader starves the GPU" from "clients are serialised and
-five of them are waiting". Those two have completely different fixes and the plan below
-assumes the first — an assumption worth 20 minutes to check.
+```bash
+python -m pipeline.profile --server-log my-project/logs/server.30716.log --json
+```
 
-Deliverable: `pipeline/profile.py` and a stored breakdown per stage. Nothing else in
-phase 1 should be believed until this exists.
+| phase | seconds | share of wall |
+|---|---|---|
+| **train** | 2 784.1 | **85.3 %** |
+| **evaluate** | 450.7 | **13.8 %** |
+| construct (model load) | 8.6 | 0.3 % |
+| aggregate + checkpoint | 1.7 | 0.05 % |
+| weights in + out | 0.6 | 0.02 % |
+| unaccounted (Ray, teardown, idle) | 19.9 | 0.6 % |
+
+72 client episodes, **never more than one overlapping**. Wall clock 3 266 s.
+
+**Both worlds are real, and the measurement separates them.**
+
+- Clients *are* serialised — `max_concurrent = 1` across 72 episodes. Lever 1 is
+  available in full, and it is mathematically a no-op.
+- Orchestration is *not* where the time goes — 99.1 % of the wall clock is inside a
+  client doing work, and the GPU still averaged 27 % while it did. The idle is inside
+  `train()`, which is the data path, which is levers 2–3.
+
+**What this deletes from phase 1.** Model construction totals 8.6 s across 72 episodes.
+Persistent client actors (lever 5) and anything else that removes per-round fixed cost
+is capped at **0.3 %** of the run. It was ranked "small, but free"; it is small enough
+not to be worth the state-handling. Cut.
+
+**What it adds.** `evaluate` is 13.8 % — six clients re-scoring their own val split
+every round, for a number `docs/PHASED_PLAN.md` already calls the flattering one. The
+holdout is what the project reports. Evaluating every client every round is 450 s of
+GPU time spent on a metric that is not the headline.
 
 ---
 
@@ -63,7 +88,8 @@ expected effect on this hardware.
 | 2 | **`cache="ram"`** in the client's `train()` | `client_app.py` ⚠ | 1 400 images at 640 px is ~2–3 GB of RAM. Removes JPEG decode from the step loop — the prime suspect for 27 % utilisation | 1.3–2× per client |
 | 3 | **Windows dataloader** — `workers=0` today | `client_app.py` ⚠ | the comment is right that spawned workers deadlock inside a Ray actor, but `workers=0` means decode happens on the training thread. With `cache="ram"` this stops mattering; without it, it *is* the bottleneck | see 2 |
 | 4 | **Reuse the label cache across rounds** | `pipeline/build_fleet.py`, shard dirs | Ultralytics writes `labels.cache` beside each shard and rescans when it is missing. 6 vehicles × 6 rounds = 36 scans. The cache survives only if the fleet is not rebuilt between rounds — assert that, do not assume it | seconds × 36 |
-| 5 | **Persistent client actors** | Flower client state ⚠ | today the `YOLO` object is constructed from yaml and reloaded every round. Keeping it in node state removes a fixed per-round cost | small, but free |
+| ~~5~~ | ~~**Persistent client actors**~~ | — | **Cut by phase 0.** Model construction is 8.6 s across 72 episodes, 0.3 % of the run. A perfect fix here buys three seconds per round | measured, not worth it |
+| 6 | **Evaluate fewer clients per round** | `my-project/pyproject.toml` ⚠ | phase 0 found `evaluate` at **13.8 %** of wall clock, spent on the self-reported metric the project already calls flattering. `fraction_evaluate < 1.0`, or evaluate only on the final round | up to 1.16× |
 
 **The trap this phase must not fall into.** Every one of these can make a run finish
 faster *and* train less. Lever 1 changes nothing mathematically — clients are

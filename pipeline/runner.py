@@ -227,6 +227,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--alpha", type=float, default=0.5,
                     help="dirichlet concentration: 0.05 concentrates each vehicle on one "
                          "condition, 100 is effectively IID")
+    ap.add_argument("--size-skew", type=float, default=0.0,
+                    help="how unequal the shard SIZES are, orthogonal to --partition. "
+                         "0 = every vehicle the same; 1.5 = an order of magnitude "
+                         "between the busiest and quietest. Fleet total is unchanged, "
+                         "so a skewed run is budget-comparable with an unskewed one")
     ap.add_argument("--strategy", default="fedavg", choices=stages.STRATEGIES,
                     help="aggregation strategy: fedavg, fedprox, fedadam, fedyogi, "
                          "fedadagrad, fedavgm, fedmedian, krum, ... (see server_app.STRATEGIES)")
@@ -242,7 +247,7 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     cfg = Config(profile=args.profile, n_vehicles=args.vehicles,
                  rounds=args.rounds, local_epochs=args.epochs, seed=args.seed,
-                 partition=args.partition, alpha=args.alpha,
+                 partition=args.partition, alpha=args.alpha, size_skew=args.size_skew,
                  strategy=args.strategy, proximal_mu=args.proximal_mu,
                  per_vehicle_override=args.per_vehicle,
                  ray_address=args.ray_address)

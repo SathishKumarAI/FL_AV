@@ -64,6 +64,9 @@
         </select></div>
       <div id="alphaWrap" hidden><label for="alpha">Dirichlet α</label>
         <input id="alpha" type="number" min="0.01" step="0.05" value="0.5"></div>
+      <!-- sizeSkew, not skew: the short name is the version-skew banner up top. -->
+      <div><label for="sizeSkew">Size skew</label>
+        <input id="sizeSkew" type="number" min="0" step="0.1" value="0"></div>
       <div><label for="strategy">Strategy</label>
         <select id="strategy"><option value="fedavg">fedavg</option></select></div>
       <div id="muWrap" hidden><label for="mu">FedProx μ</label>
@@ -71,6 +74,10 @@
     </div>
     <p class="hint" id="alphaNote" hidden>α → 0 gives each vehicle a single condition;
       α → ∞ gives them all the same mixture, which is IID.</p>
+    <p class="hint" id="sizeSkewNote" hidden>Size skew makes vehicles hold unequal
+      <em>amounts</em>, on top of whichever partition is chosen — 0.5 is mild, 1.5 an
+      order of magnitude. The fleet total is unchanged, so a skewed run is still
+      budget-comparable with an unskewed one.</p>
     <div style="margin-top:var(--s4)">
       <label class="check"><input type="checkbox" id="confirm">
         <span>Confirm the gated stages — download, GPU sanity, federated run.</span></label>
@@ -154,6 +161,11 @@
     <p class="hint">One card per vehicle: the mAP50 it reaches on its own slice, and how far
       that is from where it started. Open a card for its curves, its weight movement, and
       what its shard actually contains.</p>
+  </div>
+
+  <div class="panel">
+    <h2>On the glass right now <span class="n" id="nowTrainingWho">idle</span></h2>
+    <div id="nowTraining"></div>
   </div>
 
   <div class="panel">

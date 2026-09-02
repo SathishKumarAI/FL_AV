@@ -8,7 +8,9 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -364,6 +366,111 @@ def test_every_file_the_dashboard_imports_is_servable():
             assert (server.STATIC / "js" / imported).is_file(), f"{js.name} imports missing {imported}"
 
 
+def _run_js_check(tmp_path, name: str) -> None:
+    """Run one of `pipeline/tests/js/*.mjs` against the real dashboard modules.
+
+    The dashboard is served as plain files with no build step, so there is no JS test
+    runner here and adding one would be a larger change than the code it guards. The
+    modules are copied beside the check with a `type: module` marker, which is all
+    node needs to import them.
+
+    Skipped rather than failed without node — but note that GitHub's runners ship it,
+    so CI does execute these.
+    """
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip(f"node not installed; {name} is unchecked here")
+
+    from pipeline import server
+    work = tmp_path / "js"
+    shutil.copytree(server.STATIC / "js", work)
+    (work / "package.json").write_text('{"type":"module"}')
+    shutil.copy(Path(__file__).parent / "js" / name, work / name)
+
+    # console.assert writes to stderr and does NOT set the exit code, so an assertion
+    # that fires would otherwise pass silently -- the exact class of bug this repo
+    # keeps shipping. All three conditions are checked.
+    out = subprocess.run([node, str(work / name)], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert "Assertion failed" not in out.stderr, out.stderr
+    assert "OK" in out.stdout, out.stdout
+
+
+def test_label_overlay_boxes_land_where_the_label_file_says(tmp_path):
+    """`cx cy w h` centred becomes `x y w h` cornered.
+
+    A box drawn a few percent off looks plausible, and the overlay exists to be
+    believed when it says a shard is mislabelled. So the conversion is executed, not
+    read.
+    """
+    _run_js_check(tmp_path, "overlay_geometry.mjs")
+
+
+def test_the_live_feed_says_what_it_is_showing_in_every_state(tmp_path):
+    """Idle, training, started-but-nothing-written, and a vehicle nobody has heard of.
+
+    The failure that matters is the quiet one: without the mtime in the image URL the
+    browser serves round 1's mosaic for the whole run, and the panel looks alive while
+    showing a fossil.
+    """
+    _run_js_check(tmp_path, "live_feed.mjs")
+
+
+def test_train_artifact_route_serves_only_names_on_the_allowlist(tmp_path, monkeypatch):
+    """The trainer's directory holds weights and a data yaml beside the pictures.
+
+    Names are matched against `KINDS` rather than joined onto the run directory and
+    guarded, so neither `../../CLAUDE.md` nor `weights/best.pt` can be fetched — and a
+    future ultralytics release cannot publish a new file over HTTP by writing it.
+    """
+    from pipeline import train_artifacts
+
+    run = tmp_path / "my-project" / "runs" / "detect" / "runs" / "fl" / "batch3"
+    run.mkdir(parents=True)
+    (run / "args.yaml").write_text("epochs: 1")
+    (run / "labels.jpg").write_bytes(b"\xff\xd8jpeg")
+    (run / "weights").mkdir()
+    (run / "weights" / "best.pt").write_bytes(b"weights")
+    monkeypatch.setattr(train_artifacts.paths, "PROJECT", tmp_path / "my-project")
+
+    assert train_artifacts.run_dir(3) == run
+    assert train_artifacts.artifact(3, "labels.jpg") == run / "labels.jpg"
+    assert train_artifacts.artifact(3, "weights/best.pt") is None
+    assert train_artifacts.artifact(3, "../../../CLAUDE.md") is None
+    assert train_artifacts.artifact(3, "args.yaml") is None
+    assert train_artifacts.artifact(4, "labels.jpg") is None      # no such vehicle
+    # train_batch0.jpg is on the allowlist but was not written: absent, not an error.
+    assert train_artifacts.artifact(3, "train_batch0.jpg") is None
+
+    listed = train_artifacts.for_vehicle(3)
+    assert [f["name"] for f in listed["files"]] == ["labels.jpg"]
+
+
+def test_shard_label_boxes_are_normalised_and_a_bad_row_does_not_lose_the_good_ones(
+        tmp_path, monkeypatch):
+    """A label file with one broken row still has good rows.
+
+    Raising here would blank the overlay for the whole frame, which is exactly the
+    frame someone is looking at *because* they suspect its labels.
+    """
+    from pipeline import dataset_stats
+
+    labels = tmp_path / "batch_7" / "labels" / "train"
+    labels.mkdir(parents=True)
+    (labels / "frame.txt").write_text(
+        "2 0.5 0.5 0.25 0.5\n"        # good
+        "9 0.1 0.2\n"                  # too few fields
+        "car 0.1 0.2 0.3 0.4\n"        # class is not a number
+        "0 0.9 0.9 0.05 0.05\n"        # good, and last
+    )
+    monkeypatch.setattr(dataset_stats.paths, "VEHICLE_BATCHES", tmp_path)
+
+    got = dataset_stats.boxes(7, "frame.jpg")
+    assert [b["cls"] for b in got] == [2, 0]
+    assert got[0] == {"cls": 2, "cx": 0.5, "cy": 0.5, "w": 0.25, "h": 0.5}
+    assert dataset_stats.boxes(7, "no-such-frame.jpg") == []
+
+
 def test_shard_composition_counts_what_the_vehicle_actually_holds(tmp_path, monkeypatch):
     """The condition label is a claim; this counts the images behind it."""
     batches = tmp_path / "batch"
@@ -593,6 +700,105 @@ def test_dirichlet_rejects_an_alpha_that_has_no_meaning():
     with pytest.raises(ValueError):
         vehicles.assign(2, 10, index=idx, train_pool=set(idx), val_pool=set(idx),
                         partition="dirichlet", alpha=0)
+
+
+# ------------------------------------------------------------- quantity skew
+def test_size_skew_gives_unequal_shards_that_still_sum_to_the_budget():
+    """Skew redistributes the fleet's images; it must never change how many there are.
+
+    A skewed run and an unskewed one have to be comparable, and they only are if both
+    made the same number of image-visits. If skew changed the total, every comparison
+    against a skewed arm would be confounded by budget -- which is the failure
+    `compare.py` already refuses to let a config make.
+    """
+    idx = _mixed_index()
+    kw = dict(index=idx, train_pool=set(idx), val_pool=set(idx), val_per_vehicle=10,
+              seed=3, partition="condition")
+
+    flat = vehicles.assign(6, 100, size_skew=0.0, **kw)
+    skewed = vehicles.assign(6, 100, size_skew=0.9, **kw)
+
+    assert {v.n_train for v in flat} == {100}, "skew 0 must leave every shard equal"
+    assert len({v.n_train for v in skewed}) > 1, "skew > 0 must make shards differ"
+    assert sum(v.n_train for v in skewed) == 600, [v.n_train for v in skewed]
+
+
+def test_size_skew_never_shards_below_the_batch_size():
+    """A shard smaller than the batch takes no optimizer step and logs nothing wrong.
+
+    That exact silent no-op is already in this repo's history, so a realism knob is
+    not allowed to produce it however extreme the draw.
+    """
+    idx = _mixed_index(4000)
+    floor = vehicles.size_floor(200)
+    vs = vehicles.assign(6, 200, index=idx, train_pool=set(idx), val_pool=set(idx),
+                         val_per_vehicle=20, seed=7, size_skew=3.0)
+
+    assert floor == 32, floor
+    assert min(v.n_train for v in vs) >= floor, [v.n_train for v in vs]
+    assert all(v.val for v in vs), "a vehicle with no val split cannot self-evaluate"
+
+
+def test_size_skew_is_deterministic_and_keeps_slices_disjoint():
+    idx = _mixed_index()
+    kw = dict(index=idx, train_pool=set(idx), val_pool=set(idx), val_per_vehicle=10,
+              seed=11, size_skew=0.7, partition="dirichlet", alpha=0.4)
+    vs = vehicles.assign(5, 80, **kw)
+
+    seen = [n for v in vs for n in v.train]
+    assert len(seen) == len(set(seen)), "skewed slices must not overlap"
+    assert [v.train for v in vehicles.assign(5, 80, **kw)] == [v.train for v in vs]
+
+
+def test_skew_zero_draws_nothing_so_old_fleets_still_reproduce():
+    """The default path must not touch the rng, or every fleet ever built changes.
+
+    Determinism here is not a nicety: `fleet.meta.json` records a seed, and runs on
+    disk are only comparable to future ones while that seed still means the same
+    images.
+    """
+    idx = _mixed_index()
+    kw = dict(index=idx, train_pool=set(idx), val_pool=set(idx), val_per_vehicle=10,
+              seed=4, partition="condition")
+    assert ([v.train for v in vehicles.assign(4, 50, **kw)]
+            == [v.train for v in vehicles.assign(4, 50, size_skew=0.0, **kw)])
+
+
+def test_the_fleet_stage_expects_skewed_shards_to_be_small():
+    """Without this the rebuild check fires every run -- and rebuilding rmtree's shards.
+
+    The check asks "is any vehicle below per_vehicle images?", which is true by design
+    for every skewed fleet. Left alone it would rmtree and relink the whole fleet on
+    every invocation, including one made while a federation was in flight.
+    """
+    cfg = stages.Config(profile="demo", n_vehicles=2, size_skew=0.8)
+    # A shard for every id the server can pick, sizes spread around per_vehicle=300.
+    fleet = [{"vid": i, "n_train": 480 if i % 2 else 120, "condition": "night"}
+             for i in paths.BATCH_IDS]
+    meta = {"partition": cfg.partition, "seed": cfg.seed,
+            "per_vehicle": cfg.per_vehicle, "holdout": 0, "size_skew": 0.8}
+
+    with patch.object(vehicles, "load_fleet", return_value=fleet), \
+         patch.object(vehicles, "load_fleet_meta", return_value=meta), \
+         patch.object(stages.holdout, "names", return_value=set()):
+        assert stages._check_fleet(cfg).satisfied, stages._check_fleet(cfg).detail
+
+        thin = [*fleet[:-1], {**fleet[-1], "n_train": 4}]
+        with patch.object(vehicles, "load_fleet", return_value=thin):
+            assert not stages._check_fleet(cfg).satisfied, "below the floor is still stale"
+
+
+def test_a_fleet_built_before_skew_existed_is_not_declared_stale():
+    """`fleet.meta.json` files on disk have no size_skew key. Absent must read as 0."""
+    cfg = stages.Config(profile="demo", n_vehicles=2)
+    fleet = [{"vid": i, "n_train": cfg.per_vehicle, "condition": "x"} for i in paths.BATCH_IDS]
+    meta = {"partition": cfg.partition, "seed": cfg.seed,
+            "per_vehicle": cfg.per_vehicle, "holdout": 0}   # no size_skew
+
+    with patch.object(vehicles, "load_fleet", return_value=fleet), \
+         patch.object(vehicles, "load_fleet_meta", return_value=meta), \
+         patch.object(stages.holdout, "names", return_value=set()):
+        assert stages._check_fleet(cfg).satisfied, stages._check_fleet(cfg).detail
 
 
 def test_the_registry_is_what_every_caller_reads():
@@ -1354,6 +1560,32 @@ def test_the_documented_tabs_are_the_tabs_the_page_has():
     assert in_html == documented, (in_html ^ documented)
 
 
+def test_every_element_the_run_form_reaches_for_exists():
+    """`$("skew")` on an id the markup lacks throws, and the whole form stops working.
+
+    control.js reads the form by id and index.html declares them; nothing links the two
+    but this. The failure is silent in the worst way -- the page renders, and the first
+    keystroke kills the estimate handler.
+    """
+    static = REPO / "pipeline" / "static"
+    html = (static / "index.html").read_text(encoding="utf-8")
+    js = (static / "js" / "control.js").read_text(encoding="utf-8")
+
+    ids = re.findall(r'id="([\w-]+)"', html)
+    declared = set(ids)
+    wanted = set(re.findall(r'\$\("([\w-]+)"\)', js))
+    wanted |= set(re.findall(r'"([\w-]+)"(?=[^\n]*\.forEach\(id)', js))
+
+    missing = sorted(wanted - declared)
+    assert not missing, f"control.js reads ids index.html does not declare: {missing}"
+    # A duplicate id is worse than a missing one: getElementById returns the *first*
+    # match and nothing errors. A "Size skew" input added as id="skew" would silently
+    # have read the version-skew banner instead, and the form would have posted 0.
+    dupes = sorted({i for i in ids if ids.count(i) > 1})
+    assert not dupes, f"index.html declares these ids more than once: {dupes}"
+    assert {"sizeSkew", "sizeSkewNote", "alpha", "partition"} <= wanted, "the form lost a control"
+
+
 def test_client_logs_are_scoped_to_the_run_that_is_being_measured(tmp_path):
     """`client.<pid>.log` accumulates across runs. Reading all of them made a
     six-vehicle run look like a nine-vehicle one, and the centralised ceiling was
@@ -1497,3 +1729,82 @@ def test_with_no_real_run_at_all_the_checksums_are_empty_not_wrong(tmp_path):
     assert logparse.latest_run_log(tmp_path) is None
     assert logparse.aggregate_checksums(tmp_path) == []
     assert logparse.federation_learned(tmp_path)[0] is False
+
+
+# ------------------------------------------------------------- the round profile
+from pipeline import profile as _profile  # noqa: E402
+
+# Two client episodes from the real six-round run, trimmed. The line that ends
+# training is the same line that starts serialising the result.
+PROFILE_LINES = "\n".join([
+    "2026-08-06 00:57:35,355 - INFO - [Client] Creating FlowerClient instance from client_fn.",
+    "2026-08-06 00:57:35,513 - INFO - [Client] YOLO model loaded successfully.",
+    "2026-08-06 00:57:35,530 - INFO - [Client] Received weights with checksum: 705.23",
+    "2026-08-06 00:57:35,539 - INFO - [Client] Successfully applied received weights to model",
+    "2026-08-06 00:57:35,545 - INFO - [Client] Starting local training with batch_id=8, local_epochs=4",
+    "2026-08-06 00:58:55,185 - INFO - [Client] 8 Training done. metrics={'mAP50': 0.35}",
+    "2026-08-06 00:58:55,190 - INFO - [Client] Sending back weights with checksum: 236.48",
+    "2026-08-06 00:58:55,338 - INFO - [Client] Creating FlowerClient instance from client_fn.",
+    "2026-08-06 00:58:55,436 - INFO - [Client] YOLO model loaded successfully.",
+    "2026-08-06 00:58:55,464 - INFO - [Client] Starting local training with batch_id=2, local_epochs=4",
+    "2026-08-06 01:00:08,898 - INFO - [Client] 2 Training done. metrics={'mAP50': 0.33}",
+    "2026-08-06 01:00:08,904 - INFO - [Client] Sending back weights with checksum: 205.59",
+])
+
+
+def test_the_phase_after_training_is_measured_rather_than_left_at_zero():
+    """`Training done` closes training *and* opens serialisation. Stopping at the
+    first marker a line matches reported weights_out as 0.0 s for every run --
+    a phase that looks free because it was never measured, not because it is."""
+    got = _profile.intervals(PROFILE_LINES, _profile.CLIENT_MARKERS)
+    assert _profile.union_seconds(got["train"]) == pytest.approx(79.64 + 73.434, abs=0.01)
+    assert _profile.union_seconds(got["weights_out"]) == pytest.approx(0.011, abs=0.001)
+    assert _profile.union_seconds(got["construct"]) == pytest.approx(0.158 + 0.098, abs=0.001)
+
+
+def test_serialised_clients_are_reported_as_serialised_not_averaged_away():
+    """27 % mean utilisation is compatible with six clients each at 27 % and with one
+    client at 27 % while five wait. Only the overlap count tells them apart, and the
+    fix differs: `num-gpus < 1.0` for the second, the data path for the first."""
+    eps = _profile.episodes(PROFILE_LINES)
+    assert len(eps) == 2
+    assert _profile.max_overlap(eps) == 1, "these two episodes are back to back, not concurrent"
+    assert _profile.max_overlap([(0.0, 10.0), (5.0, 15.0), (5.5, 6.0)]) == 3
+
+
+def test_a_past_run_is_profiled_from_its_own_client_logs_not_every_later_one(tmp_path):
+    """`--server-log` profiles a run that is over. A lower time bound alone -- which
+    is all the current-run helpers need -- would sweep in every client log written
+    since, and charge this run with the next six runs' training seconds."""
+    import os
+    import time
+
+    now = time.time()
+    server = tmp_path / "server.10.log"
+    server.write_text("2026-08-06 00:57:26,281 - INFO - [Server] Aggregating 6 fit results\n"
+                      "2026-08-06 01:05:16,408 - INFO - [Server] Aggregated parameters with checksum: 159.9\n")
+    os.utime(server, (now - 7200, now - 7200))
+
+    mine = tmp_path / "client.11.log"
+    mine.write_text(PROFILE_LINES)
+    os.utime(mine, (now - 7200, now - 7200))
+
+    later = tmp_path / "client.12.log"          # a run that happened afterwards
+    later.write_text(PROFILE_LINES)
+
+    p = _profile.profile(server_log=server, log_dir=tmp_path)
+    assert [Path(c).name for c in p["client_logs"]] == ["client.11.log"]
+    assert p["episodes"] == 2, "the later run's episodes are not this run's"
+    assert p["max_concurrent"] == 1
+
+
+def test_the_profiler_says_which_lever_the_measurement_points_at():
+    """Phase 0 exists to choose between two fixes. A breakdown that leaves the
+    choice to the reader has not made it."""
+    serial_in_training = {"episodes": 6, "max_concurrent": 1, "train_share": 0.85}
+    lines = " ".join(_profile.verdict(serial_in_training))
+    assert "SERIALISED" in lines and "IN-TRAINING" in lines
+
+    concurrent_overhead = {"episodes": 6, "max_concurrent": 3, "train_share": 0.40}
+    lines = " ".join(_profile.verdict(concurrent_overhead))
+    assert "CONCURRENT" in lines and "AROUND-TRAINING" in lines
