@@ -155,3 +155,30 @@ jobs:
               assert os.path.exists(ck), f"missing {ck}"
           print("simulation smoke OK:", agg)
           EOF
+
+      - name: What the clients actually said, if anything failed
+        # Flower turns a client exception into a count -- "aggregate_fit: received 0
+        # results and 2 failures" -- and writes the traceback to the client's own log
+        # file, which this job has never printed. So the number that says the run is
+        # broken arrived with the artifact that says why stripped out, and diagnosing
+        # a real regression that way cost several six-minute rounds of guessing
+        # before anyone noticed the evidence simply was not being shown.
+        #
+        # Placed AFTER the assert, because `failure()` reports on steps that have
+        # already run: before it, this can only fire for a crash in `flwr run`, never
+        # for the assertion it exists to explain.
+        #
+        # Tolerates missing files. A green run has nothing to show, and an absent log
+        # is itself the answer when the question is "where did the logs go".
+        if: failure()
+        run: |
+          echo "::group::where the logs are"
+          ls -la logs/ 2>&1 | head -40 || echo "no logs/ directory in $(pwd)"
+          find "$GITHUB_WORKSPACE" "$HOME/.flwr" -name "*.log" -newermt "-30 minutes" 2>/dev/null | head -40
+          echo "::endgroup::"
+          for f in logs/client.*.log logs/server.*.log; do
+            [ -f "$f" ] || continue
+            echo "::group::$f"
+            grep -iE "error|exception|traceback|failed|batch_id|checksum" "$f" | head -60
+            echo "::endgroup::"
+          done
