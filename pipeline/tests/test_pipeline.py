@@ -1729,3 +1729,82 @@ def test_with_no_real_run_at_all_the_checksums_are_empty_not_wrong(tmp_path):
     assert logparse.latest_run_log(tmp_path) is None
     assert logparse.aggregate_checksums(tmp_path) == []
     assert logparse.federation_learned(tmp_path)[0] is False
+
+
+# ------------------------------------------------------------- the round profile
+from pipeline import profile as _profile  # noqa: E402
+
+# Two client episodes from the real six-round run, trimmed. The line that ends
+# training is the same line that starts serialising the result.
+PROFILE_LINES = "\n".join([
+    "2026-08-06 00:57:35,355 - INFO - [Client] Creating FlowerClient instance from client_fn.",
+    "2026-08-06 00:57:35,513 - INFO - [Client] YOLO model loaded successfully.",
+    "2026-08-06 00:57:35,530 - INFO - [Client] Received weights with checksum: 705.23",
+    "2026-08-06 00:57:35,539 - INFO - [Client] Successfully applied received weights to model",
+    "2026-08-06 00:57:35,545 - INFO - [Client] Starting local training with batch_id=8, local_epochs=4",
+    "2026-08-06 00:58:55,185 - INFO - [Client] 8 Training done. metrics={'mAP50': 0.35}",
+    "2026-08-06 00:58:55,190 - INFO - [Client] Sending back weights with checksum: 236.48",
+    "2026-08-06 00:58:55,338 - INFO - [Client] Creating FlowerClient instance from client_fn.",
+    "2026-08-06 00:58:55,436 - INFO - [Client] YOLO model loaded successfully.",
+    "2026-08-06 00:58:55,464 - INFO - [Client] Starting local training with batch_id=2, local_epochs=4",
+    "2026-08-06 01:00:08,898 - INFO - [Client] 2 Training done. metrics={'mAP50': 0.33}",
+    "2026-08-06 01:00:08,904 - INFO - [Client] Sending back weights with checksum: 205.59",
+])
+
+
+def test_the_phase_after_training_is_measured_rather_than_left_at_zero():
+    """`Training done` closes training *and* opens serialisation. Stopping at the
+    first marker a line matches reported weights_out as 0.0 s for every run --
+    a phase that looks free because it was never measured, not because it is."""
+    got = _profile.intervals(PROFILE_LINES, _profile.CLIENT_MARKERS)
+    assert _profile.union_seconds(got["train"]) == pytest.approx(79.64 + 73.434, abs=0.01)
+    assert _profile.union_seconds(got["weights_out"]) == pytest.approx(0.011, abs=0.001)
+    assert _profile.union_seconds(got["construct"]) == pytest.approx(0.158 + 0.098, abs=0.001)
+
+
+def test_serialised_clients_are_reported_as_serialised_not_averaged_away():
+    """27 % mean utilisation is compatible with six clients each at 27 % and with one
+    client at 27 % while five wait. Only the overlap count tells them apart, and the
+    fix differs: `num-gpus < 1.0` for the second, the data path for the first."""
+    eps = _profile.episodes(PROFILE_LINES)
+    assert len(eps) == 2
+    assert _profile.max_overlap(eps) == 1, "these two episodes are back to back, not concurrent"
+    assert _profile.max_overlap([(0.0, 10.0), (5.0, 15.0), (5.5, 6.0)]) == 3
+
+
+def test_a_past_run_is_profiled_from_its_own_client_logs_not_every_later_one(tmp_path):
+    """`--server-log` profiles a run that is over. A lower time bound alone -- which
+    is all the current-run helpers need -- would sweep in every client log written
+    since, and charge this run with the next six runs' training seconds."""
+    import os
+    import time
+
+    now = time.time()
+    server = tmp_path / "server.10.log"
+    server.write_text("2026-08-06 00:57:26,281 - INFO - [Server] Aggregating 6 fit results\n"
+                      "2026-08-06 01:05:16,408 - INFO - [Server] Aggregated parameters with checksum: 159.9\n")
+    os.utime(server, (now - 7200, now - 7200))
+
+    mine = tmp_path / "client.11.log"
+    mine.write_text(PROFILE_LINES)
+    os.utime(mine, (now - 7200, now - 7200))
+
+    later = tmp_path / "client.12.log"          # a run that happened afterwards
+    later.write_text(PROFILE_LINES)
+
+    p = _profile.profile(server_log=server, log_dir=tmp_path)
+    assert [Path(c).name for c in p["client_logs"]] == ["client.11.log"]
+    assert p["episodes"] == 2, "the later run's episodes are not this run's"
+    assert p["max_concurrent"] == 1
+
+
+def test_the_profiler_says_which_lever_the_measurement_points_at():
+    """Phase 0 exists to choose between two fixes. A breakdown that leaves the
+    choice to the reader has not made it."""
+    serial_in_training = {"episodes": 6, "max_concurrent": 1, "train_share": 0.85}
+    lines = " ".join(_profile.verdict(serial_in_training))
+    assert "SERIALISED" in lines and "IN-TRAINING" in lines
+
+    concurrent_overhead = {"episodes": 6, "max_concurrent": 3, "train_share": 0.40}
+    lines = " ".join(_profile.verdict(concurrent_overhead))
+    assert "CONCURRENT" in lines and "AROUND-TRAINING" in lines
