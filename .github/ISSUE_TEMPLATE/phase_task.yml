@@ -1,0 +1,60 @@
+name: Phase task
+description: A backlog item, tied to the phase it unblocks
+labels: ["task"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        `docs/BACKLOG_100.md` is a good list and a bad tracker: an item there cannot be
+        assigned, closed, or linked from a commit. This template is how one becomes a
+        unit of work. The order is fixed by `docs/PHASED_PLAN.md` — speed, then the
+        schedule, then the noise floor, and only then anything that ranks two
+        approaches against each other.
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Phase
+      options:
+        - "0 — measure the round before optimising it"
+        - "1 — runtime: more runs per GPU-hour"
+        - "2 — the schedule and the head"
+        - "3 — evidence: the noise floor"
+        - "4 — data: reproducible and clean"
+        - "5 — advanced FL"
+        - "G — GitHub, alongside everything"
+    validations:
+      required: true
+
+  - type: input
+    id: backlog
+    attributes:
+      label: Backlog item
+      placeholder: "42 — repeats across seeds"
+
+  - type: textarea
+    id: why
+    attributes:
+      label: What it unblocks
+      description: Not what it is. What cannot be believed until it is done.
+    validations:
+      required: true
+
+  - type: textarea
+    id: gate
+    attributes:
+      label: The gate
+      description: >
+        The command whose output closes this, and the number it has to show. "mAP
+        improves" is not a gate; "the holdout curve is unchanged within the phase-3
+        spread and the aggregate checksum still moves every round" is.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: touches
+    attributes:
+      label: Scope
+      options:
+        - label: "⚠ Touches `my-project/` — needs its own branch and its own prompt"
+        - label: Changes what a run measures, so results from before it are not comparable

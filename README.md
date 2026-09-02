@@ -3,6 +3,10 @@
 
 **Collaboratively train YOLOv8 models on distributed datasets while preserving data privacy.**  
 
+[![CI](https://github.com/SathishKumarAI/federated-yolov8-object-detection/actions/workflows/ci.yml/badge.svg)](https://github.com/SathishKumarAI/federated-yolov8-object-detection/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
+
 ---
 
 ## 🌐 Table of Contents  
@@ -225,7 +229,7 @@ Use **Ctrl+C** in each terminal to stop the processes.
 | **CUDA Out of Memory** | Reduce `BATCH_SIZE` or use `yolov8n`. |  
 | **No GPU Detected** | Verify `torch.cuda.is_available()` and reinstall PyTorch with CUDA. |  
 | **Dataset Path Errors** | Ensure `data.yaml` paths match the client directory structure. |  
-| **Dependency Conflicts** | Use a fresh venv. |  
+| **Dependency Conflicts** | Use a fresh venv built on **python.org** 3.12 — not conda. Windows Smart App Control blocks conda-forge's `_bz2.pyd`, and the failure is an import error a long way from its cause. See [`docs/ENV_WINDOWS.md`](docs/ENV_WINDOWS.md). |  
 | **Clients silently train on CPU** | flwr ≥ 1.31 builds its own runtime env and installs the CPU-only torch wheel. Set `FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION=1`. |  
 
 ---
@@ -244,5 +248,17 @@ Use **Ctrl+C** in each terminal to stop the processes.
 4. **Multi-Task Learning**: Add segmentation support with YOLOv8.  
 
 ---
+
+## 🤝 Contributing, security, licence
+
+- **How work ships here:** [`CONTRIBUTING.md`](CONTRIBUTING.md) — a branch per change, one
+  increment per branch, a PR carrying the numbers, squash-merged.
+- **What to work on:** [`docs/PHASED_PLAN.md`](docs/PHASED_PLAN.md) orders it, and each phase
+  has an issue template that asks for the gate rather than the intention.
+- **Security and the boundaries of the privacy claim:** [`SECURITY.md`](SECURITY.md). Short
+  version: no credentials anywhere, no data leaves the machine, the dashboard is loopback-only
+  on purpose, and federated learning on its own is *not* privacy — gradients leak, and there is
+  no differential-privacy wrapper here yet.
+- **Licence:** Apache 2.0, [`LICENSE`](LICENSE).
 
 Thanks! 😊
