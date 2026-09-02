@@ -19,8 +19,8 @@ from my_project.task import (
     OS_NAME
 )  # Import OS detection
 import urllib
-from my_project.get_set_model import (NUM_CLASSES_MODEL_YAML, get_weights, set_weights,
-                                      warm_start_head)
+from my_project.get_set_model import (NUM_CLASSES_MODEL_YAML, batchnorm_keys, get_weights,
+                                      set_weights, warm_start_head)
 from utils.logging_setup import configure_logging
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -44,6 +44,7 @@ class FlowerClient(Client):
                 local_epochs : int,
                 batch_id_range: tuple = DEFAULT_BATCH_ID_RANGE,  # Using constant
                 cache: str = "",
+                local_bn: bool = False,
                 ):
 
         super().__init__()
@@ -52,6 +53,9 @@ class FlowerClient(Client):
         self.local_epochs = local_epochs
         self.batch_id_range = batch_id_range
         self.batch_id = None
+        # FedBN. Per-RUN, not per-round: it changes what the federation is, so it
+        # belongs in run_config rather than in a FitIns the server could vary.
+        self.local_bn = bool(local_bn)
         # "" | "ram" | "disk". Ultralytics wants False, not "", for "no cache".
         self.cache = cache or False
         
@@ -80,10 +84,22 @@ class FlowerClient(Client):
             # the kind of asymmetry set_weights' strict=True exists to catch.
             warm_start_head(self.yolo.model, YOLO(self.model_path))
 
+            # Computed once: the architecture does not change between rounds, and
+            # walking every module each round would be work for an unchanging answer.
+            self._bn_keys = batchnorm_keys(self.model) if self.local_bn else set()
+            if self.local_bn:
+                logger.info(f"[Client] FedBN on: {len(self._bn_keys)} BatchNorm tensors "
+                            f"stay local, the rest come from the aggregate.")
+                if not self._bn_keys:
+                    raise ValueError(
+                        "local_bn was requested but no BatchNorm layers were found. "
+                        "That would run plain FedAvg while the log says FedBN.")
+
             logger.info("[Client] YOLO model loaded successfully.")
         except Exception as e:
             logger.error("[Client] Failed to load YOLO model!", exc_info=True)
             self.yolo = None
+            self._bn_keys = set()
 
     @property
     def model(self):
@@ -150,7 +166,7 @@ class FlowerClient(Client):
             # set_weights returns False on a count/shape mismatch instead of raising.
             # Ignoring it made a failed load look like a successful round: the client
             # trained from its own stale weights and the server averaged them in.
-            if not set_weights(self.model, weights_list):
+            if not set_weights(self.model, weights_list, keep_local=self._bn_keys):
                 raise ValueError("set_weights returned False - mismatch or error.")
             logger.info("[Client] Successfully applied received weights to model")
         except Exception as e:
@@ -361,7 +377,10 @@ class FlowerClient(Client):
         # 2) Apply weights to model
         try:
             logger.info("[Client] Setting evaluation weights.")
-            success = set_weights(self.model, weights_list)
+            # Same filter as fit(). Under FedBN a client evaluating with the averaged
+            # BN would be scoring a model it never trains as, and the self-reported
+            # metric would understate the method it is meant to measure.
+            success = set_weights(self.model, weights_list, keep_local=self._bn_keys)
             if not success:
                 raise ValueError("set_weights returned False - mismatch or error.")
         except Exception as e:
@@ -470,6 +489,7 @@ def client_fn(context: Context):
         # as the last value written (the B9 bug). The cache setting is per *run*, so
         # the run config is where it belongs.
         cache = context.run_config.get("cache", "")
+        local_bn = bool(context.run_config.get("local_bn", False))
 
         client = FlowerClient(
             model_path=model_path,
@@ -477,6 +497,7 @@ def client_fn(context: Context):
             local_epochs=local_epochs,
             batch_id_range=batch_id_range,
             cache=cache,
+            local_bn=local_bn,
         )
         
         return client

@@ -299,6 +299,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="ultralytics dataset cache. 'ram' takes JPEG decode off the "
                          "training thread; budget images x imgsz^2 x 3 bytes per "
                          "concurrent client")
+    ap.add_argument("--local-bn", action="store_true",
+                    help="FedBN: every vehicle keeps its own BatchNorm and takes the "
+                         "rest from the aggregate. Aimed at CONDITION partitioning, "
+                         "where the non-IID axis is feature shift and BN buffers are "
+                         "what encodes it; expect little on a random (IID) fleet. "
+                         "Note it leaves no single global model — the saved checkpoint "
+                         "carries the averaged BatchNorm, which is no vehicle's")
     ap.add_argument("--yes", action="store_true", help="confirm the gated stages up front")
     ap.add_argument("--ray-address", help="attach to an existing Ray head (enables its dashboard)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
@@ -314,7 +321,7 @@ def main(argv=None) -> int:
                  strategy=args.strategy, proximal_mu=args.proximal_mu,
                  per_vehicle_override=args.per_vehicle,
                  gpu_fraction=args.gpu_fraction, cache=args.cache,
-                 ray_address=args.ray_address)
+                 local_bn=args.local_bn, ray_address=args.ray_address)
     if not 0 < cfg.gpu_fraction <= 1:
         # Ray accepts a fraction above 1 and then schedules nothing, so the run hangs
         # waiting for clients that can never be placed. Caught here, not there.

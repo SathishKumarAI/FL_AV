@@ -37,7 +37,13 @@ class Config:
     rounds: int = 2
     local_epochs: int = 1
     seed: int = 0
-    partition: str = "condition"     # any key of vehicles.PARTITIONERS
+    # random = IID shards, the setting for "train the best model on this data": FedAvg
+    # over IID clients converges closest to the centralised ceiling. `condition` is the
+    # non-IID setting the FL techniques in docs/PHASED_PLAN.md are aimed at, and it is
+    # still one flag away. This default moved 2026-09-02 and it is NOT cosmetic: the
+    # fleet stage rebuilds whenever the fleet on disk disagrees with it, so a default
+    # that disagrees with the data silently repartitions it on the next run.
+    partition: str = "random"        # any key of vehicles.PARTITIONERS
     strategy: str = "fedavg"         # any key of server_app.STRATEGIES
     proximal_mu: float = 0.0         # FedProx only; >0 turns the proximal term on
     holdout_size: int = 1000         # images no vehicle may train or self-evaluate on
@@ -46,6 +52,7 @@ class Config:
     per_vehicle_override: int = 0    # 0 = use the profile default
     gpu_fraction: float = 1.0        # Ray's per-client GPU share; <1 packs clients
     cache: str = ""                  # "" | ram | disk -- ultralytics' dataset cache
+    local_bn: bool = False           # FedBN: each vehicle keeps its own BatchNorm
     ray_address: str | None = None   # set => attach to an existing head node
 
     @property
@@ -338,7 +345,9 @@ def _cmd_federate(cfg: Config) -> list[str]:
             # Quoted because flwr parses run-config values as TOML: an unquoted
             # fedadam is a bare word, not a string, and the run dies on parse.
             f'strategy="{cfg.strategy}" proximal_mu={cfg.proximal_mu} '
-            f'cache="{cfg.cache}"']
+            # TOML booleans are lowercase; Python's True is a bare word flwr cannot
+            # parse, and the run would die before the first round.
+            f'cache="{cfg.cache}" local_bn={str(cfg.local_bn).lower()}']
 
 
 def _cmd_verify(_: Config) -> list[str]:
