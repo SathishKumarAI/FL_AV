@@ -157,11 +157,29 @@ def checkpoints() -> list[Path]:
     return fresh
 
 
-def per_class(result) -> list[dict]:
+def class_names_on_disk() -> dict[int, str]:
+    """The holdout's own class names, from the yaml that defines the set being scored.
+
+    Not from the checkpoint. ``YOLO(weights).val()`` names its classes from the
+    **model**, and this project's checkpoints are built from ``yolov8s-13.yaml``,
+    which declares no ``names:`` -- so Ultralytics defaults them to ``{0: "0",
+    1: "1", ...}`` and every per-class row came out labelled with its own index.
+    The holdout's ``data.yaml`` has the real list, written by ``build()`` from the
+    same source the shards use.
+    """
+    try:
+        import yaml
+        data = yaml.safe_load(data_yaml().read_text())
+        return {i: str(n) for i, n in enumerate(data.get("names") or [])}
+    except (OSError, ImportError, AttributeError, ValueError):
+        return {}
+
+
+def per_class(result, names: dict[int, str] | None = None) -> list[dict]:
     """AP per class, for the classes the holdout actually contains.
 
-    Two traps in Ultralytics' metric API, both of which produce a plausible wrong
-    table rather than an error:
+    Three traps here, all of which produce a plausible wrong table rather than an
+    error. Each cost a run to find:
 
     - ``box.ap50`` is indexed by *position within* ``box.ap_class_index``, not by
       class id. Zipping it against ``names`` in class order mislabels every row the
@@ -169,13 +187,18 @@ def per_class(result) -> list[dict]:
     - ``box.maps`` **is** indexed by class id, but it pre-fills every absent class
       with the overall ``map``. A class with no instances would be reported as
       scoring the fleet average.
+    - ``nt_per_class`` is on the **result**, not on ``result.box``. Reading it from
+      the box silently yields ``None`` for every count, and the table renders with
+      "?" in the column that says how much any of the other numbers mean.
 
     So iterate ``ap_class_index`` and name each row from it. A class that is not in
     the list is not in the holdout, and is left out rather than given a number.
     """
     box = result.box
-    names = getattr(result, "names", {}) or {}
-    counts = getattr(box, "nt_per_class", None)
+    if names is None:
+        names = class_names_on_disk() or {
+            int(k): str(v) for k, v in (getattr(result, "names", {}) or {}).items()}
+    counts = getattr(result, "nt_per_class", None)
     rows = []
     for i, c in enumerate(getattr(box, "ap_class_index", [])):
         c = int(c)
