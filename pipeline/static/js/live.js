@@ -129,6 +129,58 @@ function renderHoldout(holdout, baseline) {
           : "")
       : ". No centralised baseline yet, so this number still has no scale — run the " +
         "<code>baseline</code> stage.");
+  renderPerClass(rows);
+}
+
+/** What the averaged mAP hides.
+ *
+ * `car` is 55.4 % of the objects in BDD100K and `train` has 29 instances fleet-wide,
+ * so one averaged number over this holdout is close to a car detector's report card.
+ * The bar is AP50; the count beside it is why a high bar may mean very little and a
+ * low one may be a handful of instances rather than a failure.
+ *
+ * Classes absent from the holdout are not here at all — see pipeline/holdout.py
+ * per_class, which omits them rather than reporting Ultralytics' `maps`, which would
+ * hand them the fleet average.
+ */
+function renderPerClass(rows) {
+  const last = rows.length ? rows[rows.length - 1].per_class : null;
+  $("perClassPanel").hidden = !(last && last.length);
+  if (!last || !last.length) return;
+
+  const first = {};
+  for (const c of (rows[0].per_class || [])) first[c.class_id] = c;
+  const totalInst = last.reduce((a, c) => a + (c.instances || 0), 0) || 1;
+  const sorted = last.slice().sort((a, b) => (b.instances || 0) - (a.instances || 0));
+
+  $("perClassWhen").textContent = rows.length > 1
+    ? `round ${rows[rows.length - 1].round}, change since round ${rows[0].round}`
+    : `round ${rows[rows.length - 1].round}`;
+
+  $("perClass").innerHTML = '<div class="mix wide">' + sorted.map(c => {
+    const was = first[c.class_id];
+    const d = (was && rows.length > 1) ? c.AP50 - was.AP50 : null;
+    const share = 100 * (c.instances || 0) / totalInst;
+    const delta = d == null ? ""
+      : `<span class="${d >= 0 ? "ok" : "warn"}">${d >= 0 ? "+" : ""}${d.toFixed(3)}</span>`;
+    return `<div class="r"><div class="t"><i style="width:${(100 * c.AP50).toFixed(1)}%"></i>` +
+      `<span>${esc(c.name)}</span></div>` +
+      `<div class="c" title="${c.instances == null ? "?" : c.instances} instances, ` +
+      `${share.toFixed(1)}% of the holdout's objects">${c.AP50.toFixed(3)} ${delta}</div></div>`;
+  }).join("") + "</div>";
+
+  const top = sorted[0];
+  const thin = sorted.filter(c => (c.instances || 0) < 100);
+  $("perClassNote").innerHTML =
+    `Bar is AP50, hover for instance count. <b>${esc(top.name)}</b> alone is ` +
+    `${(100 * (top.instances || 0) / totalInst).toFixed(1)}% of the objects scored here, so the ` +
+    `single mAP50 above is mostly its number.` +
+    (thin.length
+      ? ` ${thin.length} class(es) have under 100 instances (${thin.map(c => esc(c.name)).join(", ")}); ` +
+        `their AP moves a lot for reasons that are not the model.`
+      : "") +
+    ` Classes with no instances in the holdout are omitted rather than scored — ` +
+    `Ultralytics' <code>maps</code> would have given them the fleet average.`;
 }
 
 /** The signature panel: the one number whose stillness invalidates every other one. */

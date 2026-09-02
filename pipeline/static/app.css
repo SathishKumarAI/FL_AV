@@ -75,6 +75,7 @@ main{padding:var(--s5);max-width:1440px;margin:0 auto}
 .hint{font-size:var(--t-sm);color:var(--dim);margin:var(--s3) 0 0;max-width:80ch}
 .hint b{color:var(--ink-2);font-weight:600}
 .warn{color:var(--warn)}
+.ok{color:var(--ok)}
 code{font-family:var(--mono);color:var(--accent);background:var(--sunk);padding:1px 5px;
      border-radius:var(--r1);font-size:.94em}
 
@@ -183,6 +184,9 @@ body[data-loaded="0"] .skel{color:transparent !important;border-radius:var(--r1)
              letter-spacing:.08em}
 .mix{display:grid;gap:6px}
 .mix .r{display:grid;grid-template-columns:1fr 46px;gap:var(--s2);align-items:center;font-size:var(--t-sm)}
+/* Per-class AP carries a value AND a signed delta, which does not fit the 46px a
+   percentage needs. Same bars, wider right column. */
+.mix.wide .r{grid-template-columns:1fr 116px}
 .mix .t{position:relative;background:var(--sunk);border-radius:var(--r1);padding:2px 7px;overflow:hidden;
         border:1px solid var(--line-soft)}
 .mix .t>i{position:absolute;inset:0 auto 0 0;background:var(--accent);opacity:.16}

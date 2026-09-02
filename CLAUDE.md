@@ -126,13 +126,23 @@ to be wrong quietly.
 
 | | Fact | Why it matters |
 |---|---|---|
-| 1 | `warmup_epochs = 3.0` against `local_epochs = 4` | three of every four epochs are warmup; every client ends a round worse than the aggregate it started from |
-| 2 | `lrf = 0.01` decays **within** the round, and each round calls `train()` fresh at `lr0` | six rounds is six independent anneals, never one. The fleet never anneals globally |
-| 3 | `"optimizer_step"` is in `default_callbacks`, but `BaseTrainer.optimizer_step` **never calls `run_callbacks` for it** | registering that callback is a silent no-op that looks like it works. Override the method and pass `trainer=` to `train()` instead |
-| 4 | `cache = False`, and the client passes `workers=0` on Windows | JPEG decode runs on the training thread. Prime suspect for **27 % mean GPU utilisation** |
-| 5 | Peak VRAM at 1 400 images/vehicle is **5 087 MiB of 16 303**, with `num-gpus = 1.0` | clients are serialised on a card that fits three of them |
-| 6 | The 13-class head **was random**; COCO transfers only the backbone. Now warm-started for 9 of 13 classes (`warm_start_head`) | untrained holdout mAP50 went **0.0053 → 0.2582**. And it exposed the next problem: round 1 *costs* the warm model 0.066 mAP50, because the round is all LR warmup |
-| 7 | Observed run-to-run spread is **≥ ±0.016 mAP50** (a 1.667×-budget ceiling scored *lower* than a smaller one) | any delta under that is not a result. Measure the spread before ranking anything |
+| 1 | **`optimizer="auto"` is the default and it REPLACES `lr0`** with `0.002·5/(4+nc)` = 5.88e-4, and logs that it did | passing `lr0` without also passing `optimizer` is a **silent no-op**. Every run so far trained with AdamW at 5.88e-4, not SGD at 0.01. This is why PR #53's anneal result must be struck rather than believed |
+| 2 | `warmup_epochs` is clamped: `min(warmup_epochs, max(epochs-1, 0))` | at `local_epochs = 1` there is **no warmup at all**; at 4 there really are three of four. Any warmup claim must name its `local_epochs` |
+| 3 | `lrf` and `warmup_epochs` are **not** overridden by `auto` — only `lr0`, `momentum`, `warmup_bias_lr` are | `lrf = 0.01` still decays within the round, and each round calls `train()` fresh. Six rounds is six independent anneals |
+| 4 | `"optimizer_step"` is in `default_callbacks`, but `BaseTrainer.optimizer_step` **never calls `run_callbacks` for it** | registering that callback is a silent no-op that looks like it works. Override the method and pass `trainer=` to `train()` instead |
+| 5 | The dataloader costs **7.93 ms/sample** (5.56 with `mosaic=0`), on the training thread at `workers=0` | ~127 ms per batch of 16, the same order as the GPU step. **This is the 27 % utilisation.** Not decode — `cache="ram"` removes decode and measured *slower*; the cost is mosaic assembly and the warps |
+| 6 | `workers>0` does not help on Windows: 0 → 36.2 s, 4 → 34.3 s, 8 → **40.1 s** | no `fork`, so each worker re-imports torch+ultralytics, and a 1–4 epoch round cannot amortise it. The recorded "Ray deadlock" reason did not reproduce; spawn cost is the real one |
+| 7 | `plots=True` is the default and cost **1.19×** of a round, per client, per round — into a directory the next round overwrote | fixed: the server sends `plots` and sets it True on the final round only. `exist_ok=True` meant only the last round's pictures ever survived anyway |
+| 8 | Peak VRAM at 1 400 images/vehicle is **5 087 MiB of 16 303**, with `num-gpus = 1.0` | clients are serialised on a card that fits three of them |
+| 9 | The 13-class head **was random**; COCO transfers only the backbone. Now warm-started for 9 of 13 classes (`warm_start_head`) | untrained holdout mAP50 went **0.0053 → 0.2582**. And it exposed the next problem: round 1 *costs* the warm model 0.066 mAP50 — at 5.88e-4, not at the `lr0` the old note named |
+| 10 | `get_weights` sends the **full `state_dict`**, so FedAvg averages BatchNorm running stats across weather conditions | correct for IID clients; this fleet is partitioned by *condition*, which is feature shift — exactly what BN buffers encode. See FedBN in [`docs/FEDERATED_DETECTION.md`](docs/FEDERATED_DETECTION.md) |
+| 11 | Observed run-to-run spread is **≥ ±0.016 mAP50** (a 1.667×-budget ceiling scored *lower* than a smaller one) | any delta under that is not a result. Measure the spread before ranking anything |
+
+**And a measurement trap, learned here.** A first `train()` in a process pays CUDA
+context + cuDNN autotune + the AMP check: 34.6 s against 27.1 s warm. Benchmarking arms
+in a fixed order gives that entire cost to the first arm of the first repeat. One run
+per arm said `plots=False` was worth 1.52×; three said **1.19×**. Interleave, repeat,
+and quote the median with its spread.
 
 ## Environment traps
 
@@ -150,6 +160,15 @@ to be wrong quietly.
   which is required at full scale and leaves real headroom at demo scale.
 - The detached SuperLink caches the CWD **and environment** of whichever `flwr run`
   started it. The pipeline kills it before every federation for that reason.
+- **`--gpu-fraction 0.33` has no headroom left, and the failure is on the HOST, not the
+  card.** It is the fastest setting (1.94×) and it fills 94.9–96.6 % of VRAM with three
+  concurrent Ray actors. One run at that setting died mid-round-2 on
+  `numpy ... _ArrayMemoryError: Unable to allocate 11.8 MiB` — a full-resolution BDD
+  frame — with peak VRAM at 15 751 of 16 303 MiB. Three actors each hold their own
+  interpreter, torch, and decoded image buffers. If anything else on the machine wants
+  memory, use **0.5** (two clients, still 1.50×). The pipeline halted correctly rather
+  than reporting a short run as a finished one: Ray exits **0** after an actor dies, and
+  the runner's output inspection is the only thing that catches it.
 - Condition partitioning is only real while the condition has images: `overcast
   residential` has 1 419 in all of BDD100K. Asking for more per vehicle silently tops up
   with random images and turns a non-IID run into a nearly-IID one. `--size-skew`
@@ -178,3 +197,93 @@ python -m pipeline.holdout --evaluate    # the global model on data no vehicle s
 
 CI additionally runs an end-to-end federation smoke on CPU and asserts the aggregate
 checksum changes between rounds.
+
+<!-- plane-agent-rules:v2 -->
+## Issue tracking (Plane, local)
+
+All work across `~/Documents/coding` is tracked in one Plane board.
+The `plane` MCP server is registered at user scope, so its tools are available
+in every session — no setup needed per repo.
+
+- Workspace `coding`, project `Coding` (identifier `COD`), at <http://localhost:8080/coding/>
+- **This repo is the label `repo:federated-yolov8`.** Every work item you create must carry it.
+- Also add one `type:` label matching the conventional-commit type you intend to
+  use: `type:feat` `type:fix` `type:refactor` `type:perf` `type:docs` `type:test`
+  `type:build` `type:chore`.
+
+States, and what each one means here:
+
+| State | Means |
+|---|---|
+| `Backlog` | Captured, not committed to. Default for anything you file mid-task. |
+| `Todo` | Pulled into the current cycle. This week's list. |
+| `In Progress` | A branch exists. |
+| `In Review` | A PR is open, waiting on CI or a read. |
+| `Done` | Squash-merged, branch deleted. |
+| `Cancelled` | Decided against. Say why in a comment — that reasoning is the value. |
+
+Rules:
+
+1. **Before starting work, check for an existing work item** for what you are
+   about to do. Duplicates are worse than nothing because they split the history
+   of a decision. **Two ways to look, and both have a trap** — see "Finding an
+   existing item" below. An empty result from a search you got wrong reads
+   exactly like an empty board, which is how duplicates get filed.
+2. **A found bug outside the current task's scope gets filed, not silently left.**
+   File it in `Backlog` with `repo:federated-yolov8`, say in your reply that you filed it.
+   This is the mechanism the global CLAUDE.md rule refers to.
+3. **Move the item as the branch moves**: `In Progress` when the branch is cut,
+   `In Review` when the PR opens, `Done` on squash-merge.
+4. **Put the work item id in the PR body** (`COD-12`), not only in the branch name.
+5. Do not create Plane *projects*. One project is deliberate — repos are labels
+   so a repo can move between `now/`, `shelf/` and `live/` without its tickets
+   being migrated.
+6. Cycles are weeks. If the user asks "what am I doing this week", read the
+   current cycle, not the whole backlog.
+
+### Finding an existing item
+
+This Plane is the **Community edition**. `workitem list` with a `pql` or any
+structured filter fails outright:
+
+> PQL and structured filters are not supported on this Plane edition.
+
+So **there is no server-side way to filter by the `repo:` label.** Filter in your
+own head instead — list, then read:
+
+```
+workitem list  project_id=<COD uuid>  per_page=100
+               fields=sequence_id,name,state,labels
+```
+
+and keep only the rows whose `labels` contain this repo's label UUID. Get that
+UUID once from `label list` (the API returns UUIDs everywhere and accepts nothing
+else). The board is small enough that one unfiltered list is cheaper than the
+round-trips to avoid it.
+
+`workitem search` also works, but **it matches a contiguous substring of the
+title, not a set of words.** Searching `"LM Studio local model"` returns nothing
+while `"LM Studio"` returns two items — the first phrase appears in no title.
+**Search one distinctive token** (`local_model`, `vault.yaml`, `8787`), never a
+sentence, and treat a miss as "my query was too long", not as "no such ticket".
+
+### Useful UUIDs
+
+Every repo shares one project and one set of states, so these are fixed. Only the
+`repo:` label differs — look yours up with `label list`.
+
+| Thing | UUID |
+|---|---|
+| project `Coding` (COD) | `384bb763-72eb-497f-8ddb-142f7c178668` |
+| state `Backlog` | `c1497bfa-8446-49f0-aa45-976b0311b82f` |
+| state `Todo` | `c074ade8-4a34-4a89-8de3-e7ab61caedf6` |
+| state `In Progress` | `824d6862-acf5-4562-82d3-fc1ee7eaadd9` |
+| state `In Review` | `25021b28-b089-490e-9628-d4c0fd1a5253` |
+| state `Done` | `ede567e7-3e57-405e-ac93-fb04db6bcfff` |
+| state `Cancelled` | `85b6f97d-30e3-4cf4-ae58-063a0e239b4f` |
+
+Plane does not replace `STATUS.md`. `STATUS.md` is re-entry context — where you
+stopped, the next action, the traps. Plane is the queue. Both, in the same commit
+as the work.
+
+<!-- /plane-agent-rules -->
