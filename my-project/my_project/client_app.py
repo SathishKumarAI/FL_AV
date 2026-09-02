@@ -170,6 +170,25 @@ class FlowerClient(Client):
         batch_id = ins.config.get("batch_id", None)
         local_epochs = ins.config.get("local_epochs", self.local_epochs)
         proximal_mu = float(ins.config.get("proximal_mu", 0.0))
+        # Whether THIS round draws Ultralytics' diagnostic pictures. The server sends
+        # True only on the last round -- see fit_config_fn. Everything else here is a
+        # per-run knob that the server forwards from run_config unchanged.
+        plots = bool(ins.config.get("plots", True))
+        optimizer = str(ins.config.get("optimizer", "auto"))
+        lr0 = float(ins.config.get("lr0", 0.0))
+        mosaic = float(ins.config.get("mosaic", -1.0))   # negative = leave the default
+
+        # `optimizer="auto"` REPLACES lr0 with 0.002*5/(4+nc) and logs that it did, in
+        # a line nobody read. Passing lr0 while leaving the optimizer on auto is a
+        # silent no-op that looks like a learning-rate experiment -- it is what makes
+        # PR #53's anneal result untrustworthy. Refuse to let it happen quietly.
+        if lr0 > 0 and optimizer == "auto":
+            logger.warning(
+                f"[Client] lr0={lr0} was requested but optimizer='auto', which "
+                f"discards lr0 and substitutes its own. This round is NOT running at "
+                f"the learning rate it was asked for. Set `optimizer` (e.g. 'AdamW' "
+                f"or 'SGD') in run_config to make lr0 take effect."
+            )
 
         # Use stored batch_id as fallback if available
         if batch_id is None:
@@ -221,6 +240,15 @@ class FlowerClient(Client):
                     f"optimizer step. This round will not change the weights. Raise "
                     f"local_epochs or lower the batch size."
                 )
+            # Only what the server actually set travels: passing lr0=0.0 or
+            # mosaic=None would override an Ultralytics default with a wrong value
+            # rather than leave it alone.
+            tuning = {"optimizer": optimizer} if optimizer != "auto" else {}
+            if lr0 > 0:
+                tuning["lr0"] = lr0
+            if mosaic >= 0:
+                tuning["mosaic"] = mosaic
+
             results = self.yolo.train(
                 data=data_yaml_path,
                 epochs=local_epochs,
@@ -228,6 +256,18 @@ class FlowerClient(Client):
                 device=self.device,
                 batch=batch,
                 verbose=False,
+                # Ultralytics draws labels.jpg, train_batch*.jpg and, at final_eval,
+                # the confusion matrix and PR/F1 curves. Measured at ~1.5x the wall
+                # clock of a 1-epoch round on this hardware, per client, per round.
+                #
+                # Every round wrote them into the SAME directory (exist_ok=True below),
+                # so five rounds of six were drawing pictures that the sixth overwrote
+                # before anything read them. pipeline/train_artifacts.py serves that
+                # directory and its docstring already says it holds only the last
+                # round. So this buys the dashboard nothing and costs a third of the
+                # run. The server sends plots=True on the final round only.
+                plots=plots,
+                **tuning,
                 # Ultralytics defaults to 8. Inside a Ray actor on Windows that is a
                 # deadlock, not a slowdown — spawned dataloader children never join.
                 # With workers=0 the JPEG decode runs on the training thread, which is
