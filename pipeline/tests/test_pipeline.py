@@ -1316,6 +1316,56 @@ def test_the_run_config_the_deployment_submits_matches_the_simulation_one():
     assert "local_bn=true" in deployed and "num_server_rounds=3" in deployed
 
 
+def _rounds(*scores):
+    return [{"round": i, "mAP50": s, "checkpoint": f"global_round_{i}.pt"}
+            for i, s in enumerate(scores, 1)]
+
+
+def test_a_long_run_reports_the_round_it_peaked_at_not_the_one_it_stopped_at():
+    """Measured twice in this project: a warm-started model scored 0.2582 untrained
+    against 0.2073 after two rounds, and a 1.667x-budget ceiling scored LOWER than a
+    smaller one. Reporting the final checkpoint turns "we trained longer" into "we
+    reported a worse model"."""
+    info = _holdout.best_round(_rounds(0.10, 0.31, 0.28, 0.25))
+    assert info["best_round"] == 2 and info["best"] == 0.31
+    assert info["final_round"] == 4 and info["final"] == 0.25
+    assert info["regression"] == 0.06, "the cost of the rounds after the peak"
+    assert info["wasted_rounds"] == 2
+
+
+def test_a_run_still_improving_reports_no_regression():
+    info = _holdout.best_round(_rounds(0.10, 0.20, 0.30))
+    assert info["best_round"] == 3 and info["wasted_rounds"] == 0
+    assert info["regression"] == 0.0
+
+
+def test_a_tie_goes_to_the_earlier_round():
+    """Two rounds of equal score are not equally good: the earlier one cost less GPU,
+    and preferring it is what makes `wasted_rounds` mean anything."""
+    info = _holdout.best_round(_rounds(0.10, 0.30, 0.30))
+    assert info["best_round"] == 2
+    assert info["wasted_rounds"] == 1
+
+
+def test_best_round_survives_a_curve_with_nothing_in_it():
+    assert _holdout.best_round([]) == {}
+    assert _holdout.best_round([{"round": 1}]) == {}, "a row with no score is not a best"
+
+
+def test_promote_copies_rather_than_moves_so_the_curve_stays_reproducible(tmp_path, monkeypatch):
+    ckpts = tmp_path / "checkpoints"
+    ckpts.mkdir()
+    for i in (1, 2, 3):
+        (ckpts / f"global_round_{i}.pt").write_bytes(bytes([i]))
+    monkeypatch.setattr(_holdout.paths, "PROJECT", tmp_path)
+
+    dst = _holdout.promote(_rounds(0.1, 0.9, 0.4))
+    assert dst is not None and dst.name == "global_best.pt"
+    assert dst.read_bytes() == bytes([2]), "promoted the wrong round"
+    # The per-round checkpoints must survive: the curve is measured from them.
+    assert all((ckpts / f"global_round_{i}.pt").exists() for i in (1, 2, 3))
+
+
 def test_the_holdout_stage_runs_before_the_fleet_stage():
     """Order is load-bearing: a holdout carved afterwards is already in someone's
     val split."""
