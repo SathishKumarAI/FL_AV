@@ -35,6 +35,7 @@ Open the one file that owns the thing. Do not read the package to find it.
 | Label boxes drawn over a frame, the trainer's own pictures | `pipeline/static/js/consumed.js` |
 | Which of ultralytics' output pictures are served, and their captions | `pipeline/train_artifacts.py` — `KINDS` |
 | An HTTP route or what `/api/state` returns | `pipeline/server.py` |
+| Real SuperLink/SuperNode processes instead of the simulator | `pipeline/deploy.py` |
 | The live edge fleet: what a node may report, and its bounds | `pipeline/nodes.py` |
 | The edge node itself — camera, inference, heartbeat | `pipeline/edge.py` |
 | The live-nodes panel | `pipeline/static/js/edge.js` |
@@ -141,7 +142,7 @@ to be wrong quietly.
 | 8 | Peak VRAM at 1 400 images/vehicle is **5 087 MiB of 16 303**, with `num-gpus = 1.0` | clients are serialised on a card that fits three of them |
 | 9 | The 13-class head **was random**; COCO transfers only the backbone. Now warm-started for 9 of 13 classes (`warm_start_head`) | untrained holdout mAP50 went **0.0053 → 0.2582**. And it exposed the next problem: round 1 *costs* the warm model 0.066 mAP50 — at 5.88e-4, not at the `lr0` the old note named |
 | 10 | `get_weights` sends the **full `state_dict`**, so FedAvg averages BatchNorm running stats across weather conditions | correct for IID clients; this fleet is partitioned by *condition*, which is feature shift — exactly what BN buffers encode. See FedBN in [`docs/FEDERATED_DETECTION.md`](docs/FEDERATED_DETECTION.md) |
-| 11 | Observed run-to-run spread is **≥ ±0.016 mAP50** (a 1.667×-budget ceiling scored *lower* than a smaller one) | any delta under that is not a result. Measure the spread before ranking anything |
+| 11 | **Measured seed spread is ±0.0018 mAP50** (n=3, max−min 0.0036, stdev 0.0019; IID, 2 rounds × 1 epoch, same holdout in every arm) | the old **±0.016** was inferred from a *centralised* ceiling anomaly across two different data volumes — never a seed spread, and 8.9× too loose. It has been dismissing real differences, including FedBN's +0.0040. n=3 under-reports, so treat ±0.0018 as a **lower bound**, and re-measure at 6 × 4 non-IID before trusting it there |
 
 **And a measurement trap, learned here.** A first `train()` in a process pays CUDA
 context + cuDNN autotune + the AMP check: 34.6 s against 27.1 s warm. Benchmarking arms
@@ -218,7 +219,7 @@ a host. This is the path off the simulation engine and onto real machines.
 | version | change | why it matters here |
 |---|---|---|
 | **8.4.130** | tuning's default optimizer changed to **AdamW**, explicitly *"to ensure tuning parameters such as learning rate and momentum actually affect training"* | **upstream hit fact 1 and fixed it in their tuner.** Independent confirmation that `optimizer="auto"` silently discarding `lr0` is a real trap and not a misreading. The trainer default is unchanged, so this repo still must pass `optimizer` explicitly |
-| **8.4.137** | channels-last CUDA training auto-enabled on torch ≥1.11 | a free speed lever. 8.4.115's argument dump shows `channels_last=False`, so this repo is not getting it |
+| **8.4.137** | channels-last CUDA training auto-enabled on torch ≥1.11 | **no upgrade needed to try it.** 8.4.115 already has the `channels_last` argument, defaulting to `False`; 8.4.137 only flips the default. So it is reachable today as `channels_last=True`. Untested here, and it is not free of risk: it changes tensor memory format, and `get_weights` serialises the whole `state_dict` — the transport that produced the B4 bug. Measure the aggregate checksum, not just the wall clock. Ultralytics does serialise checkpoints as NCHW regardless, so saved weights are unaffected |
 | **8.4.129** | BF16 mixed precision (`amp="bf16"`) | Blackwell has the hardware; untested here |
 | **8.4.131** | validation forced onto the **unaugmented** pipeline when `split=train` | a correctness fix in the evaluation path this project reports from |
 | **8.4.135** | `max_det` auto-matched to dataset object counts | BDD frames are crowded — `max_det=300` is a live ceiling at this scale, worth checking before it silently truncates |

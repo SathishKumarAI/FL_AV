@@ -47,6 +47,11 @@ class Config:
     strategy: str = "fedavg"         # any key of server_app.STRATEGIES
     proximal_mu: float = 0.0         # FedProx only; >0 turns the proximal term on
     holdout_size: int = 1000         # images no vehicle may train or self-evaluate on
+    # Deliberately NOT `seed`. The holdout is the ruler; the run seed is the thing being
+    # measured. Tying them together meant a seed sweep -- the one experiment whose job
+    # is to hold everything but the seed constant -- rebuilt the holdout for every arm
+    # and compared three numbers taken on three different sets of images.
+    holdout_seed: int = 0
     alpha: float = 0.5               # dirichlet only: smaller = more skewed
     size_skew: float = 0.0           # 0 = every vehicle the same size; ~1 = 10x spread
     per_vehicle_override: int = 0    # 0 = use the profile default
@@ -358,15 +363,17 @@ def _check_holdout(cfg: Config) -> Check:
     info = holdout.meta()
     if not info:
         return Check(False, "not yet carved")
-    if info.get("size") != cfg.holdout_size or info.get("seed") != cfg.seed:
+    if info.get("size") != cfg.holdout_size or info.get("seed") != cfg.holdout_seed:
         return Check(False, f"holdout on disk is size={info.get('size')} seed={info.get('seed')}, "
-                            f"config wants size={cfg.holdout_size} seed={cfg.seed}")
-    return Check(True, f"{info.get('linked')} images held out, no vehicle sees them")
+                            f"config wants size={cfg.holdout_size} seed={cfg.holdout_seed}")
+    fp = info.get("fingerprint")
+    return Check(True, f"{info.get('linked')} images held out, no vehicle sees them"
+                       + (f" (fingerprint {fp})" if fp else ""))
 
 
 def _cmd_holdout(cfg: Config) -> list[str]:
     return [PY, "-m", "pipeline.holdout", "--build",
-            "--size", str(cfg.holdout_size), "--seed", str(cfg.seed)]
+            "--size", str(cfg.holdout_size), "--seed", str(cfg.holdout_seed)]
 
 
 def _check_validate(_: Config) -> Check:

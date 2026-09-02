@@ -1212,6 +1212,160 @@ def test_the_model_a_node_caches_on_is_content_addressed():
         "global_last duplicates a round under a name that never changes"
 
 
+def test_the_holdout_does_not_move_when_the_run_seed_does():
+    """The holdout is the ruler; the run seed is what is being measured. They were the
+    same field, so `--preset seeds` -- the one experiment whose whole job is to hold
+    everything but the seed constant -- rebuilt the holdout for every arm and compared
+    three scores taken on three different sets of images."""
+    cmds = [" ".join(stages._cmd_holdout(Config(seed=s))) for s in (0, 1, 2)]
+    assert len(set(cmds)) == 1, f"the holdout command varies with the run seed: {cmds}"
+    assert "--seed 0" in cmds[0]
+
+    # And it still moves when explicitly asked to.
+    assert "--seed 7" in " ".join(stages._cmd_holdout(Config(holdout_seed=7)))
+
+
+def test_the_experiment_driver_passes_through_the_levers_the_runner_has():
+    """experiment.py builds runner command lines by hand, so a lever added to the
+    runner is invisible here until someone adds it twice. Each of these was missing:
+    partition was hardcoded 'condition' (which would have rebuilt an IID fleet as
+    non-IID), gpu_fraction was never passed (every arm ran ~1.9x slower than the same
+    run by hand), and `--all` retrained the centralised ceiling once per arm."""
+    from pipeline import experiment
+
+    cmd = " ".join(experiment.command({"seed": 3}, confirm=True))
+    assert f"--partition {Config.partition}" in cmd, "partition is not the Config default"
+    assert "--gpu-fraction" in cmd
+    assert "--seed 3" in cmd
+
+    swept = " ".join(experiment.command({"partition": "condition"}, confirm=False))
+    assert "--partition condition" in swept, "an explicit arm setting was overridden"
+
+    skipped = " ".join(experiment.command({"skip": "baseline"}, confirm=True))
+    assert "--skip baseline" in skipped
+    assert "--local-bn" in " ".join(experiment.command({"local_bn": True}, confirm=False))
+    assert "--local-bn" not in " ".join(experiment.command({}, confirm=False))
+
+
+# ------------------------------------------------- deployment engine
+from pipeline import deploy as _deploy  # noqa: E402
+
+
+def test_every_supernode_gets_its_own_clientappio_address():
+    """Sharing one is the failure that looks like a hang: the second node binds
+    nothing, registers nothing, and the federation waits forever for a client that
+    never arrives."""
+    addrs = []
+    for i in range(5):
+        cmd = _deploy.supernode_cmd(i, "127.0.0.1:9092")
+        addrs.append(cmd[cmd.index("--clientappio-api-address") + 1])
+    assert len(set(addrs)) == 5, f"SuperNodes share an address: {addrs}"
+    assert all(a.startswith("127.0.0.1:") for a in addrs)
+    # Every node dials the same fleet port; only their own API port differs.
+    assert all("--superlink" in _deploy.supernode_cmd(i, "127.0.0.1:9092") for i in range(5))
+
+
+def test_the_fleet_and_control_ports_are_not_the_same():
+    """9092 is where SuperNodes dial in, 9093 is where `flwr run` submits. Pointing a
+    SuperNode at the control port fails in a way that reads as a network problem."""
+    assert _deploy.FLEET_PORT != _deploy.CONTROL_PORT
+    link = _deploy.superlink_cmd("127.0.0.1")
+    assert f"127.0.0.1:{_deploy.FLEET_PORT}" in link
+    assert f"127.0.0.1:{_deploy.CONTROL_PORT}" in link
+    # SuperNode API ports must not collide with either.
+    used = {_deploy.FLEET_PORT, _deploy.CONTROL_PORT}
+    assert not used & {_deploy.NODE_PORT_BASE + i for i in range(8)}
+
+
+def test_the_federation_entry_is_appended_not_rewritten(tmp_path, monkeypatch):
+    """~/.flwr/config.toml holds every federation on the machine, including the
+    local-simulation one the rest of this pipeline runs on. Rewriting it would take
+    the simulator down as a side effect of trying the deployment engine."""
+    home = tmp_path
+    monkeypatch.setattr(_deploy.Path, "home", staticmethod(lambda: home))
+    cfg = home / ".flwr" / "config.toml"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text('[superlink.local-simulation]\naddress = ":local:"\n', encoding="utf-8")
+
+    _deploy.ensure_federation("local-deployment", "127.0.0.1")
+    text = cfg.read_text(encoding="utf-8")
+    assert "[superlink.local-simulation]" in text, "the simulation federation was lost"
+    assert "[superlink.local-deployment]" in text
+    assert "insecure = true" in text
+
+    # Idempotent: running the deployment twice must not duplicate the section.
+    _deploy.ensure_federation("local-deployment", "127.0.0.1")
+    assert cfg.read_text(encoding="utf-8").count("[superlink.local-deployment]") == 1
+
+
+def test_the_run_config_the_deployment_submits_matches_the_simulation_one():
+    """The two paths build their own command lines. A lever added to one and not the
+    other means the deployment silently trains a different configuration -- and the
+    keys must all be declared in pyproject or flwr refuses the whole run."""
+    cfg = Config(rounds=3, local_epochs=2, n_vehicles=4, local_bn=True)
+    deployed = " ".join(_deploy.run_cmd("local-deployment", cfg))
+    simulated = " ".join(stages._cmd_federate(cfg))
+
+    declared = (paths.PROJECT / "pyproject.toml").read_text(encoding="utf-8")
+    body = declared.split("[tool.flwr.app.config]", 1)[1].split("[tool.flwr", 1)[0]
+    known = set(re.findall(r"^(\w+) *=", body, re.M))
+
+    for cmdline, label in ((deployed, "deploy"), (simulated, "simulate")):
+        sent = set(re.findall(r"(\w+)=", cmdline.split("--run-config", 1)[1]))
+        assert sent <= known, f"{label} sends undeclared run-config keys: {sorted(sent - known)}"
+    assert "local_bn=true" in deployed and "num_server_rounds=3" in deployed
+
+
+def _rounds(*scores):
+    return [{"round": i, "mAP50": s, "checkpoint": f"global_round_{i}.pt"}
+            for i, s in enumerate(scores, 1)]
+
+
+def test_a_long_run_reports_the_round_it_peaked_at_not_the_one_it_stopped_at():
+    """Measured twice in this project: a warm-started model scored 0.2582 untrained
+    against 0.2073 after two rounds, and a 1.667x-budget ceiling scored LOWER than a
+    smaller one. Reporting the final checkpoint turns "we trained longer" into "we
+    reported a worse model"."""
+    info = _holdout.best_round(_rounds(0.10, 0.31, 0.28, 0.25))
+    assert info["best_round"] == 2 and info["best"] == 0.31
+    assert info["final_round"] == 4 and info["final"] == 0.25
+    assert info["regression"] == 0.06, "the cost of the rounds after the peak"
+    assert info["wasted_rounds"] == 2
+
+
+def test_a_run_still_improving_reports_no_regression():
+    info = _holdout.best_round(_rounds(0.10, 0.20, 0.30))
+    assert info["best_round"] == 3 and info["wasted_rounds"] == 0
+    assert info["regression"] == 0.0
+
+
+def test_a_tie_goes_to_the_earlier_round():
+    """Two rounds of equal score are not equally good: the earlier one cost less GPU,
+    and preferring it is what makes `wasted_rounds` mean anything."""
+    info = _holdout.best_round(_rounds(0.10, 0.30, 0.30))
+    assert info["best_round"] == 2
+    assert info["wasted_rounds"] == 1
+
+
+def test_best_round_survives_a_curve_with_nothing_in_it():
+    assert _holdout.best_round([]) == {}
+    assert _holdout.best_round([{"round": 1}]) == {}, "a row with no score is not a best"
+
+
+def test_promote_copies_rather_than_moves_so_the_curve_stays_reproducible(tmp_path, monkeypatch):
+    ckpts = tmp_path / "checkpoints"
+    ckpts.mkdir()
+    for i in (1, 2, 3):
+        (ckpts / f"global_round_{i}.pt").write_bytes(bytes([i]))
+    monkeypatch.setattr(_holdout.paths, "PROJECT", tmp_path)
+
+    dst = _holdout.promote(_rounds(0.1, 0.9, 0.4))
+    assert dst is not None and dst.name == "global_best.pt"
+    assert dst.read_bytes() == bytes([2]), "promoted the wrong round"
+    # The per-round checkpoints must survive: the curve is measured from them.
+    assert all((ckpts / f"global_round_{i}.pt").exists() for i in (1, 2, 3))
+
+
 def test_the_holdout_stage_runs_before_the_fleet_stage():
     """Order is load-bearing: a holdout carved afterwards is already in someone's
     val split."""

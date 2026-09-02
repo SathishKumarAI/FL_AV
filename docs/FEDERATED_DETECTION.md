@@ -258,6 +258,94 @@ Two things fall out:
 
 ---
 
+## The noise floor, measured at last — and ±0.016 was never it
+
+Phase 3's blocking question, answered 2026-09-02. Three seeds, identical everything
+else, IID fleet, 6 vehicles × 1 400 images, 2 rounds × 1 epoch, **the same 1 000-image
+holdout in every arm** (fingerprint `3af571c2c901`, seed 0 — verified per arm, not
+assumed):
+
+| seed | holdout mAP50 | fleet |
+|---|---|---|
+| 0 | 0.1193 | `35cf9f955aeb` |
+| 1 | 0.1157 | `23215281ddba` |
+| 2 | 0.1186 | `c579060d276f` |
+
+```
+mean       0.1179
+max − min  0.0036        half-range ±0.0018        stdev 0.0019
+assumed    ±0.0160       -> the measured spread is 8.9x tighter
+```
+
+**Where ±0.016 came from, and why it was the wrong instrument.** It was inferred from a
+*centralised* ceiling anomaly: a ceiling trained on 14 000 images for 24 epochs scored
+0.4771 against the 8 400-image ceiling's 0.4936. That is a comparison between two
+different data volumes in a non-federated setting. It was never a seed spread, and it
+has been used as one to dismiss differences for two sessions.
+
+**This re-opens results previously written off**, including one of mine. FedBN measured
+**+0.0040** at round 1 — larger than the 0.0036 max−min — and I recorded it as "no
+measured difference" against the ±0.016 figure. That call rested on the wrong number.
+It is *not* thereby a win: the FedBN arms were one run each, and a single delta at the
+edge of a three-sample range decides nothing. The honest status is **unresolved, and now
+worth the repeats** rather than closed.
+
+### What this spread does and does not cover
+
+- **Three seeds. `max − min` under-reports the true spread**, and badly at n=3. Treat
+  ±0.0018 as a lower bound on the error bar, not the error bar.
+- Measured at **2 rounds × 1 epoch on an IID fleet**. The headline runs 6 × 4 on a
+  condition-partitioned one. Variance is not guaranteed to transfer — non-IID arms have
+  a second source of it in which conditions land where.
+- The seed moves **the fleet and the training randomness together**, which is the right
+  question for "would a rerun agree with me", and the wrong one for separating data
+  variance from optimisation variance.
+- The holdout on disk predates the fingerprint field, so its stored `fingerprint` is
+  null; the value above is computed live from the name list. Rebuilding at the same
+  size and seed is deterministic and would persist it.
+
+## Running it long, and why 40×1 rather than 10×4
+
+The instinct for "a better model" is more rounds and more local epochs. Half of that
+is right here, and the other half is actively wasteful.
+
+`_get_warmup_iterations` clamps warmup to `min(warmup_epochs, epochs - 1)`. At
+`local_epochs = 4` that is **three warmup epochs of four** — every client spends most of
+every round on a ramping learning rate and ends it worse than the aggregate it started
+from, which FedAvg then averages. At `local_epochs = 1` there is **no warmup at all**.
+
+So at a fixed GPU budget, spend it on **rounds, not local epochs**:
+
+| | epochs/round | rounds | warmup waste | aggregation steps |
+|---|---|---|---|---|
+| the old headline | 4 | 6 | 3 of every 4 epochs | 6 |
+| **40 × 1** | 1 | 40 | **none** | **40** |
+
+Same 160 s per round-epoch on this machine, ~1.8 h either way, and the second gives the
+federation 40 chances to aggregate instead of 6. It is also the direction phase 2
+already predicted — fewer local epochs reduce client drift.
+
+**But more rounds is not monotonically better, and this project has measured that
+twice**: the warm-started model scored 0.2582 *untrained* against 0.2073 after two
+rounds, and a 1.667×-budget centralised ceiling scored *lower* than a smaller one. A
+long run can end on a worse model than it passed through.
+
+That is what `python -m pipeline.holdout --evaluate --promote` is for. It reports the
+round the curve peaked at, what the rounds after it cost, and copies the winner to
+`checkpoints/global_best.pt`. **Report the best round, not the last one** — and
+`wasted_rounds` is the number that says what to set `--rounds` to next time.
+
+```bash
+python -m pipeline.runner --all --rounds 40 --epochs 1 --per-vehicle 1400 \
+       --partition random --gpu-fraction 0.5 --skip baseline --yes
+python -m pipeline.holdout --evaluate --promote
+```
+
+One honesty note on the comparison: 6 vehicles × 1400 × 40 rounds × 1 epoch is
+**336 000 image-visits against the headline's 201 600**, so the result is *not*
+budget-matched to the 0.4936 centralised ceiling. Either rerun the ceiling at the
+matching epoch count or state the ratio, exactly as `baseline.parity` already does.
+
 ## What to actually run
 
 Ordered by expected value per GPU-hour on this machine, all of it gated behind the
