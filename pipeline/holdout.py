@@ -18,6 +18,7 @@ Ultralytics can read them without the federation knowing.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 from pathlib import Path
@@ -46,6 +47,21 @@ def select(size: int = 1000, seed: int = 0, val_pool: set[str] | None = None) ->
     rng = random.Random(seed)
     rng.shuffle(pool)
     return sorted(pool[:size])
+
+
+def fingerprint(chosen: list[str] | None = None) -> str:
+    """Content hash of exactly which images the holdout holds.
+
+    ``size`` and ``seed`` describe how it was *asked* for, not what it *is*: the same
+    size and seed drawn from a val pool that has since grown gives a different holdout
+    and records identical metadata. Every number this project reports is measured on
+    this slice, so two runs claiming the same holdout need something checkable, on the
+    same principle as ``Vehicle.fingerprint``.
+
+    Names, not bytes -- the images are hardlinks onto a read-only cache.
+    """
+    chosen = sorted(names()) if chosen is None else sorted(chosen)
+    return hashlib.sha256("\n".join(chosen).encode()).hexdigest()[:12]
 
 
 def names() -> set[str]:
@@ -105,7 +121,8 @@ def build(size: int = 1000, seed: int = 0, class_names: list[str] | None = None,
     )
     NAMES_FILE.parent.mkdir(parents=True, exist_ok=True)
     NAMES_FILE.write_text(json.dumps(
-        {"size": size, "seed": seed, "linked": linked, "names": chosen}, indent=1))
+        {"size": size, "seed": seed, "linked": linked,
+         "fingerprint": fingerprint(chosen), "names": chosen}, indent=1))
     return HOLDOUT_ROOT
 
 
@@ -140,6 +157,40 @@ def checkpoints() -> list[Path]:
     return fresh
 
 
+def per_class(result) -> list[dict]:
+    """AP per class, for the classes the holdout actually contains.
+
+    Two traps in Ultralytics' metric API, both of which produce a plausible wrong
+    table rather than an error:
+
+    - ``box.ap50`` is indexed by *position within* ``box.ap_class_index``, not by
+      class id. Zipping it against ``names`` in class order mislabels every row the
+      moment one class is absent from the holdout.
+    - ``box.maps`` **is** indexed by class id, but it pre-fills every absent class
+      with the overall ``map``. A class with no instances would be reported as
+      scoring the fleet average.
+
+    So iterate ``ap_class_index`` and name each row from it. A class that is not in
+    the list is not in the holdout, and is left out rather than given a number.
+    """
+    box = result.box
+    names = getattr(result, "names", {}) or {}
+    counts = getattr(box, "nt_per_class", None)
+    rows = []
+    for i, c in enumerate(getattr(box, "ap_class_index", [])):
+        c = int(c)
+        rows.append({
+            "class_id": c,
+            "name": names.get(c, str(c)),
+            "instances": int(counts[c]) if counts is not None and c < len(counts) else None,
+            "AP50": float(box.ap50[i]),
+            "AP50-95": float(box.ap[i]),
+            "precision": float(box.p[i]),
+            "recall": float(box.r[i]),
+        })
+    return sorted(rows, key=lambda r: r["class_id"])
+
+
 def evaluate(weights: Path, imgsz: int = 640, batch: int = 8, device: str = "0") -> dict:
     """Score one checkpoint on the holdout. Raises if it cannot -- never returns 0."""
     if not weights.exists():
@@ -158,7 +209,11 @@ def evaluate(weights: Path, imgsz: int = 640, batch: int = 8, device: str = "0")
     return {"checkpoint": weights.name,
             "round": int(weights.stem.rsplit("_", 1)[-1]) if weights.stem[-1].isdigit() else None,
             "mAP50": float(box.map50), "mAP50-95": float(box.map),
-            "precision": float(box.mp), "recall": float(box.mr)}
+            "precision": float(box.mp), "recall": float(box.mr),
+            # `car` is 55.4 % of objects and `train` has 29 instances fleet-wide, so a
+            # single averaged mAP is close to a car detector's report card. Per-class is
+            # what says whether federation helped the rare classes or only the common one.
+            "per_class": per_class(result)}
 
 
 def evaluate_all(imgsz: int = 640, batch: int = 8, device: str = "0") -> list[dict]:
@@ -200,13 +255,16 @@ def main(argv=None) -> int:
         root = build(args.size, args.seed)
         info = meta()
         print(f"holdout: {info.get('linked')} of {info.get('size')} images materialised at {root}")
+        print(f"fingerprint: {info.get('fingerprint')} — quote this, not size and seed; "
+              f"they describe how it was asked for, not what it is")
         print("no vehicle can train or self-evaluate on these: the fleet is assigned "
               "from the val pool with them removed")
 
     if args.evaluate:
         rows = evaluate_all(imgsz=args.imgsz, batch=args.batch, device=args.device)
-        print(f"\nGlobal model on the shared holdout ({meta().get('size')} images "
-              f"no vehicle saw):\n")
+        info = meta()
+        print(f"\nGlobal model on the shared holdout ({info.get('size')} images "
+              f"no vehicle saw, fingerprint {info.get('fingerprint') or fingerprint()}):\n")
         for r in rows:
             print(f"  round {r['round']:<3} mAP50 {r['mAP50']:.4f}  "
                   f"mAP50-95 {r['mAP50-95']:.4f}  P {r['precision']:.3f}  R {r['recall']:.3f}")
@@ -214,6 +272,21 @@ def main(argv=None) -> int:
             delta = rows[-1]["mAP50"] - rows[0]["mAP50"]
             print(f"\n  {delta:+.4f} mAP50 across {len(rows)} rounds, measured on data "
                   f"no client trained on.")
+
+        last = rows[-1].get("per_class") or []
+        if last:
+            first = {c["class_id"]: c for c in (rows[0].get("per_class") or [])}
+            print(f"\n  Per class, final round — an averaged mAP over a set that is "
+                  f"mostly `car` hides which classes federation actually moved:\n")
+            print(f"    {'class':<16}{'inst':>7}{'AP50':>9}{'AP50-95':>10}{'Δ AP50':>10}")
+            for c in sorted(last, key=lambda r: -(r["instances"] or 0)):
+                was = first.get(c["class_id"], {}).get("AP50")
+                delta = f"{c['AP50'] - was:+.4f}" if was is not None and len(rows) > 1 else "—"
+                inst = c["instances"] if c["instances"] is not None else "?"
+                print(f"    {c['name']:<16}{inst:>7}{c['AP50']:>9.4f}"
+                      f"{c['AP50-95']:>10.4f}{delta:>10}")
+            print("\n    Classes absent from the holdout are omitted, not scored zero: "
+                  "Ultralytics' `maps` would have given them the fleet average.")
         print(f"\nwritten: {METRICS_FILE}")
     return 0
 

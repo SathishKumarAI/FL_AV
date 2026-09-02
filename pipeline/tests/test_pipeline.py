@@ -964,6 +964,64 @@ def test_a_fleet_that_predates_the_holdout_is_rebuilt(monkeypatch):
     assert stages._check_fleet(Config(n_vehicles=6, partition="condition")).satisfied is True
 
 
+class _FakeBox:
+    """Ultralytics' Metric, in the shape that matters: the per-class arrays are
+    indexed by POSITION in ap_class_index, while nt_per_class is indexed by class id."""
+    def __init__(self, present, ap50, ap, nt):
+        self.ap_class_index = present
+        self.ap50, self.ap = ap50, ap
+        self.p = [0.5] * len(present)
+        self.r = [0.6] * len(present)
+        self.nt_per_class = nt
+
+
+class _FakeResult:
+    def __init__(self, box, names):
+        self.box, self.names = box, names
+
+
+def test_per_class_rows_are_named_by_class_id_not_by_array_position():
+    """The trap: box.ap50[i] is the i-th class *present*, not class i. With class 0
+    absent, zipping the arrays against names in order labels every row with its
+    predecessor's name — a table that looks right and attributes `car`'s score to
+    `person`."""
+    names = {0: "person", 1: "rider", 2: "car", 3: "truck"}
+    # Only classes 2 and 3 appear in the holdout.
+    box = _FakeBox(present=[2, 3], ap50=[0.71, 0.42], ap=[0.40, 0.21],
+                   nt=[0, 0, 5000, 300])
+    rows = _holdout.per_class(_FakeResult(box, names))
+
+    assert [r["name"] for r in rows] == ["car", "truck"]
+    assert [r["AP50"] for r in rows] == [0.71, 0.42]
+    assert [r["instances"] for r in rows] == [5000, 300]
+
+
+def test_a_class_absent_from_the_holdout_is_omitted_rather_than_given_the_fleet_average():
+    """Ultralytics' `maps` pre-fills absent classes with the overall mAP, so `train`
+    — 29 instances fleet-wide, routinely absent from a 1000-image holdout — would be
+    reported as scoring whatever the average was. Silent, and flattering."""
+    names = {0: "person", 1: "car", 2: "train"}
+    box = _FakeBox(present=[0, 1], ap50=[0.30, 0.70], ap=[0.15, 0.40], nt=[100, 900, 0])
+    rows = _holdout.per_class(_FakeResult(box, names))
+
+    assert [r["class_id"] for r in rows] == [0, 1]
+    assert "train" not in {r["name"] for r in rows}
+
+
+def test_holdout_fingerprint_separates_two_holdouts_that_record_identical_metadata():
+    """size and seed describe the request, not the result: the same pair drawn from a
+    val pool that has since grown gives different images and identical metadata. Two
+    runs claiming 'the same holdout' need something checkable."""
+    pool = {f"img{i}.jpg" for i in range(500)}
+    a = _holdout.select(50, seed=4, val_pool=pool)
+    b = _holdout.select(50, seed=4, val_pool=pool | {f"new{i}.jpg" for i in range(500)})
+
+    assert _holdout.fingerprint(a) != _holdout.fingerprint(b), \
+        "a grown pool produced a different holdout that fingerprints the same"
+    assert _holdout.fingerprint(a) == _holdout.fingerprint(list(reversed(a))), \
+        "fingerprint depends on listing order, so it cannot identify a holdout"
+
+
 def test_the_holdout_stage_runs_before_the_fleet_stage():
     """Order is load-bearing: a holdout carved afterwards is already in someone's
     val split."""
