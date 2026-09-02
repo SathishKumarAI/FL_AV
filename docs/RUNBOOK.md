@@ -186,11 +186,26 @@ expectation of 2–2.5× was optimistic by exactly that much. The fraction is a 
 share — Ray runs ⌊1/fraction⌋ clients and caps none of them — so pick it from measured
 peak VRAM, not from the client count you would like:
 
-| Images/vehicle | Peak VRAM, one client | Safe fraction |
-|---|---|---|
-| 300 (demo, 320 px) | 7 319 MiB | 0.5 |
-| 1 400 (full, 640 px) | 5 087 MiB | 0.5, probably 0.33 — unmeasured |
-| 6 308 (full, 640 px) | 15 900 MiB | 1.0 only |
+| Images/vehicle | Peak VRAM, one client | Measured safe fraction | Clients at once |
+|---|---|---|---|
+| 300 (demo, 320 px) | 7 319 MiB | 0.5 | 2 |
+| 1 400 (full, 640 px) | 6 453 MiB | **0.33** — 15 468 MiB, 94.9 % of the card | 3 |
+| 6 308 (full, 640 px) | 15 900 MiB | 1.0 only | 1 |
 
-The 1 400-image row peaks *lower* than the 300-image one because batch size is chosen
-per run, not per image count. Measure before trusting a row you have not run.
+The 300-image row peaks *higher per client* than the 1 400-image one because batch size
+is chosen per run, not per image count. Measure before trusting a row you have not run.
+
+At the 1 400-image profile — the one the reference run used — the same fleet, 6 vehicles
+× 2 rounds × 1 epoch:
+
+| `--gpu-fraction` | wall | mean util | peak VRAM | energy |
+|---|---|---|---|---|
+| 1.0 | 562.1 s | 19.3 % | 6 453 MiB | 10.36 Wh |
+| 0.5 | 394.9 s | 29.7 % | 10 474 MiB | 8.37 Wh |
+| **0.33** | **289.2 s** | 30.9 % | 15 468 MiB | **5.92 Wh** |
+
+**1.94× faster and 43 % less energy**, checksums moving every round in all three.
+
+`--cache ram` was measured at both profiles and made runs **slower** (595.2 s against
+562.1 s at the full profile). It is available and it is not recommended: decode is not
+what the card is waiting for.

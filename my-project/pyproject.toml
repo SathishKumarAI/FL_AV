@@ -51,6 +51,10 @@ strategy = "fedavg"   # "fedavg" or "fedprox"
 proximal_mu = 0.0     # FedProx proximal strength; >0 enables FedProx (default 0.1 if strategy=fedprox)
 checkpoint_dir = "checkpoints"  # where the aggregated global model is saved
 save_every = 1                  # save a global checkpoint every N rounds (always on final round)
+# Ultralytics' dataset cache: "" (decode every epoch), "ram", or "disk". Empty is the
+# default because RAM is the constraint: a shard held in RAM is roughly
+# images x imgsz^2 x 3 bytes per *concurrent* client. The pipeline sets it per run.
+cache = ""
 
 
 

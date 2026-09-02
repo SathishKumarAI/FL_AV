@@ -45,6 +45,7 @@ class Config:
     size_skew: float = 0.0           # 0 = every vehicle the same size; ~1 = 10x spread
     per_vehicle_override: int = 0    # 0 = use the profile default
     gpu_fraction: float = 1.0        # Ray's per-client GPU share; <1 packs clients
+    cache: str = ""                  # "" | ram | disk -- ultralytics' dataset cache
     ray_address: str | None = None   # set => attach to an existing head node
 
     @property
@@ -336,7 +337,8 @@ def _cmd_federate(cfg: Config) -> list[str]:
             f'min_clients={cfg.n_vehicles} fraction_fit=1.0 '
             # Quoted because flwr parses run-config values as TOML: an unquoted
             # fedadam is a bare word, not a string, and the run dies on parse.
-            f'strategy="{cfg.strategy}" proximal_mu={cfg.proximal_mu}']
+            f'strategy="{cfg.strategy}" proximal_mu={cfg.proximal_mu} '
+            f'cache="{cfg.cache}"']
 
 
 def _cmd_verify(_: Config) -> list[str]:
