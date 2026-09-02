@@ -35,6 +35,38 @@ MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolo
 DEFAULT_BATCH_ID_RANGE = (1, 10)
 DEFAULT_NUM_ROUNDS = 3
 
+def round_config(server_round: int, num_rounds: int, local_epochs: int, *,
+                 plots_every_round: bool = False, optimizer: str = "auto",
+                 lr0: float = 0.0, mosaic: float = -1.0) -> Dict[str, Scalar]:
+    """What every client is told about THIS round.
+
+    Shared across clients on purpose, and safe to share -- unlike ``batch_id``, which
+    is per-vehicle and whose sharing was the B9 bug. Every value here is a property of
+    the round, so "one FitIns for everyone" and "each client gets its own" agree.
+
+    ``plots``: Ultralytics draws labels.jpg, train_batch*.jpg and, at final_eval, the
+    confusion matrix and PR/F1 curves. Measured at roughly a fifth of a one-epoch
+    round on this hardware, per client, every round -- and the client passes
+    ``exist_ok=True``, so each round wrote them into the directory the next round
+    overwrote. ``pipeline/train_artifacts.py`` serves that directory and its docstring
+    already records that it holds only the last round. So the earlier rounds' pictures
+    were drawn, paid for, and destroyed unread. Draw them on the round whose output
+    actually survives.
+
+    ``lr0`` is inert unless ``optimizer`` is set: ``optimizer="auto"`` replaces lr0
+    with ``0.002*5/(4+nc)``. The client warns when it is handed that combination.
+    """
+    return {
+        "local_epochs": local_epochs,
+        "server_round": server_round,
+        "total_rounds": num_rounds,
+        "plots": bool(plots_every_round) or server_round >= num_rounds,
+        "optimizer": optimizer,
+        "lr0": lr0,
+        "mosaic": mosaic,
+    }
+
+
 class BatchAssignmentMixin:
     """Everything this project needs from a strategy, independent of how it aggregates.
 
@@ -487,6 +519,11 @@ def server_fn(context: Context):
     run_config = getattr(context, "run_config", {}) or {}
     num_rounds = int(run_config.get("num_server_rounds", DEFAULT_NUM_ROUNDS))
     fraction_fit = float(run_config.get("fraction_fit", 1.0))
+    # Never set before, so FedAvg's 1.0 applied and every client re-scored itself on
+    # its own split every round -- 13.8 % of wall clock (phase 0) spent on the metric
+    # this project calls the flattering one, while the holdout is what gets reported.
+    # Default stays 1.0 so this commit changes no numbers; the lever is now reachable.
+    fraction_evaluate = float(run_config.get("fraction_evaluate", 1.0))
     local_epochs = int(run_config.get("local_epochs", 1))
     min_clients = int(run_config.get("min_clients", 2))
     # Strategy selection from run_config: any name in STRATEGIES.
@@ -503,6 +540,17 @@ def server_fn(context: Context):
               if k in run_config}
     checkpoint_dir = str(run_config.get("checkpoint_dir", "checkpoints"))
     save_every = int(run_config.get("save_every", 1))
+    # How much of a round is spent on things that are not training. See fit_config_fn.
+    plots_every_round = bool(run_config.get("plots_every_round", False))
+    # Ultralytics' `optimizer="auto"` DISCARDS lr0 and substitutes its own, so lr0 is
+    # inert until this is set to a real optimiser name. Default stays "auto" so this
+    # commit changes no numbers; the client warns loudly if lr0 is set without it.
+    optimizer_name = str(run_config.get("optimizer", "auto"))
+    lr0 = float(run_config.get("lr0", 0.0))          # 0.0 = leave Ultralytics alone
+    # Negative = unset. Flower's Scalar type has no None, and sending 0.0 would mean
+    # "mosaic off" rather than "not specified" -- a default silently changed to its
+    # opposite is exactly the failure this project keeps shipping.
+    mosaic = float(run_config.get("mosaic", -1.0))
     logger.info(
         f"[Server] run_config -> num_rounds={num_rounds}, fraction_fit={fraction_fit}, "
         f"local_epochs={local_epochs}, min_clients={min_clients}, "
@@ -541,8 +589,14 @@ def server_fn(context: Context):
         raise RuntimeError("Server cannot start without a valid YOLO model.") from e
 
     # Push local_epochs to every client each round via config callbacks.
+    #
+    # Safe to share one dict across clients, unlike batch_id (the B9 bug): every value
+    # here is a property of the ROUND, not of the vehicle, so "the last value written
+    # wins" and "every client gets the same value" are the same outcome.
     def fit_config_fn(server_round: int) -> Dict[str, Scalar]:
-        return {"local_epochs": local_epochs, "server_round": server_round}
+        return round_config(server_round, num_rounds, local_epochs,
+                            plots_every_round=plots_every_round,
+                            optimizer=optimizer_name, lr0=lr0, mosaic=mosaic)
 
     # Build the strategy through the registry: the mixin carries this project's
     # behaviour, the named Flower strategy carries the aggregation.
@@ -557,6 +611,7 @@ def server_fn(context: Context):
         ),
         common_kwargs=dict(
             fraction_fit=fraction_fit,            # From run_config
+            fraction_evaluate=fraction_evaluate,  # From run_config
             min_fit_clients=min_clients,          # From run_config
             min_evaluate_clients=min_clients,
             min_available_clients=min_clients,    # Minimum clients needed to start FL
