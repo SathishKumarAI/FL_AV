@@ -11,7 +11,6 @@ import json
 import os
 import sys
 import queue
-import shutil
 import subprocess
 import threading
 import time
@@ -46,6 +45,10 @@ class Run:
         self.current: str | None = None
         self._proc: subprocess.Popen | None = None
         self._stop = threading.Event()
+        # Snapshotted at construction rather than read back from git, so that restoring
+        # flwr's rewrite cannot also revert an uncommitted edit. See _restore_pyproject.
+        pp = paths.PROJECT / "pyproject.toml"
+        self._pyproject_before: bytes | None = pp.read_bytes() if pp.exists() else None
 
     # -- event plumbing ----------------------------------------------------
     def emit(self, kind: str, **payload) -> None:
@@ -236,18 +239,25 @@ class Run:
         except (OSError, subprocess.SubprocessError) as e:
             self.emit("log", stage="federate", line=f"could not stop superlink: {e}")
 
-    @staticmethod
-    def _restore_pyproject() -> None:
+    def _restore_pyproject(self) -> None:
         """`flwr run` comments out [tool.flwr.federations] in place. Put it back.
 
         Committing the rewritten file leaves a fresh clone with no federation to run,
         which has already happened once in this repo's history.
+
+        Restored from a snapshot taken before the run, not with `git checkout --`.
+        Checkout restores the *committed* file, so it discards every uncommitted edit
+        to it as well as flwr's rewrite. That is not hypothetical: adding a run-config
+        key to pyproject and then running the pipeline to test it deleted the key, and
+        the next run failed on a config value that had been there minutes earlier.
+        The snapshot also means the restore works in a source tarball with no git.
         """
         pp = paths.PROJECT / "pyproject.toml"
-        if pp.exists() and "CONFIGURATION MIGRATION NOTICE" in pp.read_text(errors="replace"):
-            if shutil.which("git"):
-                subprocess.run(["git", "checkout", "--", str(pp)], cwd=paths.REPO,
-                               capture_output=True)
+        if self._pyproject_before is None or not pp.exists():
+            return
+        if "CONFIGURATION MIGRATION NOTICE" not in pp.read_text(errors="replace"):
+            return          # flwr left it alone; anything on disk now is the user's
+        pp.write_bytes(self._pyproject_before)
 
 
 # --------------------------------------------------------------------------
