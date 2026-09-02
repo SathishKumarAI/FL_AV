@@ -142,7 +142,7 @@ to be wrong quietly.
 | 8 | Peak VRAM at 1 400 images/vehicle is **5 087 MiB of 16 303**, with `num-gpus = 1.0` | clients are serialised on a card that fits three of them |
 | 9 | The 13-class head **was random**; COCO transfers only the backbone. Now warm-started for 9 of 13 classes (`warm_start_head`) | untrained holdout mAP50 went **0.0053 → 0.2582**. And it exposed the next problem: round 1 *costs* the warm model 0.066 mAP50 — at 5.88e-4, not at the `lr0` the old note named |
 | 10 | `get_weights` sends the **full `state_dict`**, so FedAvg averages BatchNorm running stats across weather conditions | correct for IID clients; this fleet is partitioned by *condition*, which is feature shift — exactly what BN buffers encode. See FedBN in [`docs/FEDERATED_DETECTION.md`](docs/FEDERATED_DETECTION.md) |
-| 11 | Observed run-to-run spread is **≥ ±0.016 mAP50** (a 1.667×-budget ceiling scored *lower* than a smaller one) | any delta under that is not a result. Measure the spread before ranking anything |
+| 11 | **Measured seed spread is ±0.0018 mAP50** (n=3, max−min 0.0036, stdev 0.0019; IID, 2 rounds × 1 epoch, same holdout in every arm) | the old **±0.016** was inferred from a *centralised* ceiling anomaly across two different data volumes — never a seed spread, and 8.9× too loose. It has been dismissing real differences, including FedBN's +0.0040. n=3 under-reports, so treat ±0.0018 as a **lower bound**, and re-measure at 6 × 4 non-IID before trusting it there |
 
 **And a measurement trap, learned here.** A first `train()` in a process pays CUDA
 context + cuDNN autotune + the AMP check: 34.6 s against 27.1 s warm. Benchmarking arms

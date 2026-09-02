@@ -258,6 +258,52 @@ Two things fall out:
 
 ---
 
+## The noise floor, measured at last — and ±0.016 was never it
+
+Phase 3's blocking question, answered 2026-09-02. Three seeds, identical everything
+else, IID fleet, 6 vehicles × 1 400 images, 2 rounds × 1 epoch, **the same 1 000-image
+holdout in every arm** (fingerprint `3af571c2c901`, seed 0 — verified per arm, not
+assumed):
+
+| seed | holdout mAP50 | fleet |
+|---|---|---|
+| 0 | 0.1193 | `35cf9f955aeb` |
+| 1 | 0.1157 | `23215281ddba` |
+| 2 | 0.1186 | `c579060d276f` |
+
+```
+mean       0.1179
+max − min  0.0036        half-range ±0.0018        stdev 0.0019
+assumed    ±0.0160       -> the measured spread is 8.9x tighter
+```
+
+**Where ±0.016 came from, and why it was the wrong instrument.** It was inferred from a
+*centralised* ceiling anomaly: a ceiling trained on 14 000 images for 24 epochs scored
+0.4771 against the 8 400-image ceiling's 0.4936. That is a comparison between two
+different data volumes in a non-federated setting. It was never a seed spread, and it
+has been used as one to dismiss differences for two sessions.
+
+**This re-opens results previously written off**, including one of mine. FedBN measured
+**+0.0040** at round 1 — larger than the 0.0036 max−min — and I recorded it as "no
+measured difference" against the ±0.016 figure. That call rested on the wrong number.
+It is *not* thereby a win: the FedBN arms were one run each, and a single delta at the
+edge of a three-sample range decides nothing. The honest status is **unresolved, and now
+worth the repeats** rather than closed.
+
+### What this spread does and does not cover
+
+- **Three seeds. `max − min` under-reports the true spread**, and badly at n=3. Treat
+  ±0.0018 as a lower bound on the error bar, not the error bar.
+- Measured at **2 rounds × 1 epoch on an IID fleet**. The headline runs 6 × 4 on a
+  condition-partitioned one. Variance is not guaranteed to transfer — non-IID arms have
+  a second source of it in which conditions land where.
+- The seed moves **the fleet and the training randomness together**, which is the right
+  question for "would a rerun agree with me", and the wrong one for separating data
+  variance from optimisation variance.
+- The holdout on disk predates the fingerprint field, so its stored `fingerprint` is
+  null; the value above is computed live from the name list. Rebuilding at the same
+  size and seed is deterministic and would persist it.
+
 ## Running it long, and why 40×1 rather than 10×4
 
 The instinct for "a better model" is more rounds and more local epochs. Half of that
