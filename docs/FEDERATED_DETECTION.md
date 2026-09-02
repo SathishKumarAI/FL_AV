@@ -258,6 +258,48 @@ Two things fall out:
 
 ---
 
+## Running it long, and why 40×1 rather than 10×4
+
+The instinct for "a better model" is more rounds and more local epochs. Half of that
+is right here, and the other half is actively wasteful.
+
+`_get_warmup_iterations` clamps warmup to `min(warmup_epochs, epochs - 1)`. At
+`local_epochs = 4` that is **three warmup epochs of four** — every client spends most of
+every round on a ramping learning rate and ends it worse than the aggregate it started
+from, which FedAvg then averages. At `local_epochs = 1` there is **no warmup at all**.
+
+So at a fixed GPU budget, spend it on **rounds, not local epochs**:
+
+| | epochs/round | rounds | warmup waste | aggregation steps |
+|---|---|---|---|---|
+| the old headline | 4 | 6 | 3 of every 4 epochs | 6 |
+| **40 × 1** | 1 | 40 | **none** | **40** |
+
+Same 160 s per round-epoch on this machine, ~1.8 h either way, and the second gives the
+federation 40 chances to aggregate instead of 6. It is also the direction phase 2
+already predicted — fewer local epochs reduce client drift.
+
+**But more rounds is not monotonically better, and this project has measured that
+twice**: the warm-started model scored 0.2582 *untrained* against 0.2073 after two
+rounds, and a 1.667×-budget centralised ceiling scored *lower* than a smaller one. A
+long run can end on a worse model than it passed through.
+
+That is what `python -m pipeline.holdout --evaluate --promote` is for. It reports the
+round the curve peaked at, what the rounds after it cost, and copies the winner to
+`checkpoints/global_best.pt`. **Report the best round, not the last one** — and
+`wasted_rounds` is the number that says what to set `--rounds` to next time.
+
+```bash
+python -m pipeline.runner --all --rounds 40 --epochs 1 --per-vehicle 1400 \
+       --partition random --gpu-fraction 0.5 --skip baseline --yes
+python -m pipeline.holdout --evaluate --promote
+```
+
+One honesty note on the comparison: 6 vehicles × 1400 × 40 rounds × 1 epoch is
+**336 000 image-visits against the headline's 201 600**, so the result is *not*
+budget-matched to the 0.4936 centralised ceiling. Either rerun the ceiling at the
+matching epoch count or state the ratio, exactly as `baseline.parity` already does.
+
 ## What to actually run
 
 Ordered by expected value per GPU-hour on this machine, all of it gated behind the
