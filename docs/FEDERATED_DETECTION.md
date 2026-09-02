@@ -118,12 +118,12 @@ personalised heads, and the two techniques stack.
 
 Per client per round, at `local_epochs = 1`, measured against the trainer source:
 
-| Pass | Where | Escapable? |
-|---|---|---|
-| training epoch | `_do_train` | no — it is the work |
-| validation | `_do_train`: `if self.args.val or final_epoch or ...` | **no.** `final_epoch` forces it, so `val=False` does not skip it at 1 epoch |
-| validation again | `final_eval()`, unconditional after the loop, on `best.pt` | **yes** — `final_eval` no-ops when `self.best` does not exist, i.e. `save=False` |
-| validation a third time | Flower's `evaluate()` → `yolo.val()`, on the same val split | **yes** — `fraction_evaluate < 1.0` |
+| Pass | Where | Escapable? | Worth escaping? |
+|---|---|---|---|
+| training epoch | `_do_train` | no — it is the work | — |
+| validation | `_do_train`: `if self.args.val or final_epoch or ...` | **no.** `final_epoch` forces it, so `val=False` does not skip it at 1 epoch | — |
+| validation again | `final_eval()`, unconditional after the loop, on `best.pt` | yes — it no-ops when `self.best` does not exist, i.e. `save=False` | **no.** Measured at 22.8 s vs 22.9 s. Not where the time goes |
+| validation a third time | Flower's `evaluate()` → `yolo.val()`, same val split | yes — `fraction_evaluate < 1.0` | **yes** — phase 0 measured it at 13.8 % of wall clock |
 
 `fraction_evaluate` is **never set** in `server_fn`, so it defaults to 1.0: every
 client re-scores itself every round. Phase 0 measured that at **13.8 % of wall clock**,
@@ -131,10 +131,22 @@ spent on the metric this project already calls the flattering one. The holdout i
 gets reported. This is the cheapest speed lever in the repo and it is one run-config
 key.
 
-`save=False` is the second one, but it is **not** a free swap: with `save=True` the
-trainer writes EMA weights to `best.pt`, and what the client hands back to FedAvg
-depends on what `yolo.model` is bound to afterwards. Changing it changes what is being
-averaged, so it must be measured against the holdout, not assumed.
+### The pass that is not in that table, and cost the most
+
+`plots=True` is the Ultralytics default, and the client never overrode it. Every
+`train()` call draws `labels.jpg`, `train_batch{0,1,2}.jpg`, and at `final_eval` the
+confusion matrix and the P/R/F1/PR curves — **1.19× of the round**, per client, per
+round.
+
+They were being drawn six times to be kept once. The client passes `exist_ok=True`, so
+every round writes into the same `runs/fl/batch{n}` directory the next round
+overwrites, and `pipeline/train_artifacts.py` — the only thing that reads them — says
+so in its own docstring: *"a vehicle's directory holds only its **last** round. These
+are not a history."* Rounds 1..n−1 paid GPU time for files destroyed before anything
+read them.
+
+Fixed by having the server send `plots` and set it True on the final round only. The
+dashboard gets byte-for-byte what it got before.
 
 ## 4. `workers=0` is right, and the recorded reason is wrong
 
@@ -188,10 +200,34 @@ So: keep `workers=0`, and correct the comment — the reason is spawn cost on sh
 rounds, not a Ray deadlock, and the deadlock claim did not reproduce. The thing to
 attack is the **7.93 ms itself**, by turning augmentation down.
 
-**Caveat, and it is the point of phase 3.** These are one run per arm. The baseline
-alone measured 50.7 s (cold), 32.4 s and 36.2 s across invocations of the same script.
-A spread that wide cannot separate 1.41× from 1.45×, and the repeats are what say which
-of these survives.
+**Those are one run per arm, and one run per arm was not enough.** Repeating the
+candidate arms three times each, interleaved, changed the answer:
+
+| arm | median | spread | util | vs baseline |
+|---|---|---|---|---|
+| baseline (the client today) | 27.2 s | **7.6** | 25.4 % | 1.00× |
+| `plots=False` | 22.9 s | 0.3 | 31.2 % | **1.19×** |
+| `plots=False save=False` | 22.8 s | 0.4 | 29.9 % | 1.20× |
+| `plots=False save=False mosaic=0` | 20.4 s | 0.9 | 32.4 % | **1.34×** |
+
+The single-run pass suggested `plots=False` was worth 1.52×. It is worth **1.19×**.
+The difference was one cold start: the baseline's three repeats were 34.6 / 27.1 /
+27.2 s, and the 34.6 is the first `train()` of the process — CUDA context, cuDNN
+autotune, the AMP check. Because arms run in a fixed order within each repeat, the
+first arm of the first repeat always eats that, which is a flaw in the harness and not
+a property of the arm. Warm baseline is 27.1–27.2 against `plots=False` at 22.7–22.9:
+non-overlapping, and the 7.6 s "spread" is a cold-start artifact rather than run-to-run
+noise. Stated at length because reporting 1.5× here would have been wrong by a third,
+and nothing in the single-run table said so.
+
+Two things fall out:
+
+- **`save=False` buys nothing** (22.8 vs 22.9, inside the spread). `final_eval`'s
+  second validation pass is not where the time goes, so the EMA-versus-raw-weights
+  question it raises does not need answering. Dropped.
+- **`plots` is the free lever.** It cannot change what is learned, and 1.19× is
+  measured. `mosaic=0` is worth another 1.12× on top but changes the data path, so it
+  is holdout-gated and stays a run-config key at its default.
 
 ---
 
@@ -203,6 +239,7 @@ phase-3 seed spread — nothing below is claimable until a difference bigger tha
 
 | # | Change | Where | Cost | Why |
 |---|---|---|---|---|
+| 0 ✅ | **`plots` on the final round only** | `server_app.py` + `client_app.py` ⚠ | done | **1.19×**, measured, and it cannot change what is learned. The pictures already only survived from the last round |
 | 1 | `fraction_evaluate` as a run-config key, default < 1.0 | `server_app.py` ⚠ | one key | 13.8 % of wall clock, on a metric that is not the headline |
 | 2 | `optimizer` set explicitly | `client_app.py` ⚠ | one key | until this lands, no LR experiment is running the LR it names |
 | 3 | Server-driven `lr0` + `warmup_epochs`, broadcast per round | `server_app.py` + `client_app.py` ⚠ | small | safe to share one `FitIns`: the schedule is global, unlike the B9 `batch_id`. Attacks the 0.066 mAP50 round-1 loss |
