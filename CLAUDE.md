@@ -35,6 +35,7 @@ Open the one file that owns the thing. Do not read the package to find it.
 | Label boxes drawn over a frame, the trainer's own pictures | `pipeline/static/js/consumed.js` |
 | Which of ultralytics' output pictures are served, and their captions | `pipeline/train_artifacts.py` — `KINDS` |
 | An HTTP route or what `/api/state` returns | `pipeline/server.py` |
+| Real SuperLink/SuperNode processes instead of the simulator | `pipeline/deploy.py` |
 | The live edge fleet: what a node may report, and its bounds | `pipeline/nodes.py` |
 | The edge node itself — camera, inference, heartbeat | `pipeline/edge.py` |
 | The live-nodes panel | `pipeline/static/js/edge.js` |

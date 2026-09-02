@@ -1247,6 +1247,75 @@ def test_the_experiment_driver_passes_through_the_levers_the_runner_has():
     assert "--local-bn" not in " ".join(experiment.command({}, confirm=False))
 
 
+# ------------------------------------------------- deployment engine
+from pipeline import deploy as _deploy  # noqa: E402
+
+
+def test_every_supernode_gets_its_own_clientappio_address():
+    """Sharing one is the failure that looks like a hang: the second node binds
+    nothing, registers nothing, and the federation waits forever for a client that
+    never arrives."""
+    addrs = []
+    for i in range(5):
+        cmd = _deploy.supernode_cmd(i, "127.0.0.1:9092")
+        addrs.append(cmd[cmd.index("--clientappio-api-address") + 1])
+    assert len(set(addrs)) == 5, f"SuperNodes share an address: {addrs}"
+    assert all(a.startswith("127.0.0.1:") for a in addrs)
+    # Every node dials the same fleet port; only their own API port differs.
+    assert all("--superlink" in _deploy.supernode_cmd(i, "127.0.0.1:9092") for i in range(5))
+
+
+def test_the_fleet_and_control_ports_are_not_the_same():
+    """9092 is where SuperNodes dial in, 9093 is where `flwr run` submits. Pointing a
+    SuperNode at the control port fails in a way that reads as a network problem."""
+    assert _deploy.FLEET_PORT != _deploy.CONTROL_PORT
+    link = _deploy.superlink_cmd("127.0.0.1")
+    assert f"127.0.0.1:{_deploy.FLEET_PORT}" in link
+    assert f"127.0.0.1:{_deploy.CONTROL_PORT}" in link
+    # SuperNode API ports must not collide with either.
+    used = {_deploy.FLEET_PORT, _deploy.CONTROL_PORT}
+    assert not used & {_deploy.NODE_PORT_BASE + i for i in range(8)}
+
+
+def test_the_federation_entry_is_appended_not_rewritten(tmp_path, monkeypatch):
+    """~/.flwr/config.toml holds every federation on the machine, including the
+    local-simulation one the rest of this pipeline runs on. Rewriting it would take
+    the simulator down as a side effect of trying the deployment engine."""
+    home = tmp_path
+    monkeypatch.setattr(_deploy.Path, "home", staticmethod(lambda: home))
+    cfg = home / ".flwr" / "config.toml"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text('[superlink.local-simulation]\naddress = ":local:"\n', encoding="utf-8")
+
+    _deploy.ensure_federation("local-deployment", "127.0.0.1")
+    text = cfg.read_text(encoding="utf-8")
+    assert "[superlink.local-simulation]" in text, "the simulation federation was lost"
+    assert "[superlink.local-deployment]" in text
+    assert "insecure = true" in text
+
+    # Idempotent: running the deployment twice must not duplicate the section.
+    _deploy.ensure_federation("local-deployment", "127.0.0.1")
+    assert cfg.read_text(encoding="utf-8").count("[superlink.local-deployment]") == 1
+
+
+def test_the_run_config_the_deployment_submits_matches_the_simulation_one():
+    """The two paths build their own command lines. A lever added to one and not the
+    other means the deployment silently trains a different configuration -- and the
+    keys must all be declared in pyproject or flwr refuses the whole run."""
+    cfg = Config(rounds=3, local_epochs=2, n_vehicles=4, local_bn=True)
+    deployed = " ".join(_deploy.run_cmd("local-deployment", cfg))
+    simulated = " ".join(stages._cmd_federate(cfg))
+
+    declared = (paths.PROJECT / "pyproject.toml").read_text(encoding="utf-8")
+    body = declared.split("[tool.flwr.app.config]", 1)[1].split("[tool.flwr", 1)[0]
+    known = set(re.findall(r"^(\w+) *=", body, re.M))
+
+    for cmdline, label in ((deployed, "deploy"), (simulated, "simulate")):
+        sent = set(re.findall(r"(\w+)=", cmdline.split("--run-config", 1)[1]))
+        assert sent <= known, f"{label} sends undeclared run-config keys: {sorted(sent - known)}"
+    assert "local_bn=true" in deployed and "num_server_rounds=3" in deployed
+
+
 def test_the_holdout_stage_runs_before_the_fleet_stage():
     """Order is load-bearing: a holdout carved afterwards is already in someone's
     val split."""
