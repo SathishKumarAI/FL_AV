@@ -122,6 +122,35 @@ Python train loop, per-round trainer construction inside each actor — it is no
 addressed by anything ranked here, and finding it is a new phase-0-shaped question
 rather than another lever to pull.
 
+### Answered, 2026-09-02 — and it was none of those three
+
+Measured on the dataset alone, no model and no GPU, so the number is the dataloader's
+own cost: **7.93 ms/sample** stock, **5.56 ms** with `mosaic=0`. At batch 16 that is
+~127 ms of CPU per batch, on the training thread, against a GPU step of the same order.
+The bottleneck is **the transform stack**, and the guess above did not list it.
+
+It also explains lever 2's failure rather than leaving it as a surprise: `cache="ram"`
+removes the JPEG decode and leaves the mosaic assembly and `random_perspective` warps,
+which is why utilisation moved 19.3 → 22.7 % and the clock got worse. And
+`close_mosaic = 10` fires at `epoch == epochs - close_mosaic`, which is negative for a
+1–4 epoch round — **mosaic never closes inside a federated round.**
+
+Lever 3 is now measured rather than deduced-moot, and the answer is the same for a
+different reason. One epoch on `batch_1`: `workers=0` 36.2 s, `workers=4` 34.3 s,
+`workers=8` **40.1 s**. Windows has no `fork`, so each worker re-imports torch and
+ultralytics and a short round cannot amortise it; `mosaic=0` is worth more at
+`workers=0` (1.45×) than at `workers=4` (1.21×). The client's stated reason — a
+deadlock inside a Ray actor — did not reproduce. Keep `workers=0`, correct the comment.
+
+**And the lever that was in none of the six rows.** `plots=True` is the Ultralytics
+default and the client never overrode it, costing **1.19×** of every round, per client,
+drawn into a directory the next round overwrote. Shipped: the server sends `plots` and
+sets it True on the final round only. `mosaic=0` is worth a further 1.12× and is
+holdout-gated because it changes the data path.
+
+Full detail, including the three-repeat medians and why the single-run pass said 1.52×
+for something worth 1.19×: [`docs/FEDERATED_DETECTION.md`](FEDERATED_DETECTION.md).
+
 Demo-scale table and the VRAM-to-fraction guide: [`docs/RUNBOOK.md`](RUNBOOK.md) §8.
 
 **The trap this phase must not fall into.** Every one of these can make a run finish
@@ -148,7 +177,28 @@ on three facts checked against the installed ultralytics 8.4.115 rather than ass
 ```
 warmup_epochs = 3.0   lr0 = 0.01   lrf = 0.01   cos_lr = False
 close_mosaic  = 10    mosaic = 1.0   freeze = None   patience = 100   nbs = 64
+optimizer = "auto"    <- 2026-09-02: this line is why the two below are half wrong
 ```
+
+> **Correction, 2026-09-02.** `optimizer="auto"` is the default and the client never
+> overrode it, and `auto` **replaces `lr0`** with `0.002·5/(4+nc)` = 5.88e-4 — logging
+> that it has done so. So every run this project has ever done trained with **AdamW at
+> 5.88e-4**, not SGD at 0.01, and *`lr0` has never once been the number in effect.*
+>
+> `lrf` and `warmup_epochs` are **not** overridden — `_setup_scheduler` reads them
+> directly — so fact 2 below survives; only its `lr0` framing is wrong.
+>
+> **This strikes PR #53's result.** That branch varies `lr0_round` per round without
+> setting `optimizer`, so every value it computed was discarded and only its
+> `lrf_round` applied. Its "−0.0079 mAP50, negative at six of six rounds" is currently
+> the reason this project believes a global anneal does not help, and it did not test
+> one. Rebase it with `optimizer` set explicitly and re-run.
+>
+> Fact 1's arithmetic is also wrong in the other direction:
+> `_get_warmup_iterations` clamps to `min(warmup_epochs, max(epochs-1, 0))`, so at
+> `local_epochs = 1` there is **no warmup at all** — and every measurement in the
+> session that produced the numbers below ran at 1. At `local_epochs = 4` there really
+> are three warmup epochs of four. Any warmup claim must name its `local_epochs`.
 
 **Fact 1 — three of every four epochs are warmup.** `local_epochs = 4` against
 `warmup_epochs = 3.0` means the LR ramp never finishes. The Metrics tab already shows
@@ -277,6 +327,7 @@ on *this* dataset:
 
 | # | Technique | Why here | Cost |
 |---|---|---|---|
+| 0 | **FedBN — keep BatchNorm local** | added 2026-09-02, and it should be first. `get_weights` sends the full `state_dict`, so FedAvg averages BN `running_mean`/`running_var` across vehicles. That is right for IID clients; this fleet is partitioned by **condition**, which is *feature* shift — precisely what BN buffers encode. Averaging a night vehicle's statistics with a clear-daylight one describes no vehicle's data. Every other entry in this table addresses drift in *parameter* space; this is the only one aimed at the axis the fleet is actually partitioned on, and it is a filter on which tensors travel | **small** ⚠ |
 | 1 | **True FedProx** | today's `fedprox` is a weight-space approximation applied after training, which is honest but is not FedProx. See the mechanism note below — it is reachable, contrary to the earlier claim | medium ⚠ |
 | 2 | **Personalised heads** (backlog 37) | share the backbone, keep a per-vehicle 13-class head. Condition-partitioned vehicles is the textbook case for this, and it directly attacks the per-vehicle spread (0.4069 → 0.4754) | medium ⚠ |
 | 3 | **FedAvgM** | server momentum, one keyword argument, frequently a free win on non-IID | one run |
