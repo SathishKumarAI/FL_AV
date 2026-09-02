@@ -44,6 +44,7 @@ class Config:
     alpha: float = 0.5               # dirichlet only: smaller = more skewed
     size_skew: float = 0.0           # 0 = every vehicle the same size; ~1 = 10x spread
     per_vehicle_override: int = 0    # 0 = use the profile default
+    gpu_fraction: float = 1.0        # Ray's per-client GPU share; <1 packs clients
     ray_address: str | None = None   # set => attach to an existing head node
 
     @property
@@ -315,7 +316,15 @@ def _cmd_federate(cfg: Config) -> list[str]:
     # which flwr migrates out of pyproject.toml into ~/.flwr/config.toml on first run
     # -- so editing pyproject would be silently ignored and the run would hang
     # forever waiting for clients that never arrive. Override it on the CLI instead.
-    fed = f"num-supernodes={cfg.n_vehicles} client-resources-num-gpus=1.0 client-resources-num-cpus=2"
+    # client-resources-num-gpus is a *scheduling* fraction, not a memory limit: Ray
+    # runs floor(1 / fraction) clients at once and none of them is capped. Phase 0
+    # measured 72 client episodes never overlapping and 99.1 % of the wall clock
+    # inside a client, so this is the one lever whose ceiling is the client count --
+    # and mathematically a no-op, because clients are independent within a round.
+    # It defaults to 1.0 because the ceiling is VRAM, which depends on the profile:
+    # a 6 308-image shard peaks at 15.9 GB of 16.3, a 1 400-image one at 5.1 GB.
+    fed = (f"num-supernodes={cfg.n_vehicles} "
+           f"client-resources-num-gpus={cfg.gpu_fraction} client-resources-num-cpus=2")
     if not cfg.ray_address:
         # Ray refuses num_cpus/num_gpus when attaching to a cluster that already
         # exists ("When connecting to an existing cluster, num_cpus and num_gpus must

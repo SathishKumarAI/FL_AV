@@ -134,39 +134,52 @@ def max_overlap(spans: list[tuple[float, float]]) -> int:
     return best
 
 
+def stamps_of(text: str) -> list[float]:
+    return [_parse_ts(m.group(1)) for m in map(TS.match, text.splitlines()) if m]
+
+
 def profile(server_log: Path | None = None, log_dir: Path | None = None) -> dict:
     """Per-phase seconds for one run, from the logs it already wrote."""
     server = server_log or logparse.latest_run_log(log_dir)
     if server is None:
         return {"error": "no server log that aggregated a round -- has a federation run?"}
 
-    # Client logs of *this* run only. Logs are named per process and accumulate, so
-    # reading the directory would mix six runs into one breakdown. The window is
-    # bounded at *both* ends: `--server-log` profiles a past run, and a lower bound
-    # alone would sweep in every client log written since.
-    st = server.stat()
-    lo, hi = min(st.st_ctime, st.st_mtime) - 60, st.st_mtime + 60
-    clients = [f for f in logparse.iter_logs("client*.log", log_dir)
-               if f.is_file() and lo <= f.stat().st_mtime <= hi]
+    server_text = server.read_text(errors="replace")
+    server_stamps = stamps_of(server_text)
+    if not server_stamps:
+        return {"error": f"no timestamped lines in {server.name}"}
+    t0, t1 = min(server_stamps), max(server_stamps)
+
+    # Client logs of *this* run only, decided by what the logs say rather than by when
+    # the filesystem last touched them. Logs are named per process and accumulate, and
+    # the mtime window this started with swept in the previous arm of a before/after
+    # comparison: two runs four minutes apart, 48 episodes, a wall clock spanning both,
+    # and a "2x faster" reading that was two runs added together.
+    clients = []
+    for f in logparse.iter_logs("client*.log", log_dir):
+        if not f.is_file():
+            continue
+        text = f.read_text(errors="replace")
+        s = stamps_of(text)
+        # A client of this run started while the server was still logging, so its first
+        # line falls inside the server's own span. Both ends are tight: a minute of
+        # slack at either end is enough to swallow the next arm of a before/after
+        # comparison, which is the measurement this exists to make.
+        if s and t0 - 5 <= min(s) <= t1:
+            clients.append((f, text))
 
     spans: dict[str, list[tuple[float, float]]] = {p: [] for p in PHASES}
     eps: list[tuple[float, float]] = []
-    stamps: list[float] = []
+    stamps: list[float] = list(server_stamps)
 
-    for f in clients:
-        text = f.read_text(errors="replace")
+    for f, text in clients:
         for phase, got in intervals(text, CLIENT_MARKERS).items():
             spans[phase] += got
         eps += episodes(text)
-        stamps += [_parse_ts(m.group(1)) for m in map(TS.match, text.splitlines()) if m]
+        stamps += stamps_of(text)
 
-    server_text = server.read_text(errors="replace")
     for phase, got in intervals(server_text, SERVER_MARKERS).items():
         spans[phase] += got
-    stamps += [_parse_ts(m.group(1)) for m in map(TS.match, server_text.splitlines()) if m]
-
-    if not stamps:
-        return {"error": f"no timestamped lines in {server.name} or its client logs"}
 
     wall = max(stamps) - min(stamps)
     busy = union_seconds(eps)
@@ -175,7 +188,7 @@ def profile(server_log: Path | None = None, log_dir: Path | None = None) -> dict
 
     return {
         "server_log": str(server),
-        "client_logs": [str(c) for c in clients],
+        "client_logs": [str(f) for f, _ in clients],
         "wall_s": round(wall, 1),
         "phases": breakdown,
         # Union, so this is honest whether or not episodes overlap. Whatever is left is
