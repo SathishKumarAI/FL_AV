@@ -107,6 +107,33 @@ FedProx/FedAdam/FedAvgM which all address client drift in *parameter* space.
 It is not in `docs/PHASED_PLAN.md`'s phase-5 table. On this dataset it is the highest
 expected-value entry in it, and the cheapest.
 
+### Measured, 2026-09-02 — on an IID fleet, which is the wrong fleet for it
+
+Implemented (`local_bn` run-config flag; `batchnorm_keys` + `set_weights(keep_local=)`)
+and run against the **random** partition, because that is the fleet the project moved to.
+6 vehicles × 1 400 images, 2 rounds × 1 epoch, same holdout:
+
+| round | FedAvg | FedBN | Δ mAP50 |
+|---|---|---|---|
+| 1 | 0.1045 | 0.1085 | +0.0040 |
+| 2 | 0.1201 | 0.1218 | +0.0017 |
+
+**No measured difference.** Both deltas sit far inside the ±0.016 spread, and this is
+the predicted result, not a disappointment: random partitioning makes every client's
+input distribution the same, so there is no feature shift for a local BatchNorm to
+preserve. FedBN was given nothing to do.
+
+The comparison is weak for a second reason worth stating. Under FedBN the saved
+checkpoint still carries the *averaged* BatchNorm — no vehicle's — so a holdout score on
+it measures a model that never existed. The FedBN column above is therefore a lower
+bound on the method even where the method applies.
+
+**The run that would actually test it** is the same pair on the **condition** fleet
+(`--partition condition`, fingerprint `7170c3ee9350`), reported per vehicle rather than
+on the averaged-BN checkpoint, and only once the phase-3 seed spread is known. Until
+then the honest statement is: implemented, wired, tested, and **unmeasured on the
+partition it is for**.
+
 **Note the interaction with the holdout.** With BN kept local there is no single global
 model to score, so the phase-5 leaderboard must state which of two things it reports:
 the shared backbone plus each vehicle's own BN (personalised, scored per vehicle and
