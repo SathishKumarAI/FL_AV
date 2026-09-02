@@ -16,6 +16,7 @@ whole flow and visualises a simulated vehicle fleet while it runs.
 | How do I branch, commit, merge? | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Why is mAP low, what do I run next? | [`docs/ML_PLAN.md`](docs/ML_PLAN.md) |
 | How do I try another FL algorithm? | [`docs/FL_TECHNIQUES.md`](docs/FL_TECHNIQUES.md) |
+| **What does Flower × YOLO actually need, measured?** | [`docs/FEDERATED_DETECTION.md`](docs/FEDERATED_DETECTION.md) |
 | What should I build? | [`docs/BACKLOG_100.md`](docs/BACKLOG_100.md) |
 | How do I run any of it? | [`pipeline/README.md`](pipeline/README.md) |
 | Where did the last session stop? | [`STATUS.md`](STATUS.md) and `docs/prompts/` |
@@ -143,6 +144,86 @@ context + cuDNN autotune + the AMP check: 34.6 s against 27.1 s warm. Benchmarki
 in a fixed order gives that entire cost to the first arm of the first repeat. One run
 per arm said `plots=False` was worth 1.52×; three said **1.19×**. Interleave, repeat,
 and quote the median with its spread.
+
+## Upstream, checked against the live docs 2026-09-02
+
+| | installed | latest | gap |
+|---|---|---|---|
+| flwr | **1.33.0** | 1.36.0 | 3 minor |
+| ultralytics | **8.4.115** | 8.4.138 | 23 patch |
+| torch | 2.11.0+cu128 | — | correct for sm_120 |
+| opencv-python | 5.0.0.93 | — | already present; webcam capture needs no new dependency |
+
+**Do not upgrade either one to chase these.** Every measured number in this repo was
+taken on the installed versions, and the floors in `my-project/pyproject.toml` were
+raised deliberately. What follows is what an upgrade would *mean*, so the decision is
+informed rather than automatic.
+
+### Flower: this project is written against the legacy API
+
+`flwr` has a **Message API** (since 1.21) that supersedes what this project uses. Not a
+rename — a different shape:
+
+| this project | Message API |
+|---|---|
+| `ServerApp(server_fn=...)` | no `server_fn`; `strategy.start(grid, initial_arrays, num_rounds)` |
+| `ClientApp(client_fn=...)` | no `client_fn`; `@app.train()` / `@app.evaluate()` decorators |
+| `flwr.server.strategy` | `flwr.serverapp.strategy` |
+| `configure_fit` / `aggregate_fit` / `configure_evaluate` / `aggregate_evaluate` | one `Message` carrying a `RecordDict` |
+| `FitIns` / `FitRes` / `EvaluateIns` / `EvaluateRes` | `Message` |
+| `fraction_fit`, `min_fit_clients` | `fraction_train`, `min_train_nodes` |
+
+`BatchAssignmentMixin` is built entirely out of the left-hand column, so migrating is a
+rewrite of `server_app.py` and `client_app.py`, not an edit. It still runs on 1.33 —
+that is verified, and it is why the floor is where it is.
+
+**The one reason it may be worth doing anyway:** the B9 bug is *structurally impossible*
+in the Message API. FedAvg building one `FitIns` and handing the same object to every
+client is what made the whole fleet train one shard; a Message is per-node by
+construction. `configure_fit` currently copies the config dict to work around exactly
+that, and the copy is load-bearing — see the silent-failures table.
+
+### Flower deployment: the repo's commented block is the OLD spelling
+
+`my-project/pyproject.toml` carries a commented `[tool.flwr.federations.remote-deployment]`
+block. **That form is superseded** — flwr migrated federations out of pyproject into
+`~/.flwr/config.toml` (the migration notice flwr writes into pyproject on every run says
+so). The current spelling:
+
+```toml
+# ~/.flwr/config.toml
+[superlink.local-deployment]
+address  = "127.0.0.1:9093"
+insecure = true                 # TLS: replace with certificate paths
+```
+
+```bash
+flower-superlink --insecure                      # Fleet API on 127.0.0.1:9092
+flower-supernode --insecure --superlink 127.0.0.1:9092 \
+                 --host 127.0.0.1 --port 9094 \
+                 --node-config "partition-id=0 num-partitions=5"
+flwr run . local-deployment --stream
+```
+
+Ports: **9092** Fleet API (SuperNodes dial in), **9093** Control API (`flwr run` submits
+here), **9094+** each SuperNode's own Runtime API — distinct per node when several share
+a host. This is the path off the simulation engine and onto real machines.
+
+### Ultralytics 8.4.116–8.4.138
+
+| version | change | why it matters here |
+|---|---|---|
+| **8.4.130** | tuning's default optimizer changed to **AdamW**, explicitly *"to ensure tuning parameters such as learning rate and momentum actually affect training"* | **upstream hit fact 1 and fixed it in their tuner.** Independent confirmation that `optimizer="auto"` silently discarding `lr0` is a real trap and not a misreading. The trainer default is unchanged, so this repo still must pass `optimizer` explicitly |
+| **8.4.137** | channels-last CUDA training auto-enabled on torch ≥1.11 | a free speed lever. 8.4.115's argument dump shows `channels_last=False`, so this repo is not getting it |
+| **8.4.129** | BF16 mixed precision (`amp="bf16"`) | Blackwell has the hardware; untested here |
+| **8.4.131** | validation forced onto the **unaugmented** pipeline when `split=train` | a correctness fix in the evaluation path this project reports from |
+| **8.4.135** | `max_det` auto-matched to dataset object counts | BDD frames are crowded — `max_det=300` is a live ceiling at this scale, worth checking before it silently truncates |
+| 8.4.132–8.4.135 | `fraction` gains count-based limits and boundary standardisation | `fraction=1000` for exactly 1 000 images would replace some shard plumbing |
+
+**Nothing about `DetMetrics`, `nt_per_class`, `ap_class_index` or the `optimizer_step`
+callback is documented as changed** — the four facts this repo measured against 8.4.115
+still hold, but they are measured facts about *one version* and an upgrade re-opens all
+of them. Re-run the probes before believing them on 8.4.138.
 
 ## Environment traps
 
