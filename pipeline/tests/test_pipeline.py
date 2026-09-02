@@ -966,18 +966,33 @@ def test_a_fleet_that_predates_the_holdout_is_rebuilt(monkeypatch):
 
 class _FakeBox:
     """Ultralytics' Metric, in the shape that matters: the per-class arrays are
-    indexed by POSITION in ap_class_index, while nt_per_class is indexed by class id."""
-    def __init__(self, present, ap50, ap, nt):
+    indexed by POSITION in ap_class_index. It has NO nt_per_class -- that lives on
+    the result, and reading it from here is what made every count come out '?'."""
+    def __init__(self, present, ap50, ap):
         self.ap_class_index = present
         self.ap50, self.ap = ap50, ap
         self.p = [0.5] * len(present)
         self.r = [0.6] * len(present)
-        self.nt_per_class = nt
 
 
 class _FakeResult:
-    def __init__(self, box, names):
+    """DetMetrics: nt_per_class is indexed by CLASS ID and lives here, not on .box."""
+    def __init__(self, box, names, nt=None):
         self.box, self.names = box, names
+        if nt is not None:
+            self.nt_per_class = nt
+
+
+def test_instance_counts_come_from_the_result_not_from_the_box():
+    """nt_per_class is a DetMetrics attribute. Reading it off result.box returns None
+    for every class and the table renders '?' in the column that says how much the AP
+    numbers mean -- silently, because a missing count is not an error."""
+    box = _FakeBox(present=[0, 2], ap50=[0.3, 0.6], ap=[0.1, 0.35])
+    result = _FakeResult(box, {0: "person", 2: "car"}, nt=[1277, 52, 10389])
+    assert not hasattr(box, "nt_per_class"), "the fake must match the real shape"
+
+    rows = _holdout.per_class(result, names={0: "person", 2: "car"})
+    assert [r["instances"] for r in rows] == [1277, 10389]
 
 
 def test_per_class_rows_are_named_by_class_id_not_by_array_position():
@@ -987,9 +1002,8 @@ def test_per_class_rows_are_named_by_class_id_not_by_array_position():
     `person`."""
     names = {0: "person", 1: "rider", 2: "car", 3: "truck"}
     # Only classes 2 and 3 appear in the holdout.
-    box = _FakeBox(present=[2, 3], ap50=[0.71, 0.42], ap=[0.40, 0.21],
-                   nt=[0, 0, 5000, 300])
-    rows = _holdout.per_class(_FakeResult(box, names))
+    box = _FakeBox(present=[2, 3], ap50=[0.71, 0.42], ap=[0.40, 0.21])
+    rows = _holdout.per_class(_FakeResult(box, names, nt=[0, 0, 5000, 300]), names=names)
 
     assert [r["name"] for r in rows] == ["car", "truck"]
     assert [r["AP50"] for r in rows] == [0.71, 0.42]
@@ -1001,11 +1015,31 @@ def test_a_class_absent_from_the_holdout_is_omitted_rather_than_given_the_fleet_
     — 29 instances fleet-wide, routinely absent from a 1000-image holdout — would be
     reported as scoring whatever the average was. Silent, and flattering."""
     names = {0: "person", 1: "car", 2: "train"}
-    box = _FakeBox(present=[0, 1], ap50=[0.30, 0.70], ap=[0.15, 0.40], nt=[100, 900, 0])
-    rows = _holdout.per_class(_FakeResult(box, names))
+    box = _FakeBox(present=[0, 1], ap50=[0.30, 0.70], ap=[0.15, 0.40])
+    rows = _holdout.per_class(_FakeResult(box, names, nt=[100, 900, 0]), names=names)
 
     assert [r["class_id"] for r in rows] == [0, 1]
     assert "train" not in {r["name"] for r in rows}
+
+
+def test_class_names_come_from_the_holdout_yaml_not_from_the_checkpoint():
+    """`YOLO(weights).val()` names its classes from the MODEL. This project's
+    checkpoints are built from yolov8s-13.yaml, which declares no `names:`, so
+    Ultralytics defaults them to {0: "0", 1: "1", ...} -- and a whole per-class table
+    rendered with every row labelled by its own index. The holdout's data.yaml has
+    the real list."""
+    box = _FakeBox(present=[0, 2], ap50=[0.3, 0.6], ap=[0.1, 0.35])
+    placeholder = {i: str(i) for i in range(13)}      # what the checkpoint carries
+    result = _FakeResult(box, placeholder, nt=[1277, 52, 10389])
+
+    fell_back = _holdout.per_class(result, names=None)
+    if not all(r["name"] == str(r["class_id"]) for r in fell_back):
+        # A holdout exists on disk, so the yaml supplied real names.
+        assert [r["name"] for r in fell_back] == ["person", "car"]
+
+    # Explicit names always win, whatever the checkpoint claims.
+    real = {0: "person", 2: "car"}
+    assert [r["name"] for r in _holdout.per_class(result, names=real)] == ["person", "car"]
 
 
 def test_holdout_fingerprint_separates_two_holdouts_that_record_identical_metadata():
