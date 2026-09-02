@@ -19,7 +19,8 @@ from my_project.task import (
     OS_NAME
 )  # Import OS detection
 import urllib
-from my_project.get_set_model import NUM_CLASSES_MODEL_YAML, get_weights, set_weights
+from my_project.get_set_model import (NUM_CLASSES_MODEL_YAML, get_weights, set_weights,
+                                      warm_start_head)
 from utils.logging_setup import configure_logging
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -72,6 +73,12 @@ class FlowerClient(Client):
             # The server builds the same arch (server_app.py) — set_weights'
             # strict=True is what enforces that they agree.
             self.yolo = YOLO(NUM_CLASSES_MODEL_YAML).load(self.model_path)
+            # The head the server broadcasts overwrites this one every round, so this
+            # matters only for the shape of the model before the first set_weights.
+            # Done anyway, and through the same helper, so the two sides cannot drift:
+            # a client whose head is warmed differently from the server's is exactly
+            # the kind of asymmetry set_weights' strict=True exists to catch.
+            warm_start_head(self.yolo.model, YOLO(self.model_path))
 
             logger.info("[Client] YOLO model loaded successfully.")
         except Exception as e:
