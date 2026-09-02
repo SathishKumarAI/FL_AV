@@ -1022,6 +1022,38 @@ def test_holdout_fingerprint_separates_two_holdouts_that_record_identical_metada
         "fingerprint depends on listing order, so it cannot identify a holdout"
 
 
+def test_the_report_pairs_a_class_delta_by_class_id_not_by_row_position():
+    """A class present in the final round but absent from round 1 must get no delta,
+    not its neighbour's. Rare classes drop out of a 1000-image holdout routinely, so
+    this is the normal case rather than the edge one."""
+    hold = [
+        {"round": 1, "mAP50": 0.1, "per_class": [
+            {"class_id": 2, "name": "car", "instances": 5000, "AP50": 0.60, "AP50-95": 0.3},
+        ]},
+        {"round": 2, "mAP50": 0.2, "per_class": [
+            {"class_id": 0, "name": "person", "instances": 400, "AP50": 0.31, "AP50-95": 0.1},
+            {"class_id": 2, "name": "car", "instances": 5000, "AP50": 0.66, "AP50-95": 0.4},
+        ]},
+    ]
+    rows = [r for r in report._per_class_table(hold) if r.startswith("| car")
+            or r.startswith("| person")]
+    car = next(r for r in rows if r.startswith("| car"))
+    person = next(r for r in rows if r.startswith("| person"))
+
+    assert "+0.0600" in car, car
+    assert "—" in person, "a class absent from round 1 was given a delta anyway"
+    # car is 5000 of 5400 objects: the share column is the reason the mAP above is
+    # mostly one class's number.
+    assert "92.6%" in car, car
+    assert "person" in "".join(rows)
+
+
+def test_a_run_scored_before_per_class_existed_still_reports():
+    """holdout_metrics.json from an earlier run has no per_class key at all."""
+    assert report._per_class_table([{"round": 1, "mAP50": 0.1}]) == []
+    assert report._per_class_table([{"round": 1, "mAP50": 0.1, "per_class": []}]) == []
+
+
 def test_the_holdout_stage_runs_before_the_fleet_stage():
     """Order is load-bearing: a holdout carved afterwards is already in someone's
     val split."""
