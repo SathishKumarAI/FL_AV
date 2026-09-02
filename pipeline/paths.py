@@ -16,6 +16,11 @@ STATE = HERE / ".state"            # markers + attribute cache; gitignored
 MLFLOW_STORE = HERE / "mlruns"     # gitignored
 MLFLOW_DB = MLFLOW_STORE / "mlflow.db"
 MLFLOW_ARTIFACTS = MLFLOW_STORE / "artifacts"
+#: One experiment for both writers -- ultralytics' per-vehicle training curves and
+#: the sink's federation-level facts. Lives here rather than in mlflow_sink because
+#: subprocess_env has to name it too, and a constant in two places is a constant that
+#: will disagree with itself.
+MLFLOW_EXPERIMENT = "federated-yolov8"
 REPORTS = HERE / "reports"         # gitignored
 # Vehicle shards live here, NOT in my-project. task.get_batch_path() resolves
 # FL_AV_DATA_ROOT/batch/batch_<id>, so pointing that env var at VEHICLE_ROOT is all
@@ -120,10 +125,19 @@ def subprocess_env(ray_address: str | None = None, data_root: Path | None = None
             if p and os.path.normcase(p) != same]
     env["PATH"] = os.pathsep.join([scripts, *rest])
     env["FL_AV_DATA_ROOT"] = str(data_root or PROJECT)
-    # Ultralytics' own MLflow callback reads this. It has to name the same backend the
-    # pipeline's sink writes to, or the two halves of a run -- per-vehicle training
-    # curves and federation-level facts -- land in two stores and neither is complete.
+    # Ultralytics' own MLflow callback reads both of these. The URI has to name the
+    # same backend the pipeline's sink writes to, or the two halves of a run --
+    # per-vehicle training curves and federation-level facts -- land in two stores and
+    # neither is complete.
+    #
+    # The experiment name matters for a second reason. Without it the callback falls
+    # back to `trainer.args.project`, creates an experiment of its own with no artifact
+    # location, and MLflow then resolves artifacts against the CWD -- which for every
+    # stage in this pipeline is my-project. One federation left 24 run directories under
+    # my-project/mlruns/, outside the store, ungitignored and invisible to the sink.
+    # Naming the sink's experiment reuses its explicit artifact location instead.
     env.setdefault("MLFLOW_TRACKING_URI", mlflow_uri())
+    env.setdefault("MLFLOW_EXPERIMENT_NAME", MLFLOW_EXPERIMENT)
     if ray_address:
         # Makes flwr's ray.init() attach to an already-running head node instead
         # of creating its own with include_dashboard=False hardcoded.

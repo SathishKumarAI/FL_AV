@@ -15,7 +15,20 @@ from pathlib import Path
 
 from . import logparse, paths
 
-EXPERIMENT = "federated-yolov8"
+EXPERIMENT = paths.MLFLOW_EXPERIMENT
+
+
+def ensure_experiment() -> None:
+    """Create the experiment, with its artifact location named, before anything logs.
+
+    Order matters and it is the whole reason this is callable on its own. Ultralytics'
+    callback calls ``set_experiment`` too, and whoever gets there first decides where
+    artifacts live. If that is the callback -- running with ``cwd=my-project`` and no
+    artifact location -- MLflow resolves them against the CWD and a federation leaves
+    24 run directories under ``my-project/mlruns/``, outside the store the sink writes
+    to. The pipeline therefore creates the experiment before it launches a stage.
+    """
+    _mlflow()
 
 
 def _mlflow():
@@ -23,8 +36,8 @@ def _mlflow():
     mlflow.set_tracking_uri(paths.mlflow_uri())
     if mlflow.get_experiment_by_name(EXPERIMENT) is None:
         # Named explicitly. A database backend does not imply where artifacts go, and
-        # the default is `./mlartifacts` relative to the CWD -- which for this project
-        # means one directory per place a subprocess was launched from.
+        # the default resolves against the CWD -- which for this project means one
+        # store per place a subprocess was launched from.
         paths.MLFLOW_ARTIFACTS.mkdir(parents=True, exist_ok=True)
         mlflow.create_experiment(EXPERIMENT, artifact_location=paths.MLFLOW_ARTIFACTS.as_uri())
     mlflow.set_experiment(EXPERIMENT)

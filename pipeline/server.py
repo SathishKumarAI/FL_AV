@@ -106,7 +106,7 @@ class State:
         still shows up. The event bus stays for the low-latency log stream.
         """
         checksums = logparse.aggregate_checksums()
-        metrics_path = verify._metrics_csv()
+        metrics_path = verify.metrics_csv()
         rows = logparse.read_metrics_csv(metrics_path)
 
         per_vehicle: dict[str, dict] = {}
