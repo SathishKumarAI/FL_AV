@@ -81,6 +81,42 @@ def _num(v, suffix: str = "") -> str:
     return "—" if v is None else f"{v}{suffix}"
 
 
+def _per_class_table(hold: list[dict]) -> list[str]:
+    """Per-class AP on the holdout, or nothing for a run scored before it existed.
+
+    The averaged mAP above is dominated by `car` -- 55.4 % of BDD100K's objects --
+    so it cannot say whether federation helped the classes a driving model is
+    actually judged on. Rows are sorted by instance count because that is the column
+    that decides how much any of the others mean.
+
+    The delta pairs by class id, never by row position: a class present in the final
+    round but absent from round 1 gets no delta rather than its neighbour's.
+    """
+    last = (hold[-1] or {}).get("per_class") or []
+    if not last:
+        return []
+    first = {c["class_id"]: c for c in ((hold[0] or {}).get("per_class") or [])}
+    total = sum(c.get("instances") or 0 for c in last) or 1
+
+    L = ["### Per class", "",
+         "Classes absent from the holdout are omitted rather than scored: Ultralytics' "
+         "`maps` would have handed them the fleet average.", "",
+         "| class | instances | share | AP50 | AP50-95 | ΔAP50 |",
+         "|---|---:|---:|---:|---:|---:|"]
+    for c in sorted(last, key=lambda r: -(r.get("instances") or 0)):
+        was = first.get(c["class_id"])
+        delta = f"{c['AP50'] - was['AP50']:+.4f}" if was and len(hold) > 1 else "—"
+        inst = c.get("instances")
+        L.append(f"| {c['name']} | {inst if inst is not None else '?'} | "
+                 f"{100 * (inst or 0) / total:.1f}% | {c['AP50']:.4f} | "
+                 f"{c['AP50-95']:.4f} | {delta} |")
+    thin = [c["name"] for c in last if (c.get("instances") or 0) < 100]
+    if thin:
+        L += ["", f"Under 100 instances, so their AP moves for reasons that are not the "
+                  f"model: {', '.join(thin)}."]
+    return L + [""]
+
+
 def to_markdown(d: dict) -> str:
     L: list[str] = [f"# Federated YOLOv8 — run report", "",
                     f"Generated {d['generated']} · {d['host']['platform']} · "
@@ -105,17 +141,23 @@ def to_markdown(d: dict) -> str:
 
     hold = (d.get("holdout") or {}).get("rounds") or []
     if hold:
-        size = ((d.get("holdout") or {}).get("holdout") or {}).get("size", "?")
+        meta = (d.get("holdout") or {}).get("holdout") or {}
+        size = meta.get("size", "?")
+        fp = meta.get("fingerprint")
         L += ["## The honest global metric", "",
               f"Scored on a shared holdout of {size} images that no vehicle trained or "
               f"self-evaluated on. Every other number in this report was measured by a "
               f"client on its own distribution, so this is the one that can be compared "
-              f"between runs.", "",
+              f"between runs."
+              + (f" Holdout fingerprint `{fp}` — two runs quoting the same one were "
+                 f"scored on the same images, which size and seed cannot promise."
+                 if fp else ""), "",
               "| round | mAP50 | mAP50-95 | precision | recall |", "|---|---|---|---|---|"]
         for r in hold:
             L.append(f"| {r.get('round')} | {r['mAP50']:.4f} | {r['mAP50-95']:.4f} | "
                      f"{r['precision']:.3f} | {r['recall']:.3f} |")
         L.append("")
+        L += _per_class_table(hold)
         gap = d.get("baseline") or {}
         if gap:
             qualifier = ("" if gap.get("matched", True) else
