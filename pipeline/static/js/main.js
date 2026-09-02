@@ -9,6 +9,7 @@ import { loadData } from "./data.js";
 import { loadPlan } from "./plan.js";
 import { loadDocs } from "./docs.js";
 import { loadMetrics } from "./metrics.js";
+import { pollEdge } from "./edge.js";
 
 const VIEWS = ["control", "live", "data", "metrics", "plan", "docs"];
 
@@ -32,3 +33,6 @@ wireControl(() => showView(document.querySelector('.tab[data-view=live]')));
 enableChartCursor();
 connectEvents();
 poll();
+// Its own loop, not part of poll(): edge nodes are live whether or not a federation
+// is running, and /api/nodes must not be coupled to the run-state snapshot.
+pollEdge();

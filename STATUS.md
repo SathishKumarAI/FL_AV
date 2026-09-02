@@ -128,6 +128,51 @@ images-vs-objects question: [`docs/FEDERATED_DETECTION.md`](docs/FEDERATED_DETEC
   applied and every client re-scored itself every round: phase 0's 13.8 %. Still 1.0.
 - The view-id test now covers every dashboard module, not just `control.js`.
 
+## Later the same day: FedBN, an IID fleet, and the model running live
+
+**The fleet is now random (IID)**, fingerprint `090d345dbb14`, `validate` clean. The
+`Config.partition` default moved with it — `_check_fleet` rebuilds whenever the config
+disagrees with the data, so a default left at `condition` would have silently
+repartitioned the fleet on the next run.
+
+**FedBN is implemented and it engaged** — clients log *"kept 285 local tensors, applied
+70 from the aggregate"*, matching the 285 of 355 measured statically. YOLOv8s is
+BatchNorm-dense in tensor count (80.3 %) and nearly BatchNorm-free in weight (0.36 %).
+
+| round | FedAvg | FedBN | Δ mAP50 |
+|---|---|---|---|
+| 1 | 0.1045 | 0.1085 | +0.0040 |
+| 2 | 0.1201 | 0.1218 | +0.0017 |
+
+**No measured difference**, both far inside ±0.016 — and that is the *predicted* result,
+flagged before the run. Random partitioning gives every client the same input
+distribution, so there is no feature shift for a local BatchNorm to preserve. FedBN was
+given nothing to do. It is **implemented, tested, and unmeasured on the partition it is
+for**; the run that would test it is the same pair on `--partition condition`
+(fingerprint `7170c3ee9350`), reported per vehicle, after the seed spread.
+
+Second caveat, structural: under FedBN the saved checkpoint carries the *averaged* BN,
+which is no vehicle's, so a holdout score on it measures a model that never existed.
+The FedBN column is a lower bound even where the method applies.
+
+**The model now runs live on other machines.** `pipeline/edge.py` per test machine pulls
+the current global checkpoint, runs it on a camera, and reports to a new dashboard panel.
+Verified end to end: a node downloaded `global_round_6.pt` and ran at **15.07 fps,
+36.74 ms/frame on CPU**, frames served as JPEG, `/api/node-frame/..%2f..%2fsecret` → 404.
+Nodes cache on the checkpoint's content hash, not its name, because a re-run rewrites
+`global_round_1.pt` with different weights. Nothing on a node trains — a camera stream
+has no labels. See [`docs/REALTIME_NODES.md`](docs/REALTIME_NODES.md).
+
+The dashboard still binds **loopback by default**; `--host 0.0.0.0` is opt-in and prints
+a warning, because `POST /api/run` starts training subprocesses and nothing authenticates.
+
+**Upstream checked** (see CLAUDE.md): flwr 1.33.0 vs 1.36.0, ultralytics 8.4.115 vs
+8.4.138. This project is written against Flower's **legacy** API — the Message API
+replaces `server_fn`/`client_fn`/`FitIns`/`FitRes` and would make the B9 bug
+structurally impossible. Ultralytics **8.4.130 changed their tuner's default optimizer
+to AdamW "so that learning rate and momentum actually affect training"** — upstream
+independently hitting this repo's fact 1.
+
 ## Next action
 
 1. **Merge the stack.** Unchanged and still blocking everything. `gh pr merge` is
